@@ -43,6 +43,30 @@ pub struct CoinbaseRecipient {
 }
 
 // Conversion from Noun to BlockPage
+impl BlockPage {
+    /// Create a mock BlockPage for testing
+    pub fn mock(height: u64) -> Self {
+        BlockPage {
+            height,
+            hash: format!("hash_{}", height),
+            parent_hash: if height > 0 { 
+                format!("hash_{}", height - 1) 
+            } else { 
+                "genesis".to_string() 
+            },
+            timestamp: Utc::now(),
+            transactions: vec![],
+            target: "00000000ffff0000000000000000000000000000000000000000000000000000".to_string(),
+            coinbase: vec![
+                CoinbaseRecipient {
+                    address: "mock_miner".to_string(),
+                    amount: 5000000000,
+                }
+            ],
+        }
+    }
+}
+
 impl TryFrom<nockapp::Noun> for BlockPage {
     type Error = String;
 
