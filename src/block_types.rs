@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::transaction_types::{Transaction, Inputs, Outputs, Seeds, Coins};
+use crate::transaction_types::Transaction;
 
 /// High-level block representation for RPC responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
