@@ -8,12 +8,12 @@ repository = "https://github.com/SWPSCO/tx-types"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028", default-features = false }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "c88496985c83218ba3100e07031d56371bb02028" }
+noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
+nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
+zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 either = "1.13"
