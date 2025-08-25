@@ -11,6 +11,7 @@
 pub mod transaction_types;
 pub mod tx_to_noun;
 pub mod u320;
+pub mod block_types;
 
 // Submodules
 pub mod hashing;
@@ -32,6 +33,9 @@ pub use validation::{validator::{TransactionValidator, TransactionValidationErro
 
 // Re-export main transaction types
 pub use transaction_types::*;
+
+// Re-export block types for RPC usage
+pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, SimpleTransactionOutput, CoinbaseRecipient};
 
 // Test modules
 #[cfg(test)]
