@@ -23,7 +23,6 @@ libc = { workspace = true }
 memmap2 = { workspace = true }
 num-derive = { workspace = true }
 num-traits = { workspace = true }
-rand = { workspace = true }
 signal-hook = { workspace = true }
 slotmap = { workspace = true }
 static_assertions = { workspace = true }
@@ -33,6 +32,7 @@ tracing-core.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
+rand = { workspace = true }
 
 [build-dependencies]
 autotools = "0.2"

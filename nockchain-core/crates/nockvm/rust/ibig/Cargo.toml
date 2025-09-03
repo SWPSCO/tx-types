@@ -20,7 +20,7 @@ missing_safety_doc = "allow"
 all-features = true
 
 [features]
-default = ["std", "rand", "num-traits"]
+default = ["std", "num-traits"]
 
 # Interface with the std library.
 std = []
@@ -36,10 +36,6 @@ default-features = false
 optional = true
 workspace = true
 
-[dependencies.rand]
-default-features = false
-optional = true
-workspace = true
 
 [dependencies.serde]
 default-features = false
@@ -51,8 +47,6 @@ workspace = true
 workspace = true
 features = ["html_reports"]
 
-[dev-dependencies.rand]
-workspace = true
 
 [dev-dependencies.serde_test]
 version = "1.0.130"

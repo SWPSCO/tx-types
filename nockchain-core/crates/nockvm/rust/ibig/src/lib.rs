@@ -100,8 +100,6 @@ mod shift_ops;
 mod sign;
 mod ubig;
 
-#[cfg(feature = "rand")]
-pub mod rand;
 
 #[cfg(feature = "num-traits")]
 mod num_traits;
