@@ -13,7 +13,7 @@ nockapp = { path = "./nockchain-core/crates/nockapp", default-features = false, 
 nockvm = { path = "./nockchain-core/crates/nockvm/rust/nockvm" }
 nockchain-libp2p-io = { path = "./nockchain-core/crates/nockchain-libp2p-io", default-features = false }
 zkvm-jetpack = { path = "./nockchain-core/crates/zkvm-jetpack" }
-ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig" }
+ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig", default-features = false, features = ["std", "num-traits"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 either = "1.13"
@@ -21,7 +21,6 @@ num-bigint = "0.4"
 bs58 = "0.5"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 
