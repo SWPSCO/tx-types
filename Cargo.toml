@@ -8,12 +8,12 @@ repository = "https://github.com/SWPSCO/tx-types"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+noun-serde = { path = "./nockchain-core/crates/noun-serde" }
+nockapp = { path = "./nockchain-core/crates/nockapp", default-features = false, features = [] }
+nockvm = { path = "./nockchain-core/crates/nockvm/rust/nockvm" }
+nockchain-libp2p-io = { path = "./nockchain-core/crates/nockchain-libp2p-io", default-features = false }
+zkvm-jetpack = { path = "./nockchain-core/crates/zkvm-jetpack" }
+ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 either = "1.13"
@@ -25,7 +25,10 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 
+[features]
+tracy = ["nockapp/tracing-tracy"]
+
 [patch.crates-io]
-tracy-client-sys = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client-sys" }
-tracy-client = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client" }
-tracing-tracy = { path = "../nockchain-rpc-server/dummy-tracy/tracing-tracy" }
+tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }
+tracy-client = { path = "./dummy-tracy/tracy-client" }
+tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }

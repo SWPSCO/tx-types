@@ -1,0 +1,11 @@
+[package]
+name = "tracy-client"
+version = "0.18.2"
+edition = "2021"
+
+[dependencies]
+once_cell = "1.21"
+tracy-client-sys = { version = "0.26.1", path = "../tracy-client-sys" }
+
+[lib]
+path = "src/lib.rs"

@@ -1,0 +1,9 @@
+[package]
+name = "tracy-client-sys"
+version = "0.26.1"
+edition = "2021"
+
+[dependencies]
+
+[lib]
+path = "src/lib.rs"

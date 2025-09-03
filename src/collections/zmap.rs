@@ -120,7 +120,7 @@ where
     }
 
     /// Right rotation
-    /// ```
+    /// ```text
     ///     n              left
     ///    / \            /    \
     ///  left r    =>    ll     n
@@ -135,7 +135,7 @@ where
     }
 
     /// Left rotation
-    /// ```
+    /// ```text
     ///    n                right
     ///   / \              /     \
     ///  l  right   =>    n       rr
@@ -1588,8 +1588,7 @@ where
     K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
     V: noun_serde::NounDecode + Clone + Debug,
 {
-    fn from_noun<A: nockvm::noun::NounAllocator>(
-        alloc: &mut A,
+    fn from_noun(
         noun: &nockvm::noun::Noun,
     ) -> Result<Self, noun_serde::NounDecodeError> {
         use nockvm::noun::Noun;
@@ -1605,7 +1604,7 @@ where
         
         // Decode the node recursively
         let mut map = ZMap::new();
-        Self::decode_node_recursive(alloc, noun, &mut map)?;
+        Self::decode_node_recursive(noun, &mut map)?;
         Ok(map)
     }
 }
@@ -1615,8 +1614,7 @@ where
     K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
     V: noun_serde::NounDecode + Clone + Debug,
 {
-    fn decode_node_recursive<A: nockvm::noun::NounAllocator>(
-        alloc: &mut A,
+    fn decode_node_recursive(
         noun: &nockvm::noun::Noun,
         map: &mut ZMap<K, V>,
     ) -> Result<(), noun_serde::NounDecodeError> {
@@ -1633,8 +1631,8 @@ where
         let pair_cell = cell.head().as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
         
-        let key = K::from_noun(alloc, &pair_cell.head())?;
-        let value = V::from_noun(alloc, &pair_cell.tail())?;
+        let key = K::from_noun(&pair_cell.head())?;
+        let value = V::from_noun(&pair_cell.tail())?;
         
         // Insert the key-value pair
         map.put(key, value);
@@ -1644,8 +1642,8 @@ where
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
         
         // Recursively decode left and right subtrees
-        Self::decode_node_recursive(alloc, &children_cell.head(), map)?;
-        Self::decode_node_recursive(alloc, &children_cell.tail(), map)?;
+        Self::decode_node_recursive(&children_cell.head(), map)?;
+        Self::decode_node_recursive(&children_cell.tail(), map)?;
         
         Ok(())
     }

@@ -60,7 +60,7 @@ pub fn calculate_timelock_range(inputs: &[Input]) -> crate::transaction_types::T
 /// Converts a list of Inputs into a raw Nock noun using NounSlab
 /// 
 /// This function creates a noun structure that matches the Hoon raw-tx format:
-/// ```
+/// ```text
 /// [tx-id raw-tx-without-id]
 /// ```
 /// Where raw-tx-without-id = [inputs timelock-range total-fees]
