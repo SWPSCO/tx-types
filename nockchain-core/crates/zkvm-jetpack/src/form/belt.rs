@@ -197,9 +197,3 @@ impl From<Belt> for u32 {
     }
 }
 
-#[cfg(test)]
-impl quickcheck::Arbitrary for Belt {
-    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        Belt(u64::arbitrary(g) % PRIME)
-    }
-}

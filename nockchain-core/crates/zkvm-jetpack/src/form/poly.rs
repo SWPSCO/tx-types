@@ -264,9 +264,3 @@ impl<'a> From<&'a BPolySliceMut<'_>> for BPolySlice<'a> {
     }
 }
 
-#[cfg(test)]
-impl quickcheck::Arbitrary for BPolyVec {
-    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        PolyVec(Vec::<Belt>::arbitrary(g))
-    }
-}

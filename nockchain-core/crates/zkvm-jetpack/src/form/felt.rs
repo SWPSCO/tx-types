@@ -129,12 +129,6 @@ impl<'a> From<&'a Felt> for &'a [Belt] {
     }
 }
 
-#[cfg(test)]
-impl quickcheck::Arbitrary for Felt {
-    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        Felt([Belt::arbitrary(g), Belt::arbitrary(g), Belt::arbitrary(g)])
-    }
-}
 
 impl Add for Felt {
     type Output = Self;
