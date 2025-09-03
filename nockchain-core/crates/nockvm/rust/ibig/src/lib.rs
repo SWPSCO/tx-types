@@ -64,6 +64,7 @@
 
 extern crate alloc;
 
+pub use crate::arch::word::Word;
 pub use crate::ibig::IBig;
 pub use crate::memory::Stack;
 pub use crate::ubig::UBig;

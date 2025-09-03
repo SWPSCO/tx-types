@@ -195,9 +195,12 @@ pub mod util {
     /**
      * Address-based size checks.
      * Currently, only addresses indexable by the first 48 bits are reachable by
-     * modern 64-bit CPUs.
+     * modern 64-bit CPUs. For 32-bit systems, we use 31 bits.
      */
+    #[cfg(target_pointer_width = "64")]
     const MAX_BIT_LENGTH: usize = (1 << 47) - 1;
+    #[cfg(target_pointer_width = "32")]
+    const MAX_BIT_LENGTH: usize = (1 << 31) - 1;
 
     /// Performs addition that returns None on Noun size overflow
     pub fn checked_add(a: usize, b: usize) -> result::Result<usize, JetErr> {

@@ -6,7 +6,7 @@ use std::ptr::copy_nonoverlapping;
 use std::{mem, ptr};
 
 use either::Either::{self, Left, Right};
-use ibig::Stack;
+use ibig::{Stack, Word};
 use memmap2::MmapMut;
 use thiserror::Error;
 
@@ -2057,8 +2057,8 @@ impl Preserve for Noun {
 }
 
 impl Stack for NockStack {
-    unsafe fn alloc_layout(&mut self, layout: Layout) -> *mut u64 {
-        self.layout_alloc(layout)
+    unsafe fn alloc_layout(&mut self, layout: Layout) -> *mut Word {
+        self.layout_alloc(layout) as *mut Word
     }
 }
 

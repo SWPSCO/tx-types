@@ -1,5 +1,5 @@
 /// Machine word.
-pub(crate) type Word = u64;
+pub type Word = u64;
 
 /// Signed machine word.
 pub(crate) type SignedWord = i64;

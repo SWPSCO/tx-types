@@ -1,5 +1,4 @@
 use either::Either::*;
-use libc::{c_void, memcmp};
 
 use crate::mem::{NockStack, ALLOC, FRAME, STACK};
 use crate::noun::Noun;
@@ -95,21 +94,29 @@ pub unsafe fn unifying_equality(stack: &mut NockStack, a: *mut Noun, b: *mut Nou
                 (Left(x_indirect), Left(y_indirect)) => {
                     let x_as_ptr = x_indirect.to_raw_pointer();
                     let y_as_ptr = y_indirect.to_raw_pointer();
-                    if x_indirect.size() == y_indirect.size()
-                        && memcmp(
-                            x_indirect.data_pointer() as *const c_void,
-                            y_indirect.data_pointer() as *const c_void,
-                            x_indirect.size() << 3,
-                        ) == 0
-                    {
-                        let (_senior, junior) = senior_pointer_first(stack, x_as_ptr, y_as_ptr);
-                        if std::ptr::eq(x_as_ptr, junior) {
-                            *x = *y;
+                    let x_size = x_indirect.size();
+                    let y_size = y_indirect.size();
+                    if x_size == y_size {
+                        let x_slice = std::slice::from_raw_parts(
+                            x_indirect.data_pointer() as *const u8,
+                            x_size << 3,
+                        );
+                        let y_slice = std::slice::from_raw_parts(
+                            y_indirect.data_pointer() as *const u8,
+                            y_size << 3,
+                        );
+                        if x_slice == y_slice {
+                            let (_senior, junior) = senior_pointer_first(stack, x_as_ptr, y_as_ptr);
+                            if std::ptr::eq(x_as_ptr, junior) {
+                                *x = *y;
+                            } else {
+                                *y = *x;
+                            }
+                            stack.pop::<(*mut Noun, *mut Noun)>();
+                            continue;
                         } else {
-                            *y = *x;
+                            break;
                         }
-                        stack.pop::<(*mut Noun, *mut Noun)>();
-                        continue;
                     } else {
                         break;
                     }
