@@ -26,7 +26,7 @@ getrandom = { version = "0.2", features = ["js"] }
 [dev-dependencies]
 
 [features]
-tracy = ["nockapp/tracing-tracy"]
+tracy = []
 
 [patch.crates-io]
 tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }
