@@ -21,5 +21,11 @@ num-bigint = "0.4"
 bs58 = "0.5"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
+
+[patch.crates-io]
+tracy-client-sys = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client-sys" }
+tracy-client = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client" }
+tracing-tracy = { path = "../nockchain-rpc-server/dummy-tracy/tracing-tracy" }
