@@ -46,7 +46,7 @@ pub mod util {
                 } else {
                     let mut n = atom.as_indirect()?.as_ubig(stack);
 
-                    while !n.is_zero() {
+                    while n != ibig::UBig::from(0u64) {
                         root = T(stack, &[D(b'0' as u64 + (&n % 10u64)), root]);
                         n /= 10u64;
                         lent += 1;

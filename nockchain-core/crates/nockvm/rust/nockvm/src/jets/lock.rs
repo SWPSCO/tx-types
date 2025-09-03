@@ -1,3 +1,1 @@
-pub mod aes;
-pub mod ed;
-pub mod sha;
+// Crypto modules removed for WASM compatibility
