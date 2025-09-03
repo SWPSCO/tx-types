@@ -9,25 +9,25 @@ use nockvm::noun::{Atom, IndirectAtom, NounAllocator, D};
 use nockvm::serialization::{cue, jam};
 
 use crate::noun::slab::NounSlab;
-use crate::{Noun, Result, ToBytes, ToBytesExt};
+use crate::{Noun, ToBytes, ToBytesExt};
 
 pub trait NounExt {
-    fn cue_bytes(stack: &mut NockStack, bytes: &Bytes) -> Result<Noun, Error>;
-    fn cue_bytes_slice(stack: &mut NockStack, bytes: &[u8]) -> Result<Noun, Error>;
+    fn cue_bytes(stack: &mut NockStack, bytes: &Bytes) -> std::result::Result<Noun, Error>;
+    fn cue_bytes_slice(stack: &mut NockStack, bytes: &[u8]) -> std::result::Result<Noun, Error>;
     fn jam_self(self, stack: &mut NockStack) -> JammedNoun;
     fn list_iter(self) -> impl Iterator<Item = Noun>;
     fn eq_bytes(self, bytes: impl AsRef<[u8]>) -> bool;
 }
 
 impl NounExt for Noun {
-    fn cue_bytes(stack: &mut NockStack, bytes: &Bytes) -> Result<Noun, Error> {
+    fn cue_bytes(stack: &mut NockStack, bytes: &Bytes) -> std::result::Result<Noun, Error> {
         let atom = Atom::from_bytes(stack, bytes);
         cue(stack, atom)
     }
 
     // generally, we should be using `cue_bytes`, but if we're not going to be passing it around
     // its OK to just cue a byte slice to avoid copying.
-    fn cue_bytes_slice(stack: &mut NockStack, bytes: &[u8]) -> Result<Noun, Error> {
+    fn cue_bytes_slice(stack: &mut NockStack, bytes: &[u8]) -> std::result::Result<Noun, Error> {
         let atom = unsafe {
             IndirectAtom::new_raw_bytes(stack, bytes.len(), bytes.as_ptr()).normalize_as_atom()
         };
@@ -57,10 +57,10 @@ impl NounExt for Noun {
 // The goal would be to canonicalize the Atom representations of various Rust types. When it needs to be specialized, users can make a newtype.
 pub trait AtomExt {
     fn from_bytes<A: NounAllocator>(allocator: &mut A, bytes: &Bytes) -> Atom;
-    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> Result<Atom>;
+    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> crate::Result<Atom>;
     fn eq_bytes(self, bytes: impl AsRef<[u8]>) -> bool;
-    fn to_bytes_until_nul(self) -> Result<Vec<u8>>;
-    fn into_string(self) -> Result<String>;
+    fn to_bytes_until_nul(self) -> crate::Result<Vec<u8>>;
+    fn into_string(self) -> crate::Result<String>;
 }
 
 impl AtomExt for Atom {
@@ -72,7 +72,7 @@ impl AtomExt for Atom {
     }
 
     // TODO: This is worth making into a public/supported part of [`nockvm`]'s API.
-    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> Result<Atom> {
+    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> crate::Result<Atom> {
         unsafe {
             let data: Bytes = value.as_bytes()?;
             Ok(
@@ -105,12 +105,12 @@ impl AtomExt for Atom {
         }
     }
 
-    fn to_bytes_until_nul(self) -> Result<Vec<u8>> {
+    fn to_bytes_until_nul(self) -> crate::Result<Vec<u8>> {
         let bytes = str::from_utf8(self.as_ne_bytes())?;
         Ok(bytes.trim_end_matches('\0').as_bytes().to_vec())
     }
 
-    fn into_string(self) -> Result<String> {
+    fn into_string(self) -> crate::Result<String> {
         let str = str::from_utf8(self.as_ne_bytes())?;
         Ok(str.trim_end_matches('\0').to_string())
     }
