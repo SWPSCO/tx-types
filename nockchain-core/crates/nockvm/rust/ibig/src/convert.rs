@@ -148,7 +148,7 @@ impl UBig {
                 let skip_bytes = x.leading_zeros() as usize / 8;
                 unsafe {
                     core::slice::from_raw_parts(
-                        x as *const u64 as *const u8,
+                        x as *const Word as *const u8,
                         WORD_BYTES - skip_bytes,
                     )
                 }

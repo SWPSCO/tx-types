@@ -4,6 +4,8 @@ use alloc::alloc::Layout;
 use core::marker::PhantomData;
 use core::{mem, slice};
 
+use crate::arch::word::Word;
+
 /// Chunk of memory directly allocated from the global allocator.
 pub(crate) struct MemoryAllocation {
     layout: Layout,
@@ -12,7 +14,7 @@ pub(crate) struct MemoryAllocation {
 
 pub trait Stack: Sized {
     // no-std bites me in the keister again
-    unsafe fn alloc_layout(&mut self, layout: Layout) -> *mut u64;
+    unsafe fn alloc_layout(&mut self, layout: Layout) -> *mut Word;
 }
 
 /// Chunk of memory.
