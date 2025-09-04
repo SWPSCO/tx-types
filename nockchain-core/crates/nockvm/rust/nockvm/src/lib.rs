@@ -14,7 +14,6 @@ pub mod mug;
 pub mod noun;
 pub mod serialization;
 pub mod site;
-pub mod substantive;
 pub mod trace;
 pub mod unifying_equality;
 
