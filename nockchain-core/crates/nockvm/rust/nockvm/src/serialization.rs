@@ -17,12 +17,14 @@ pub fn met0_usize(atom: Atom) -> usize {
 
 /// Calculate the number of bits needed to represent a u64 as a usize
 pub fn met0_u64_to_usize(x: u64) -> usize {
-    let usize_bitslice = BitSlice::<u64, Lsb0>::from_element(&x);
+    // Convert u64 to u32 array for BitSlice  
+    let x_as_u32s = [x as u32, (x >> 32) as u32];
+    let usize_bitslice = BitSlice::<u32, Lsb0>::from_slice(&x_as_u32s);
     usize_bitslice.last_one().map_or(0, |last_one| last_one + 1)
 }
 
 /// Read the next bit from the bitslice and advance the cursor
-pub fn next_bit(cursor: &mut usize, slice: &BitSlice<u64, Lsb0>) -> bool {
+pub fn next_bit(cursor: &mut usize, slice: &BitSlice<u32, Lsb0>) -> bool {
     if (*slice).len() > *cursor {
         let res = slice[*cursor];
         *cursor += 1;
@@ -35,26 +37,26 @@ pub fn next_bit(cursor: &mut usize, slice: &BitSlice<u64, Lsb0>) -> bool {
 /// Reads the next up to n bits from the bitslice and advance the cursor
 pub fn next_up_to_n_bits<'a>(
     cursor: &mut usize,
-    slice: &'a BitSlice<u64, Lsb0>,
+    slice: &'a BitSlice<u32, Lsb0>,
     n: usize,
-) -> &'a BitSlice<u64, Lsb0> {
+) -> &'a BitSlice<u32, Lsb0> {
     let res = if (slice).len() >= *cursor + n {
         &slice[*cursor..*cursor + n]
     } else if slice.len() > *cursor {
         &slice[*cursor..]
     } else {
-        BitSlice::<u64, Lsb0>::empty()
+        BitSlice::<u32, Lsb0>::empty()
     };
     *cursor += n;
     res
 }
 
 /// Get the remaining bits from the cursor position
-pub fn rest_bits(cursor: usize, slice: &BitSlice<u64, Lsb0>) -> &BitSlice<u64, Lsb0> {
+pub fn rest_bits(cursor: usize, slice: &BitSlice<u32, Lsb0>) -> &BitSlice<u32, Lsb0> {
     if slice.len() > cursor {
         &slice[cursor..]
     } else {
-        BitSlice::<u64, Lsb0>::empty()
+        BitSlice::<u32, Lsb0>::empty()
     }
 }
 
@@ -103,7 +105,7 @@ enum CueStackEntry {
 ///
 /// # Returns
 /// A Result containing either the deserialized Noun or an Error
-pub fn cue_bitslice(stack: &mut NockStack, buffer: &BitSlice<u64, Lsb0>) -> Result<Noun, Error> {
+pub fn cue_bitslice(stack: &mut NockStack, buffer: &BitSlice<u32, Lsb0>) -> Result<Noun, Error> {
     let backref_map = MutHamt::<Noun>::new(stack);
     let mut result = D(0);
     let mut cursor = 0;
@@ -181,7 +183,7 @@ pub fn cue(stack: &mut NockStack, buffer: Atom) -> Result<Noun, Error> {
 
 /// Get the size in bits of an encoded atom or backref
 /// TODO: use first_zero() on a slice of the buffer
-fn get_size(cursor: &mut usize, buffer: &BitSlice<u64, Lsb0>) -> Result<usize, Error> {
+fn get_size(cursor: &mut usize, buffer: &BitSlice<u32, Lsb0>) -> Result<usize, Error> {
     let buff_at_cursor = rest_bits(*cursor, buffer);
     let bitsize = buff_at_cursor
         .first_one()
@@ -193,7 +195,10 @@ fn get_size(cursor: &mut usize, buffer: &BitSlice<u64, Lsb0>) -> Result<usize, E
         let mut size: u64 = 0;
         *cursor += bitsize + 1;
         let size_bits = next_up_to_n_bits(cursor, buffer, bitsize - 1);
-        BitSlice::from_element_mut(&mut size)[0..bitsize - 1].copy_from_bitslice(size_bits);
+        // Convert u64 to u32 array for BitSlice
+        let ptr = &mut size as *mut u64 as *mut [u32; 2];
+        let size_as_u32s = unsafe { &mut *ptr };
+        BitSlice::from_slice_mut(size_as_u32s)[0..bitsize - 1].copy_from_bitslice(size_bits);
         Ok((size as usize) + (1 << (bitsize - 1)))
     }
 }
@@ -222,7 +227,7 @@ fn get_size(cursor: &mut usize, buffer: &BitSlice<u64, Lsb0>) -> Result<usize, E
 fn rub_atom(
     stack: &mut NockStack,
     cursor: &mut usize,
-    buffer: &BitSlice<u64, Lsb0>,
+    buffer: &BitSlice<u32, Lsb0>,
 ) -> Result<Atom, Error> {
     let size = get_size(cursor, buffer)?;
     let bits = next_up_to_n_bits(cursor, buffer, size);
@@ -230,8 +235,11 @@ fn rub_atom(
         unsafe { Ok(DirectAtom::new_unchecked(0).as_atom()) }
     } else if size < 64 {
         // Fits in a direct atom
-        let mut direct_raw = 0;
-        BitSlice::from_element_mut(&mut direct_raw)[0..bits.len()].copy_from_bitslice(bits);
+        let mut direct_raw: u64 = 0;
+        // Convert u64 to u32 array for BitSlice
+        let ptr = &mut direct_raw as *mut u64 as *mut [u32; 2];
+        let raw_as_u32s = unsafe { &mut *ptr };
+        BitSlice::from_slice_mut(raw_as_u32s)[0..bits.len()].copy_from_bitslice(bits);
         unsafe { Ok(DirectAtom::new_unchecked(direct_raw).as_atom()) }
     } else {
         // Need an indirect atom
@@ -244,7 +252,7 @@ fn rub_atom(
 }
 
 /// Deserialize a backreference from the buffer
-fn rub_backref(cursor: &mut usize, buffer: &BitSlice<u64, Lsb0>) -> Result<u64, Error> {
+fn rub_backref(cursor: &mut usize, buffer: &BitSlice<u32, Lsb0>) -> Result<u64, Error> {
     // TODO: What's size here usually?
     let size = get_size(cursor, buffer)?;
     if size == 0 {
@@ -252,7 +260,10 @@ fn rub_backref(cursor: &mut usize, buffer: &BitSlice<u64, Lsb0>) -> Result<u64, 
     } else if size <= 64 {
         // TODO: Size <= 64, so we can fit the backref in a direct atom?
         let mut backref: u64 = 0;
-        BitSlice::from_element_mut(&mut backref)[0..size]
+        // Convert u64 to u32 array for BitSlice
+        let ptr = &mut backref as *mut u64 as *mut [u32; 2];
+        let ref_as_u32s = unsafe { &mut *ptr };
+        BitSlice::from_slice_mut(ref_as_u32s)[0..size]
             .copy_from_bitslice(&buffer[*cursor..*cursor + size]);
         *cursor += size;
         Ok(backref)
@@ -265,7 +276,7 @@ struct JamState<'a> {
     cursor: usize,
     size: usize,
     atom: IndirectAtom,
-    slice: &'a mut BitSlice<u64, Lsb0>,
+    slice: &'a mut BitSlice<u32, Lsb0>,
 }
 
 /// Serialize a noun into an atom

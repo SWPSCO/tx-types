@@ -256,12 +256,18 @@ impl DirectAtom {
         self.0
     }
 
-    pub fn as_bitslice(&self) -> &BitSlice<u64, Lsb0> {
-        BitSlice::from_element(&self.0)
+    pub fn as_bitslice(&self) -> &BitSlice<u32, Lsb0> {
+        // View the u64 as two u32s
+        let ptr = &self.0 as *const u64 as *const [u32; 2];
+        let arr = unsafe { &*ptr };
+        BitSlice::from_slice(arr)
     }
 
-    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u64, Lsb0> {
-        BitSlice::from_element_mut(&mut self.0)
+    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u32, Lsb0> {
+        // View the u64 as two u32s
+        let ptr = &mut self.0 as *mut u64 as *mut [u32; 2];
+        let arr = unsafe { &mut *ptr };
+        BitSlice::from_slice_mut(arr)
     }
 
     pub fn as_ne_bytes(&self) -> &[u8] {
@@ -448,11 +454,14 @@ impl IndirectAtom {
     pub unsafe fn new_raw_mut_bitslice<'a, A: NounAllocator>(
         allocator: &mut A,
         size: usize,
-    ) -> (Self, &'a mut BitSlice<u64, Lsb0>) {
+    ) -> (Self, &'a mut BitSlice<u32, Lsb0>) {
         let (noun, ptr) = Self::new_raw_mut_zeroed(allocator, size);
+        // Convert u64 array to u32 array view
+        let ptr_u32 = ptr as *mut u32;
+        let size_u32 = size * 2; // Each u64 becomes 2 u32s
         (
             noun,
-            BitSlice::from_slice_mut(from_raw_parts_mut(ptr, size)),
+            BitSlice::from_slice_mut(from_raw_parts_mut(ptr_u32, size_u32)),
         )
     }
 
@@ -553,12 +562,22 @@ impl IndirectAtom {
     }
 
     /** BitSlice view on an indirect atom, with lifetime tied to reference to indirect atom. */
-    pub fn as_bitslice(&self) -> &BitSlice<u64, Lsb0> {
-        BitSlice::from_slice(self.as_slice())
+    pub fn as_bitslice(&self) -> &BitSlice<u32, Lsb0> {
+        // View u64 array as u32 array (each u64 becomes 2 u32s)
+        let u64_slice = self.as_slice();
+        let ptr = u64_slice.as_ptr() as *const u32;
+        let len = u64_slice.len() * 2;
+        let u32_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+        BitSlice::from_slice(u32_slice)
     }
 
-    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u64, Lsb0> {
-        BitSlice::from_slice_mut(self.as_mut_slice())
+    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u32, Lsb0> {
+        // View u64 array as u32 array (each u64 becomes 2 u32s)
+        let u64_slice = self.as_mut_slice();
+        let ptr = u64_slice.as_mut_ptr() as *mut u32;
+        let len = u64_slice.len() * 2;
+        let u32_slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        BitSlice::from_slice_mut(u32_slice)
     }
 
     pub fn as_ubig<S: Stack>(&self, stack: &mut S) -> UBig {
@@ -858,7 +877,7 @@ impl fmt::Debug for DebugPath<'_> {
 
 impl Slots for Cell {}
 impl private::RawSlots for Cell {
-    fn raw_slot(&self, axis: &BitSlice<u64, Lsb0>) -> Result<Noun> {
+    fn raw_slot(&self, axis: &BitSlice<u32, Lsb0>) -> Result<Noun> {
         let mut noun: Noun = self.as_noun();
         // Axis cannot be 0
         let mut cursor = axis.last_one().ok_or(Error::NotRepresentable)?;
@@ -1040,7 +1059,7 @@ impl Atom {
         }
     }
 
-    pub fn as_bitslice(&self) -> &BitSlice<u64, Lsb0> {
+    pub fn as_bitslice(&self) -> &BitSlice<u32, Lsb0> {
         if self.is_indirect() {
             unsafe { self.indirect.as_bitslice() }
         } else {
@@ -1048,7 +1067,7 @@ impl Atom {
         }
     }
 
-    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u64, Lsb0> {
+    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<u32, Lsb0> {
         if self.is_indirect() {
             unsafe { self.indirect.as_bitslice_mut() }
         } else {
@@ -1490,7 +1509,7 @@ impl fmt::Debug for Noun {
 
 impl Slots for Noun {}
 impl private::RawSlots for Noun {
-    fn raw_slot(&self, axis: &BitSlice<u64, Lsb0>) -> Result<Noun> {
+    fn raw_slot(&self, axis: &BitSlice<u32, Lsb0>) -> Result<Noun> {
         match self.as_either_atom_cell() {
             Right(cell) => cell.raw_slot(axis),
             Left(_atom) => {
@@ -1531,7 +1550,9 @@ pub trait Slots: private::RawSlots {
      * Retrieve component Noun at given axis, or fail with descriptive error
      */
     fn slot(&self, axis: u64) -> Result<Noun> {
-        self.raw_slot(BitSlice::from_element(&axis))
+        // Convert u64 axis to u32 array for BitSlice
+        let axis_as_u32s = [axis as u32, (axis >> 32) as u32];
+        self.raw_slot(BitSlice::from_slice(&axis_as_u32s))
     }
 
     /**
@@ -1558,7 +1579,7 @@ mod private {
         /**
          * Actual logic of retreiving Noun object at some axis
          */
-        fn raw_slot(&self, axis: &BitSlice<u64, Lsb0>) -> Result<Noun>;
+        fn raw_slot(&self, axis: &BitSlice<u32, Lsb0>) -> Result<Noun>;
     }
 }
 

@@ -48,7 +48,7 @@ impl Site {
                 // XX TODO this check is pessimized since there could be multiple ways to match the
                 // jet and we only actually match one of them, but we check all of them and run
                 // unjetted if any have an axis outside 7.
-                let axis_7_bits: &BitSlice<u64, Lsb0> = BitSlice::from_element(&7u64);
+                let axis_7_bits: &BitSlice<u32, Lsb0> = BitSlice::from_element(&7u32);
                 let batteries_list = ctx.cold.find(&mut ctx.stack, &mut path);
                 let mut ret = true;
                 for mut batteries in batteries_list {

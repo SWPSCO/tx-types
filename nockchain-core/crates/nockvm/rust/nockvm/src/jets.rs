@@ -270,8 +270,8 @@ pub mod util {
         from: usize,
         step: usize,
         to: usize,
-        dest: &mut BitSlice<u64, Lsb0>,
-        source: &BitSlice<u64, Lsb0>,
+        dest: &mut BitSlice<u32, Lsb0>,
+        source: &BitSlice<u32, Lsb0>,
     ) -> result::Result<(), JetErr> {
         let from_b = checked_left_shift(bloq, from)?;
         let to_b = checked_left_shift(bloq, to)?;

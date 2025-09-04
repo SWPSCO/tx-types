@@ -1370,7 +1370,7 @@ fn mean_pop(stack: &mut NockStack) {
 
 fn edit(
     stack: &mut NockStack,
-    edit_axis: &BitSlice<u64, Lsb0>,
+    edit_axis: &BitSlice<u32, Lsb0>,
     patch: Noun,
     mut tree: Noun,
 ) -> Noun {

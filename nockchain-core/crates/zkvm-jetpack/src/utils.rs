@@ -60,7 +60,7 @@ pub fn vecnoun_to_hoon_tuple(stack: &mut NockStack, vec: &[Noun]) -> Noun {
 }
 
 // convert bitslice to u128 (check with fits_in_u128 before, if you don't know size)
-pub fn bitslice_to_u128(bits: &BitSlice<u64, Lsb0>) -> u128 {
+pub fn bitslice_to_u128(bits: &BitSlice<u32, Lsb0>) -> u128 {
     bits.iter().by_vals().enumerate().fold(
         0u128,
         |acc, (i, bit)| {
@@ -74,7 +74,7 @@ pub fn bitslice_to_u128(bits: &BitSlice<u64, Lsb0>) -> u128 {
 }
 
 // check if bitslice fits into u128
-pub fn fits_in_u128(bits: &BitSlice<u64, Lsb0>) -> bool {
+pub fn fits_in_u128(bits: &BitSlice<u32, Lsb0>) -> bool {
     bits.iter()
         .by_vals()
         .enumerate()
