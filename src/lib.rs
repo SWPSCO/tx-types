@@ -37,6 +37,10 @@ pub use transaction_types::*;
 // Re-export block types for RPC usage
 pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, SimpleTransactionOutput, CoinbaseRecipient};
 
+// Nockchain reexport
+pub use nockapp;
+pub use nockvm;
+
 // Test modules
 #[cfg(test)]
 mod tests;
