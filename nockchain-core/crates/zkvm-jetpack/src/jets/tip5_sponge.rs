@@ -11,7 +11,9 @@ use crate::utils::*;
 
 // edit door values
 fn door_edit(stack: &mut NockStack, edit_axis_path: u64, patch: Noun, mut tree: Noun) -> Noun {
-    let edit_axis = BitSlice::<u64, Lsb0>::from_element(&edit_axis_path);
+    // Convert u64 to u32 array for BitSlice
+    let axis_as_u32s = [edit_axis_path as u32, (edit_axis_path >> 32) as u32];
+    let edit_axis = BitSlice::<u32, Lsb0>::from_slice(&axis_as_u32s);
 
     let mut res = patch;
     let mut dest: *mut Noun = &mut res;

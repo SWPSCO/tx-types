@@ -643,11 +643,21 @@ impl Jammer for NockJammer {
             let buffer_len = buffer.len();
             buffer.resize(buffer_len + backref_sz_sz, false);
             buffer.push(true);
+            // Convert u64 to u32 array for BitSlice
+            #[cfg(target_pointer_width = "64")]
+            let backref_sz_as_u32s = [backref_sz as u32, (backref_sz >> 32) as u32];
+            #[cfg(target_pointer_width = "32")]
+            let backref_sz_as_u32s = [backref_sz as u32, 0u32];
             buffer.extend_from_bitslice(
-                &BitSlice::<_, Lsb0>::from_element(&backref_sz)[0..backref_sz_sz - 1],
+                &BitSlice::<u32, Lsb0>::from_slice(&backref_sz_as_u32s)[0..backref_sz_sz - 1],
             );
+            // Convert usize to u32 array for BitSlice
+            #[cfg(target_pointer_width = "64")]
+            let backref_as_u32s = [backref as u32, (backref >> 32) as u32];
+            #[cfg(target_pointer_width = "32")]
+            let backref_as_u32s = [backref as u32, 0u32];
             buffer
-                .extend_from_bitslice(&BitSlice::<_, Lsb0>::from_element(&backref)[0..backref_sz]);
+                .extend_from_bitslice(&BitSlice::<u32, Lsb0>::from_slice(&backref_as_u32s)[0..backref_sz]);
         }
 
         fn mat_atom(buffer: &mut BitVec<u8, Lsb0>, atom: Atom) {
@@ -661,8 +671,13 @@ impl Jammer for NockJammer {
             let buffer_len = buffer.len();
             buffer.resize(buffer_len + atom_sz_sz, false);
             buffer.push(true);
+            // Convert usize to u32 array for BitSlice
+            #[cfg(target_pointer_width = "64")]
+            let atom_sz_as_u32s = [atom_sz as u32, (atom_sz >> 32) as u32];
+            #[cfg(target_pointer_width = "32")]
+            let atom_sz_as_u32s = [atom_sz as u32, 0u32];
             buffer.extend_from_bitslice(
-                &BitSlice::<_, Lsb0>::from_element(&atom_sz)[0..atom_sz_sz - 1],
+                &BitSlice::<u32, Lsb0>::from_slice(&atom_sz_as_u32s)[0..atom_sz_sz - 1],
             );
             buffer.extend_from_bitslice(&atom.as_bitslice()[0..atom_sz]);
         }
@@ -707,7 +722,19 @@ impl Jammer for NockJammer {
                 } else {
                     *cursor += idx + 1;
                     let mut sz = 0usize;
-                    let sz_slice = BitSlice::<_, Lsb0>::from_element_mut(&mut sz);
+                    // Convert usize to u32 array for BitSlice
+                    #[cfg(target_pointer_width = "64")]
+                    let sz_slice = {
+                        let ptr = &mut sz as *mut usize as *mut [u32; 2];
+                        let sz_as_u32s = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_slice_mut(sz_as_u32s)
+                    };
+                    #[cfg(target_pointer_width = "32")]
+                    let sz_slice = {
+                        let ptr = &mut sz as *mut usize as *mut u32;
+                        let sz_as_u32 = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_element_mut(sz_as_u32)
+                    };
                     if buffer.len() < *cursor + idx - 1 {
                         Err(CueError::TruncatedBuffer)?;
                     };
@@ -721,7 +748,19 @@ impl Jammer for NockJammer {
                         Err(CueError::TruncatedBuffer)?;
                     }
                     let mut backref = 0usize;
-                    let backref_slice = BitSlice::<_, Lsb0>::from_element_mut(&mut backref);
+                    // Convert usize to u32 array for BitSlice
+                    #[cfg(target_pointer_width = "64")]
+                    let backref_slice = {
+                        let ptr = &mut backref as *mut usize as *mut [u32; 2];
+                        let backref_as_u32s = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_slice_mut(backref_as_u32s)
+                    };
+                    #[cfg(target_pointer_width = "32")]
+                    let backref_slice = {
+                        let ptr = &mut backref as *mut usize as *mut u32;
+                        let backref_as_u32 = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_element_mut(backref_as_u32)
+                    };
                     backref_slice[0..sz].clone_from_bitslice(&buffer[*cursor..*cursor + sz]);
                     *cursor += sz;
                     Ok(backref)
@@ -743,7 +782,19 @@ impl Jammer for NockJammer {
                 } else {
                     *cursor += idx + 1;
                     let mut sz = 0usize;
-                    let sz_slice = BitSlice::<_, Lsb0>::from_element_mut(&mut sz);
+                    // Convert usize to u32 array for BitSlice
+                    #[cfg(target_pointer_width = "64")]
+                    let sz_slice = {
+                        let ptr = &mut sz as *mut usize as *mut [u32; 2];
+                        let sz_as_u32s = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_slice_mut(sz_as_u32s)
+                    };
+                    #[cfg(target_pointer_width = "32")]
+                    let sz_slice = {
+                        let ptr = &mut sz as *mut usize as *mut u32;
+                        let sz_as_u32 = unsafe { &mut *ptr };
+                        BitSlice::<u32, Lsb0>::from_element_mut(sz_as_u32)
+                    };
                     if buffer.len() < *cursor + idx - 1 {
                         Err(CueError::TruncatedBuffer)?;
                     }
@@ -756,7 +807,10 @@ impl Jammer for NockJammer {
                     if sz < 64 {
                         // Direct atom: less than 64 bits
                         let mut data = 0u64;
-                        let atom_slice = BitSlice::<_, Lsb0>::from_element_mut(&mut data);
+                        // Convert u64 to u32 array for BitSlice
+                        let ptr = &mut data as *mut u64 as *mut [u32; 2];
+                        let data_as_u32s = unsafe { &mut *ptr };
+                        let atom_slice = BitSlice::<u32, Lsb0>::from_slice_mut(data_as_u32s);
                         atom_slice[0..sz].clone_from_bitslice(&buffer[*cursor..*cursor + sz]);
                         *cursor += sz;
                         Ok(unsafe { DirectAtom::new_unchecked(data).as_atom() })

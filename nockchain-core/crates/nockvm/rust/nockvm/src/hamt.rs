@@ -262,15 +262,22 @@ union Entry<T: Copy> {
 }
 
 // Entries in our union are the same size and alignment
+// These assertions only hold on 64-bit architectures
+#[cfg(target_pointer_width = "64")]
 assert_eq_size!(Entry<()>, Leaf<()>);
+#[cfg(target_pointer_width = "64")]
 assert_eq_align!(Entry<()>, Leaf<()>);
+#[cfg(target_pointer_width = "64")]
 assert_eq_size!(Entry<()>, Stem<()>);
+#[cfg(target_pointer_width = "64")]
 assert_eq_align!(Entry<()>, Stem<()>);
 
 // Our custom leaf type is the same size as a fat pointer to key-value pairs
+#[cfg(target_pointer_width = "64")]
 assert_eq_size!(&[(Noun, ())], Leaf<()>);
 
 // Our custom stem type is the same size as a fat pointer to `Entry`s
+#[cfg(target_pointer_width = "64")]
 assert_eq_size!(&[Entry<()>], Stem<()>);
 
 #[derive(Copy, Clone)]
