@@ -398,6 +398,31 @@ impl SchnorrPubkey {
     pub fn from_b58(base58: &str) -> Result<Self, String> {
         Self::from_base58(base58)
     }
+
+    #[inline]
+    fn f6lt_words_be_desc(a: &F6LT, out: &mut Vec<u8>) {
+        // a5...a0 as big-endian u64s
+        out.extend_from_slice(&a.values[5].to_be_bytes());
+        out.extend_from_slice(&a.values[4].to_be_bytes());
+        out.extend_from_slice(&a.values[3].to_be_bytes());
+        out.extend_from_slice(&a.values[2].to_be_bytes());
+        out.extend_from_slice(&a.values[1].to_be_bytes());
+        out.extend_from_slice(&a.values[0].to_be_bytes());
+    }
+    
+    /// Convert SchnorrPubkey to base58 encoded string
+    /// Implements the Hoon to-b58 function:
+    /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
+    pub fn to_b58(&self) -> String {
+        if self.inf {
+            return "inf".to_string();
+        }
+        let mut bytes = Vec::with_capacity(1 + 6*8 + 6*8);
+        bytes.push(1u8);                        // fixed prefix
+        Self::f6lt_words_be_desc(&self.y, &mut bytes); // Y first
+        Self::f6lt_words_be_desc(&self.x, &mut bytes); // then X
+        bs58::encode(bytes).into_string()
+    }
     
     /// Convert base58 encoded string to SchnorrPubkey (new implementation)
     pub fn from_base58(s: &str) -> Result<Self, String> {
@@ -420,37 +445,6 @@ impl SchnorrPubkey {
         let x = F6LT { values: [pk_vec[6], pk_vec[7], pk_vec[8], pk_vec[9], pk_vec[10], pk_vec[11]] };
         
         Ok(SchnorrPubkey { x, y, inf })
-    }
-    
-    /// Convert SchnorrPubkey to base58 encoded string
-    /// Implements the Hoon to-b58 function:
-    /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
-    pub fn to_b58(&self) -> String {
-        use num_bigint::BigUint;
-        use bs58;
-        
-        // Build the encoding: x coordinates + y coordinates + infinity flag
-        let mut result = BigUint::from(0u32);
-        
-        // Add x coordinate (most significant)
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.x.values[i]);
-        }
-        
-        // Add y coordinate
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.y.values[i]);
-        }
-        
-        // Add infinity flag (least significant bit)
-        result <<= 1;
-        if self.inf {
-            result |= BigUint::from(1u32);
-        }
-        
-        bs58::encode(result.to_bytes_be()).into_string()
     }
 }
 
