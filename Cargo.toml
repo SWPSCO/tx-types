@@ -40,6 +40,11 @@ rand = { version = "0.8.5" }
 num-bigint = "0.4"
 num-traits = "0.2.19"
 bs58 = "0.5"
+bip39 = "2.0"
+hmac = "0.12"
+sha2 = "0.10"
+pbkdf2 = "0.12"
+zeroize = "1.0"
 
 [patch.crates-io]
 tracy-client-sys = { path = "crates/nockchain-rpc-server/dummy-tracy/tracy-client-sys" }

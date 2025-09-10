@@ -17,6 +17,7 @@ pub mod block_types;
 pub mod hashing;
 pub mod collections;
 pub mod validation;
+pub mod crypto;
 
 
 // Re-export commonly used types from submodules
