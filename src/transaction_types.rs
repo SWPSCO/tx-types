@@ -8,6 +8,8 @@ use crate::collections::{ZSet, ZMap};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
+use num_bigint::BigUint;
+use num_traits::{Zero, One};
 
 
 // Coin name structure  
@@ -340,35 +342,17 @@ pub struct SchnorrPubkey {
 }
 
 impl SchnorrPubkey {
-    /// Helper: decode base58 to BigUint
-    fn de_base58(s: &str) -> Result<num_bigint::BigUint, String> {
-        use bs58;
-        use num_bigint::BigUint;
-        
-        let bytes = bs58::decode(s)
-            .into_vec()
-            .map_err(|e| format!("Invalid base58: {}", e))?;
-        Ok(BigUint::from_bytes_be(&bytes))
+    #[inline]
+    fn f6lt_words_be_desc(a: &F6LT, out: &mut Vec<u8>) {
+        // a5...a0 as big-endian u64s
+        out.extend_from_slice(&a.values[5].to_be_bytes());
+        out.extend_from_slice(&a.values[4].to_be_bytes());
+        out.extend_from_slice(&a.values[3].to_be_bytes());
+        out.extend_from_slice(&a.values[2].to_be_bytes());
+        out.extend_from_slice(&a.values[1].to_be_bytes());
+        out.extend_from_slice(&a.values[0].to_be_bytes());
     }
-    
-    /// Helper: extract 64-bit chunks from BigUint
-    fn rip64(n: &num_bigint::BigUint) -> Vec<u64> {
-        use num_bigint::BigUint;
-        
-        let mut result = Vec::new();
-        let mut remaining = n.clone();
-        let mask = BigUint::from(u64::MAX);
-        
-        // Extract 12 u64 values (6 for x, 6 for y)
-        for _ in 0..12 {
-            let chunk: u64 = (&remaining & &mask).try_into().unwrap_or(0);
-            result.push(chunk);
-            remaining >>= 64;
-        }
-        
-        result
-    }
-    
+
     pub fn to_hashable(&self) -> Hashable {
         // In Hoon, this is [%leaf form] where form is the pubkey noun.
         // Since our Hashable::Leaf only supports bytes (not arbitrary nouns),
@@ -395,62 +379,140 @@ impl SchnorrPubkey {
     /// ++  from-b58  |=(=cord `form`(base58-to-a-pt:cheetah cord))
     /// 
     /// The base58 encoding represents a compressed elliptic curve point
-    pub fn from_b58(base58: &str) -> Result<Self, String> {
-        Self::from_base58(base58)
-    }
-    
-    /// Convert base58 encoded string to SchnorrPubkey (new implementation)
-    pub fn from_base58(s: &str) -> Result<Self, String> {
-        use num_bigint::BigUint;
-        
-        let big_num = Self::de_base58(s)?;
-        
-        // Extract the infinity flag (least significant bit)
-        let inf = (&big_num & BigUint::from(1u32)) == BigUint::from(1u32);
-        let point_data = big_num >> 1; // Remove the infinity bit
-        
-        // Extract the 12 u64 values (y first, then x in the encoding)
-        let pk_vec = Self::rip64(&point_data);
-        if pk_vec.len() < 12 {
-            return Err("Invalid base58: insufficient data".to_string());
+    pub fn from_b58(s: &str) -> Result<Self, String> {
+        if s == "inf" {
+            return Ok(SchnorrPubkey {
+                x: F6LT { values: [0; 6] },
+                y: F6LT { values: [0; 6] },
+                inf: true,
+            });
         }
-        
-        // Note: The encoding order is y (lower bits) then x (higher bits)
-        let y = F6LT { values: [pk_vec[0], pk_vec[1], pk_vec[2], pk_vec[3], pk_vec[4], pk_vec[5]] };
-        let x = F6LT { values: [pk_vec[6], pk_vec[7], pk_vec[8], pk_vec[9], pk_vec[10], pk_vec[11]] };
-        
-        Ok(SchnorrPubkey { x, y, inf })
+        let bytes = bs58::decode(s).into_vec()
+            .map_err(|e| format!("invalid base58: {e}"))?;
+        if bytes.len() != 97 || bytes[0] != 0x01 {
+            return Err("a-pt b58: expected 97 bytes with 0x01 prefix".into());
+        }
+        // Y: a5..a0 (BE u64s), then X: a5..a0
+        let mut rd = &bytes[1..];
+
+        fn take_u64_be(rd: &mut &[u8]) -> u64 {
+            let (head, tail) = rd.split_at(8);
+            *rd = tail;
+            u64::from_be_bytes(head.try_into().unwrap())
+        }
+
+        let mut y = [0u64; 6];
+        let mut x = [0u64; 6];
+
+        // note: file format stores a5..a0; our struct keeps [a0..a5]
+        y[5] = take_u64_be(&mut rd);
+        y[4] = take_u64_be(&mut rd);
+        y[3] = take_u64_be(&mut rd);
+        y[2] = take_u64_be(&mut rd);
+        y[1] = take_u64_be(&mut rd);
+        y[0] = take_u64_be(&mut rd);
+
+        x[5] = take_u64_be(&mut rd);
+        x[4] = take_u64_be(&mut rd);
+        x[3] = take_u64_be(&mut rd);
+        x[2] = take_u64_be(&mut rd);
+        x[1] = take_u64_be(&mut rd);
+        x[0] = take_u64_be(&mut rd);
+
+        Ok(SchnorrPubkey {
+            x: F6LT { values: x },
+            y: F6LT { values: y },
+            inf: false,
+        })
+    }
+
+    fn pack_le(words: &[u64]) -> num_bigint::BigUint {
+        use num_bigint::BigUint;
+        use num_traits::{Zero, One};
+        let mut n = BigUint::zero();
+        for (i, &w) in words.iter().enumerate() {
+            n += BigUint::from(w) << (64 * i);
+        }
+        n
+    }
+
+    pub fn to_base58(&self) -> String {
+        use num_bigint::BigUint;
+        use num_traits::One;
+        let mut n = BigUint::from(0u32);
+
+        // N = ((y_le << (64*6)) | x_le) << 1 | inf
+        let x = Self::pack_le(&self.x.values);
+        let y = Self::pack_le(&self.y.values);
+        n = (y << (64 * 6)) | x;
+        n = (n << 1) | if self.inf { BigUint::one() } else { BigUint::from(0u32) };
+
+        bs58::encode(n.to_bytes_be()).into_string()
     }
     
     /// Convert SchnorrPubkey to base58 encoded string
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
     pub fn to_b58(&self) -> String {
-        use num_bigint::BigUint;
-        use bs58;
-        
-        // Build the encoding: x coordinates + y coordinates + infinity flag
-        let mut result = BigUint::from(0u32);
-        
-        // Add x coordinate (most significant)
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.x.values[i]);
-        }
-        
-        // Add y coordinate
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.y.values[i]);
-        }
-        
-        // Add infinity flag (least significant bit)
-        result <<= 1;
         if self.inf {
-            result |= BigUint::from(1u32);
+            return "inf".to_string();
         }
-        
-        bs58::encode(result.to_bytes_be()).into_string()
+        let mut bytes = Vec::with_capacity(1 + 6*8 + 6*8);
+        bytes.push(1u8);                        // fixed prefix
+        Self::f6lt_words_be_desc(&self.y, &mut bytes); // Y first
+        Self::f6lt_words_be_desc(&self.x, &mut bytes); // then X
+        bs58::encode(bytes).into_string()
+    }
+
+    pub fn from_base58(s: &str) -> Self {
+        use num_bigint::BigUint;
+        use num_traits::{Zero, One};
+
+        let mut n = Self::de_base58(s);
+        let inf = (&n & BigUint::one()) == BigUint::one();
+        n >>= 1;
+
+        // pull x (low 6 words) then y (next 6 words)
+        let mask_6 = (BigUint::one() << (64 * 6)) - BigUint::one();
+        let x_big = &n & &mask_6;
+        let y_big = n >> (64 * 6);
+
+        let mut x_vals = Self::rip64(&x_big);
+        let mut y_vals = Self::rip64(&y_big);
+        x_vals.resize(6, 0);
+        y_vals.resize(6, 0);
+
+        let x = F6LT { values: [x_vals[0], x_vals[1], x_vals[2], x_vals[3], x_vals[4], x_vals[5]] };
+        let y = F6LT { values: [y_vals[0], y_vals[1], y_vals[2], y_vals[3], y_vals[4], y_vals[5]] };
+
+        SchnorrPubkey { x, y, inf }
+    }
+
+    fn de_base58(s: &str) -> num_bigint::BigUint {
+        use num_bigint::BigUint;
+        use num_traits::Zero;
+        const ALPH: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        let mut n = BigUint::zero();
+        for ch in s.chars() {
+            let d = ALPH.find(ch).expect("invalid base58 char") as u32;
+            n = n * 58u32 + d;
+        }
+        n
+    }
+    fn rip64(n: &num_bigint::BigUint) -> Vec<u64> {
+        use num_bigint::BigUint;
+        use num_traits::Zero;
+        let mut x = n.clone();
+        let mut out = Vec::new();
+        let mask = BigUint::from(u128::from(u64::MAX));
+        let sixty_four = 64u32;
+        while !x.is_zero() {
+            let w = (&x & &mask).to_u64_digits()[0];
+            out.push(w);
+            x >>= sixty_four;
+        }
+        if out.is_empty() { out.push(0); }
+        out
     }
 }
 
