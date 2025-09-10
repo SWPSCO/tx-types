@@ -4,7 +4,7 @@ use noun_serde::NounEncode;
 
 // Import from transaction_types instead of txo
 use crate::transaction_types::{
-    Inputs, Input, Coins,
+    Inputs, Input, Coins, Hash, NName,
 };
 use crate::collections::ZMap;
 use crate::hashing::compute_tx_id;
@@ -131,6 +131,23 @@ pub fn create_raw_transaction_noun(input_list: Vec<Input>) -> NounSlab {
     slab
 }
 
+/// Generate a transaction ID from inputs ZMap
+pub fn generate_tx_id(inputs_zmap: ZMap<NName, Input>) -> Hash { 
+    let input_list: Vec<Input> = inputs_zmap.tap().iter().map(|(_, input)| input.clone()).collect();
+
+    // Step 2: Calculate total fees by summing all input fees
+    let total_fees_value: u64 = input_list
+        .iter()
+        .map(|input| input.spend.fee.value)
+        .sum();
+    
+    // Step 3: Calculate timelock range from all inputs
+    let timelock_range = calculate_timelock_range(&input_list);
+    
+    // Step 4: Compute tx-id using the hashable implementations from tx/hashing
+    // This uses the ToHashable trait implementations and proper TIP5 hashing
+    compute_tx_id(&inputs_zmap, &timelock_range, total_fees_value)
+}
 
 // Note: We now use TimelockRange's NounEncode trait implementation directly
 // instead of a custom create_timelock_range_noun function

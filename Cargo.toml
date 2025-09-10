@@ -1,32 +1,47 @@
-[package]
-name = "tx-types"
-version = "0.1.0"
-edition = "2021"
-authors = ["SWPSCO"]
-description = "Transaction types and utilities for Nockchain"
-repository = "https://github.com/SWPSCO/tx-types"
-license = "MIT OR Apache-2.0"
+[workspace]
+members = [
+    "crates/tx-types",
+    "crates/nicker",
+]
+resolver = "2"
 
-[dependencies]
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+# Nockchain dependencies
 noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
 nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
 nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
 nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
 zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
 ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+proc-macro2 = "1.0"
+
+# Standard dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-either = "1.13"
+anyhow = "1.0"
+tokio = { version = "1.44.2", features = ["full"] }
+tracing = { version = "0.1.41" }
+tracing-subscriber = { version = "0.3.19" }
+clap = { version = "4.5.37", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6.1", features = ["v4"] }
+bytes = { version = "1.10.1" }
+futures = "0.3"
+hex = { version = "0.4.3" }
+rand = { version = "0.8.5" }
+
+# Math/crypto dependencies
 num-bigint = "0.4"
 num-traits = "0.2.19"
 bs58 = "0.5"
-anyhow = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-getrandom = { version = "0.2", features = ["js"] }
-
-[dev-dependencies]
 
 [patch.crates-io]
-tracy-client-sys = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client-sys" }
-tracy-client = { path = "../nockchain-rpc-server/dummy-tracy/tracy-client" }
-tracing-tracy = { path = "../nockchain-rpc-server/dummy-tracy/tracing-tracy" }
+tracy-client-sys = { path = "crates/nockchain-rpc-server/dummy-tracy/tracy-client-sys" }
+tracy-client = { path = "crates/nockchain-rpc-server/dummy-tracy/tracy-client" }
+tracing-tracy = { path = "crates/nockchain-rpc-server/dummy-tracy/tracing-tracy" }
