@@ -15,4 +15,4 @@ pub mod tx_id;
 pub use hashable::Hashable;
 pub use hasher::{hash_hashable, hash_noun_varlen, hash_ten_cell};
 pub use tip5::{Tip5Hasher, Tip5Error};
-pub use tx_id::{compute_tx_id, compute_tx_id_base58};
+pub use tx_id::{compute_tx_id, compute_tx_id_base58, sig_hash_for_input};

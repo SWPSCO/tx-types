@@ -4,7 +4,7 @@ use sha2::Sha512;
 use ibig::UBig;
 use num_traits::Zero;
 use zeroize::Zeroize;
-use crate::crypto::cheetah::{CheetahPoint, constants::group_order};
+use crate::crypto::cheetah::point::{CheetahPoint, cheetah_order};
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
 
@@ -82,7 +82,7 @@ impl ExtendedKey {
     
     /// Derive a child key at the given index
     pub fn derive_child(&self, index: u32) -> Result<Self> {
-        let n = group_order();
+        let n = cheetah_order();
         
         if self.private_key.is_none() && Self::is_hardened(index) {
             return Err(CryptoError::DerivationFailed);
@@ -128,7 +128,7 @@ impl ExtendedKey {
         // Derive child private key if parent has private key
         let child_private_key = if let Some(parent_private) = self.private_key {
             let parent_sk = UBig::from_be_bytes(&parent_private);
-            let child_sk = (il_int + parent_sk) % &n;
+            let child_sk = (il_int.clone() + parent_sk) % &n;
             
             if child_sk.is_zero() {
                 return Err(CryptoError::DerivationFailed);

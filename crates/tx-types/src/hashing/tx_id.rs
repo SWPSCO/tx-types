@@ -4,7 +4,7 @@
 use super::hashable::Hashable;
 use super::hasher::{hash_hashable, digest_to_base58};
 use crate::collections::ZMap;
-use crate::transaction_types::{Hash, NName, Input, TimelockRange, to_hashable_timelock_intent};
+use crate::transaction_types::{Hash, NName, Input, TimelockRange, RawTransaction, to_hashable_timelock_intent};
 
 /// Compute the transaction ID from components
 /// Mirrors Hoon's compute-id function:
@@ -47,6 +47,19 @@ pub fn compute_tx_id_base58(
 ) -> String {
     let digest = compute_tx_id(inputs, timelock_range, total_fees);
     digest_to_base58(&digest)
+}
+
+/// Compute signature hash for a specific input in a transaction
+/// This creates the hash that will be signed for a particular input
+pub fn sig_hash_for_input(raw_tx: &RawTransaction, input_name: &NName) -> Hash {
+    // For signature hashing, we typically hash the transaction ID
+    // along with the specific input being signed
+    let hashable = Hashable::cell(
+        Hashable::hash(raw_tx.id.clone()),
+        input_name.to_hashable(),
+    );
+    
+    hash_hashable(&hashable)
 }
 
 #[cfg(test)]

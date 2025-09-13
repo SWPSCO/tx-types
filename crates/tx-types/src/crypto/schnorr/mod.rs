@@ -8,5 +8,5 @@
 pub mod rfc6979;
 pub mod signature;
 
-pub use signature::{sign_hash, verify_signature, SignatureError};
+pub use signature::{schnorr_sign_txid, verify_signature, SignatureError};
 pub use rfc6979::generate_nonce;

@@ -730,7 +730,7 @@ pub struct NNoteHead {
     pub timelock: Timelock,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct T8 {
     pub values: [u64; 8],
 }

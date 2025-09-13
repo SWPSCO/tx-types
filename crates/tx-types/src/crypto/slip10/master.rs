@@ -5,7 +5,7 @@ use ibig::UBig;
 use num_traits::Zero;
 use bip39::{Mnemonic, Language};
 use pbkdf2::pbkdf2;
-use crate::crypto::cheetah::constants::group_order;
+use crate::crypto::cheetah::point::cheetah_order;
 use crate::crypto::{CryptoError, Result};
 use super::derive::ExtendedKey;
 
@@ -36,7 +36,7 @@ pub fn bip39_to_seed(mnemonic: &str, passphrase: &str) -> Result<[u8; 64]> {
 /// 2. Implements retry logic for invalid private keys
 /// 3. Returns (private_key, chain_code)
 pub fn master_from_seed(seed: &[u8]) -> Result<ExtendedKey> {
-    let n = group_order();
+    let n = cheetah_order();
     
     // First derivation attempt
     let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY)
