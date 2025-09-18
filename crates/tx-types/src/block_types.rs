@@ -1,11 +1,15 @@
-use chrono::{DateTime, Utc, TimeZone};
-use serde::{Deserialize, Serialize};
-// use crate::transaction_types::Transaction;
 use crate::transaction_types::{Hash, Lock, Coins};
 use crate::collections::zset::ZSet;
-use noun_serde::{NounDecode, NounDecodeError};
-use nockvm::noun::{Noun, FullDebugCell};
 use crate::collections::zmap::ZMap;
+
+use std::collections::{HashSet, HashMap};
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc, TimeZone};
+use num_bigint::BigUint;
+
+use nockvm::noun::{Noun, FullDebugCell};
+use noun_serde::{NounDecode, NounDecodeError};
+
 #[derive(Debug, Clone, NounDecode)]
 pub struct Page {
     pub digest: Hash,
@@ -20,7 +24,49 @@ pub struct Page {
     pub target: BigNum,
     pub accumulated_work: BigNum,
     pub height: u64,
-    pub msg: PageMsg,
+    pub msg: Vec<u64>,
+}
+
+impl Page {
+    pub fn to_postgres(&self) -> PostgresPage {
+        let digest = self.digest.to_b58();
+        let pow = format!("https://placeholder.url/bucket/{}", self.height);
+        let parent = self.parent.to_b58();
+        let tx_ids = self.tx_ids.tap().iter().map(|tx_id| tx_id.to_b58()).collect();
+        let coinbase = self.coinbase.tap().iter().map(|(lock, coins)| PostgresCoinbase {
+            m: lock.m,
+            pubkeys: lock.pubkeys.tap().iter().map(|pubkey| pubkey.to_b58()).collect(),
+            coins: coins.value,
+        }).collect();
+        let timestamp = self.timestamp.value;
+        let epoch_counter = self.epoch_counter;
+        let target = self.target.to_decimal_string();
+        let accumulated_work = self.accumulated_work.to_decimal_string();
+        let height = self.height;
+        let msg = (!self.msg.is_empty()).then(|| {
+            let mut out = String::with_capacity(self.msg.len() * 8); // upper bound
+            for &w in &self.msg {
+                let bytes = w.to_le_bytes();
+                // Trim trailing NULs within this 8-byte LE chunk
+                let used = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+                if let Ok(s) = std::str::from_utf8(&bytes[..used]) { out.push_str(s); }
+            }
+            out
+        });
+        PostgresPage {
+            digest,
+            pow,
+            parent,
+            tx_ids,
+            coinbase,
+            timestamp,
+            epoch_counter,
+            target,
+            accumulated_work,
+            height,
+            msg,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,14 +82,18 @@ impl NounDecode for CoinbaseSplit {
 }
 
 #[derive(NounDecode, Debug, Clone)]
-pub struct PageMsg {
-    pub message: Vec<Hash>,
-}
-
-#[derive(NounDecode, Debug, Clone)]
 pub struct BigNum {
     pub header: String,
     pub body: Vec<u32>,
+}
+
+impl BigNum {
+    pub fn to_decimal_string(&self) -> String {
+        let le_u32 = self.body.clone();
+        if le_u32.is_empty() { return "0".into(); }
+        let bytes: Vec<u8> = le_u32.iter().flat_map(|w| w.to_le_bytes()).collect();
+        BigUint::from_bytes_le(&bytes).to_str_radix(10)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -61,4 +111,29 @@ impl NounDecode for Timestamp {
             .ok_or_else(|| NounDecodeError::Custom("Invalid timestamp".to_string()))?;
         Ok(Timestamp { value: datetime_utc })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PostgresPage {
+    pub digest: String,
+    // everything below this is what is hashed for the digest: +.page
+    pub pow: String, // link to s3 bucket
+    // everything below this is what is hashed for the block commitment: +>.page
+    pub parent: String, // link to s3 bucket
+    pub tx_ids: Vec<String>,
+    pub coinbase: Vec<PostgresCoinbase>,
+    pub timestamp: DateTime<Utc>,
+    pub epoch_counter: u64,
+    pub target: String,
+    pub accumulated_work: String,
+    pub height: u64,
+    pub msg: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PostgresCoinbase {
+    pub m: u64,
+    pub pubkeys: Vec<String>,
+    pub coins: u64,
+
 }
