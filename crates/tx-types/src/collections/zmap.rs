@@ -8,7 +8,7 @@
 
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use nockvm::noun::D;
+use nockvm::noun::{D, NounAllocator};
 use noun_serde::NounEncode;
 use ibig::UBig;
 use crate::hashing::tip5::Tip5Hasher;
@@ -1588,8 +1588,7 @@ where
     K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
     V: noun_serde::NounDecode + Clone + Debug,
 {
-    fn from_noun<A: nockvm::noun::NounAllocator>(
-        alloc: &mut A,
+    fn from_noun(
         noun: &nockvm::noun::Noun,
     ) -> Result<Self, noun_serde::NounDecodeError> {
         use nockvm::noun::Noun;
@@ -1605,7 +1604,8 @@ where
         
         // Decode the node recursively
         let mut map = ZMap::new();
-        Self::decode_node_recursive(alloc, noun, &mut map)?;
+        let mut alloc: nockapp::noun::slab::NounSlab = nockapp::noun::slab::NounSlab::new();
+        Self::decode_node_recursive(&mut alloc, noun, &mut map)?;
         Ok(map)
     }
 }
@@ -1633,8 +1633,8 @@ where
         let pair_cell = cell.head().as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
         
-        let key = K::from_noun(alloc, &pair_cell.head())?;
-        let value = V::from_noun(alloc, &pair_cell.tail())?;
+        let key = K::from_noun(&pair_cell.head())?;
+        let value = V::from_noun(&pair_cell.tail())?;
         
         // Insert the key-value pair
         map.put(key, value);

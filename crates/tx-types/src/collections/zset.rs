@@ -669,7 +669,7 @@ where
             .map_err(|_| NounDecodeError::ExpectedCell)?;
         
         // First element is the value
-        let value = T::from_noun(alloc, &cell.head())?;
+        let value = T::from_noun(&cell.head())?;
         
         // Second element should be a cell [left right]
         let tail_cell = cell.tail().as_cell()
@@ -691,9 +691,10 @@ impl<T> NounDecode for ZSet<T>
 where
     T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
 {
-    fn from_noun<A: NounAllocator>(alloc: &mut A, noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let mut alloc: nockapp::noun::slab::NounSlab = nockapp::noun::slab::NounSlab::new();
         // Decode from tree structure matching Hoon's z-set
-        let root = Self::node_from_noun(alloc, noun)?;
+        let root = Self::node_from_noun(&mut alloc, noun)?;
         Ok(ZSet { root })
     }
 }

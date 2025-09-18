@@ -11,14 +11,14 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Nockchain dependencies
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
+noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
+nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7", default-features = false }
+nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
+nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
+nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7", default-features = false }
+zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "fdf0d1b4445cfff8f285d18e3a2dbb219f337fc7" }
 proc-macro2 = "1.0"
 
 # Standard dependencies

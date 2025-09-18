@@ -251,8 +251,8 @@ impl NounEncode for Timelock {
 }
 
 impl NounDecode for Timelock {
-    fn from_noun<A: NounAllocator>(allocator: &mut A, noun: &Noun) -> Result<Self, NounDecodeError> {
-        let intent = TimelockIntent::from_noun(allocator, noun)?;
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let intent = TimelockIntent::from_noun(noun)?;
         Timelock::new(intent)
             .map_err(|e| NounDecodeError::Custom(e))
     }
@@ -310,7 +310,7 @@ impl NounEncode for F6LT {
 }
 
 impl NounDecode for F6LT {
-    fn from_noun<A: NounAllocator>(_: &mut A, noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         // Extract 6 values from nested cell structure
         let mut values = [0u64; 6];
         let mut current = *noun;
@@ -1017,7 +1017,7 @@ pub struct RawTransaction {
 }
 
 impl NounDecode for T8 {
-    fn from_noun<A: NounAllocator>(_: &mut A, noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let mut ret: [u64; 8] = [0; 8];
         let mut cur = *noun;
         for i in 0..7 {

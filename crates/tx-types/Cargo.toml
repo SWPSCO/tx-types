@@ -28,6 +28,7 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 pbkdf2 = { workspace = true }
 zeroize = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 
