@@ -36,8 +36,7 @@ pub use validation::{validator::{TransactionValidator, TransactionValidationErro
 pub use transaction_types::*;
 
 // Re-export block types for RPC usage
-// pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, SimpleTransactionOutput, CoinbaseRecipient};
-pub use block_types::Page;
+pub use block_types::*;
 
 // Test modules
 #[cfg(test)]
