@@ -32,18 +32,6 @@ pub struct Pages {
     pub pages: ZMap<Hash, Page>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CoinbaseSplit {
-    pub recipients: u64,
-}
-
-impl NounDecode for CoinbaseSplit {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        tracing::info!("CoinbaseSplit noun: {:?}", noun);
-        Ok(CoinbaseSplit { recipients: 0 })
-    }
-}
-
 #[derive(NounDecode, Debug, Clone)]
 pub struct BigNum {
     pub header: String,
