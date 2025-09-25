@@ -398,7 +398,7 @@ where
         let value_noun = value.to_noun(&mut slab);
         
         // Compute the TIP5 hash
-        let hash = Tip5Hasher::hash_noun(value_noun)
+        let hash = Tip5Hasher::hash_noun_varlen(value_noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         
         // Convert Hash to UBig using our new method
@@ -440,7 +440,7 @@ where
         let mut slab: NounSlab = NounSlab::new();
         let value_noun = value.to_noun(&mut slab);
         
-        let hash = Tip5Hasher::hash_noun(value_noun)
+        let hash = Tip5Hasher::hash_noun_varlen(value_noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         
         // Use hash_ten_cell with two copies of the hash
@@ -844,7 +844,7 @@ mod tests {
             // Compute the hash for each value to understand ordering
             let mut slab: NounSlab = NounSlab::new();
             let noun = item.to_noun(&mut slab);
-            let hash = Tip5Hasher::hash_noun(noun).unwrap();
+            let hash = Tip5Hasher::hash_noun_varlen(noun).unwrap();
             println!("{}: value={}, hash={:x?}", idx, item.0, &hash.values[0..2]); // Show first 2 values of hash
         }
         

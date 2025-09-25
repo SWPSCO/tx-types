@@ -375,12 +375,12 @@ mod tests {
         
         let mut slab1: NounSlab = NounSlab::new();
         let pubkey1_noun = pubkey1.to_noun(&mut slab1);
-        let pubkey1_hash = Tip5Hasher::hash_noun(pubkey1_noun).unwrap();
+        let pubkey1_hash = Tip5Hasher::hash_noun_varlen(pubkey1_noun).unwrap();
         println!("\npubkey1 (x[0]={}): hash={:x?}", pubkey1.x.values[0], pubkey1_hash.values);
         
         let mut slab2: NounSlab = NounSlab::new();
         let pubkey2_noun = pubkey2.to_noun(&mut slab2);
-        let pubkey2_hash = Tip5Hasher::hash_noun(pubkey2_noun).unwrap();
+        let pubkey2_hash = Tip5Hasher::hash_noun_varlen(pubkey2_noun).unwrap();
         println!("pubkey2 (x[0]={}): hash={:x?}", pubkey2.x.values[0], pubkey2_hash.values);
         
         // Convert hashes to UBig for comparison (same as gor_tip does)

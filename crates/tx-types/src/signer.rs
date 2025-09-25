@@ -136,7 +136,7 @@ fn hash_transcript_list(element_arrays: &[&[u64]]) -> Result<Hash, crate::hashin
     }
     
     // Hash the list using TIP5
-    Tip5Hasher::hash_noun(list)
+    Tip5Hasher::hash_varlen(list)
 }
 
 #[cfg(test)]
@@ -226,5 +226,59 @@ mod tests {
         );
 
         println!("✓ schnorr_sign_digest with T8 key produces expected results!");
+    }
+
+    #[test]
+    fn test_hash_transcript_list() {
+        // Test hashing the numbers [1, 2, 3, 0] as a transcript list
+        let numbers = [1u64, 2u64, 3u64, 0u64];
+        let element_arrays: &[&[u64]] = &[&numbers];
+        
+        let result = hash_transcript_list(element_arrays);
+        
+        match result {
+            Ok(hash) => {
+                println!("hash_transcript_list([1, 2, 3, 0]) = {:x?}", hash.values);
+                
+                // Verify it produces a valid hash (5 u64 values)
+                assert_eq!(hash.values.len(), 5);
+                
+                // The hash should be deterministic - calling again should produce same result
+                let result2 = hash_transcript_list(element_arrays).unwrap();
+                assert_eq!(hash.values, result2.values, "Hash should be deterministic");
+                
+                println!("✓ hash_transcript_list produces deterministic hash for [1, 2, 3, 0]");
+            }
+            Err(e) => {
+                panic!("hash_transcript_list failed: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_hash_transcript_list_simple() {
+        // Test hashing the numbers [1, 2, 3] as a transcript list
+        let numbers = [1u64, 2u64, 3u64];
+        let element_arrays: &[&[u64]] = &[&numbers];
+        
+        let result = hash_transcript_list(element_arrays);
+        
+        match result {
+            Ok(hash) => {
+                println!("hash_transcript_list([1, 2, 3]) = {:x?}", hash.values);
+                
+                // Verify it produces a valid hash (5 u64 values)
+                assert_eq!(hash.values.len(), 5);
+                
+                // The hash should be deterministic - calling again should produce same result
+                let result2 = hash_transcript_list(element_arrays).unwrap();
+                assert_eq!(hash.values, result2.values, "Hash should be deterministic");
+                
+                println!("✓ hash_transcript_list produces deterministic hash for [1, 2, 3]");
+            }
+            Err(e) => {
+                panic!("hash_transcript_list failed: {:?}", e);
+            }
+        }
     }
 }

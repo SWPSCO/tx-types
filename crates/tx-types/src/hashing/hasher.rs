@@ -10,9 +10,9 @@ use nockvm::noun::{Atom, T};
 /// Goldilocks prime: 2^64 - 2^32 + 1
 pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
 
-/// Hash a raw noun using variable-length hashing
-/// This mirrors the Hoon hash-noun-varlen function
-pub fn hash_noun_varlen(data: &[u8]) -> Hash {
+/// Hash a raw atom using variable-length hashing
+/// This mirrors the Hoon hash-varlen function which is intended for single atoms
+pub fn hash_varlen(data: &[u8]) -> Hash {
     use super::tip5::Tip5Hasher;
     use nockapp::noun::AtomExt;
     
@@ -47,7 +47,7 @@ pub fn hash_noun_varlen(data: &[u8]) -> Hash {
     };
     
     // Use the real TIP5 hasher
-    let result = Tip5Hasher::hash_noun(noun).unwrap_or_else(|_e| {
+    let result = Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_e| {
         // eprintln!("  -> TIP5 hash failed: {:?}", e);
         Hash { values: [0; 5] }
     });
@@ -97,7 +97,7 @@ pub fn hash_hashable(h: &Hashable) -> Hash {
     match h {
         Hashable::Leaf(data) => {
             // Hash raw data
-            hash_noun_varlen(data)
+            hash_varlen(data)
         },
         Hashable::Hash(digest) => {
             // Already hashed, return as-is
@@ -132,7 +132,7 @@ pub fn hash_hashable(h: &Hashable) -> Hash {
             };
             
             // Hash the list using real TIP5
-            Tip5Hasher::hash_noun(list_noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            Tip5Hasher::hash_noun_varlen(list_noun).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
 }

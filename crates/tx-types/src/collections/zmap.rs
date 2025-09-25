@@ -258,7 +258,7 @@ where
         let key_noun = key.to_noun(&mut slab);
         
         // Compute the TIP5 hash
-        let hash = Tip5Hasher::hash_noun(key_noun)
+        let hash = Tip5Hasher::hash_noun_varlen(key_noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         
         // Convert Hash to UBig using our new method
@@ -299,7 +299,7 @@ where
         let mut slab: NounSlab = NounSlab::new();
         let key_noun = key.to_noun(&mut slab);
         
-        let hash = Tip5Hasher::hash_noun(key_noun)
+        let hash = Tip5Hasher::hash_noun_varlen(key_noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         
         // Use hash_ten_cell with two copies of the hash

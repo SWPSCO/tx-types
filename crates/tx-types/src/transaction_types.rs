@@ -361,7 +361,7 @@ impl SchnorrPubkey {
         // This is semantically equivalent to Hoon's (hash [%leaf form]).
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun(noun)
+        let hash = Tip5Hasher::hash_noun_varlen(noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         Hashable::Hash(hash)
     }
@@ -568,7 +568,7 @@ impl Lock {
             // Hash each pubkey
             let mut slab: NounSlab = NounSlab::new();
             let pubkey_noun = pubkey.to_noun(&mut slab);
-            let pubkey_hash = Tip5Hasher::hash_noun(pubkey_noun)
+            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun)
                 .unwrap_or_else(|_| Hash { values: [0; 5] });
             Hashable::Hash(pubkey_hash)
         });
@@ -761,7 +761,7 @@ impl SchnorrSignature {
         // This is semantically equivalent to Hoon's (hash [%leaf form]).
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun(noun)
+        let hash = Tip5Hasher::hash_noun_varlen(noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         Hashable::Hash(hash)
     }

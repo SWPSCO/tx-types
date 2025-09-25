@@ -24,7 +24,7 @@ pub mod crypto;
 // Re-export commonly used types from submodules
 pub use hashing::{
     hashable::Hashable,
-    hasher::{hash_hashable, hash_noun_varlen, hash_ten_cell},
+    hasher::{hash_hashable, hash_varlen, hash_ten_cell},
     tip5::{Tip5Hasher, Tip5Error},
     tx_id::{compute_tx_id, compute_tx_id_base58},
 };
