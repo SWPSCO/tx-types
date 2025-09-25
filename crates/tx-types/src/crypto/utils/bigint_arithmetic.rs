@@ -65,37 +65,44 @@ pub fn be32_sub_inplace(a: &mut [u8; 32], b: &[u8; 32]) {
 
 #[inline]
 pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    let (mut sum, carry) = add_be32(a, b);
-    if carry == 1 || !be32_lt(&sum, &CHEETAH_N) {
-        be32_sub_inplace(&mut sum, &CHEETAH_N);
-    }
-    sum
+    use num_bigint::BigUint;
+    
+    // Convert inputs to BigUint (big-endian)
+    let a_big = BigUint::from_bytes_be(a);
+    let b_big = BigUint::from_bytes_be(b);
+    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
+    
+    // Compute (a + b) mod n
+    let sum = (a_big + b_big) % n_big;
+    
+    // Convert back to 32-byte big-endian array
+    let bytes = sum.to_bytes_be();
+    let mut result = [0u8; 32];
+    let offset = 32_usize.saturating_sub(bytes.len());
+    result[offset..].copy_from_slice(&bytes);
+    
+    result
 }
 
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    let mut prod = [0u8; 64];
-    for i in 0..32 {
-        let mut carry: u32 = 0;
-        for j in 0..32 {
-            let ai = a[31 - i] as u32;
-            let bj = b[31 - j] as u32;
-            let k = 63 - (i + j);
-            let t = ai * bj + prod[k] as u32 + carry;
-            prod[k] = (t & 0xff) as u8;
-            carry = t >> 8;
-        }
-        let mut kk = 63 - (i + 32);
-        let mut c = carry;
-        while c != 0 {
-            let t = prod[kk] as u32 + c;
-            prod[kk] = (t & 0xff) as u8;
-            c = t >> 8;
-            if kk == 0 { break; }
-            kk -= 1;
-        }
-    }
-    mod_n_from_be_bytes(&prod)
+    use num_bigint::BigUint;
+    
+    // Convert inputs to BigUint (big-endian)
+    let a_big = BigUint::from_bytes_be(a);
+    let b_big = BigUint::from_bytes_be(b);
+    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
+    
+    // Compute (a * b) mod n
+    let product = (a_big * b_big) % n_big;
+    
+    // Convert back to 32-byte big-endian array
+    let bytes = product.to_bytes_be();
+    let mut result = [0u8; 32];
+    let offset = 32_usize.saturating_sub(bytes.len());
+    result[offset..].copy_from_slice(&bytes);
+    
+    result
 }
 
 #[inline]
@@ -251,4 +258,147 @@ pub fn be32_atom_to_t8_le(be: &[u8; 32]) -> crate::transaction_types::T8 {
         v[i] = w;
     }
     crate::transaction_types::T8 { values: v }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mul_mod_n_large_numbers() {
+        // Test with two large 32-byte numbers
+        // First number: 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0
+        let a: [u8; 32] = [
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+        ];
+
+        // Second number: 0xFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210
+        let b: [u8; 32] = [
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+        ];
+
+        // Compute a * b mod n
+        let result = mul_mod_n(&a, &b);
+        
+        // Print the inputs and result for debugging
+        println!("\nTesting mul_mod_n with large numbers:");
+        print!("a = 0x");
+        for byte in &a {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        print!("b = 0x");
+        for byte in &b {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        print!("CHEETAH_N = 0x");
+        for byte in &CHEETAH_N {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        print!("a * b mod n = 0x");
+        for byte in &result {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        // Verify result is less than n
+        assert!(be32_lt(&result, &CHEETAH_N), "Result should be less than n");
+        
+        // Test with smaller numbers that we can manually verify
+        // a = 1000 (0x3E8)
+        let small_a: [u8; 32] = {
+            let mut arr = [0u8; 32];
+            arr[30] = 0x03;
+            arr[31] = 0xE8;
+            arr
+        };
+        
+        // b = 2000 (0x7D0)
+        let small_b: [u8; 32] = {
+            let mut arr = [0u8; 32];
+            arr[30] = 0x07;
+            arr[31] = 0xD0;
+            arr
+        };
+        
+        let small_result = mul_mod_n(&small_a, &small_b);
+        
+        // 1000 * 2000 = 2,000,000 (0x1E8480)
+        let expected: [u8; 32] = {
+            let mut arr = [0u8; 32];
+            arr[29] = 0x1E;
+            arr[30] = 0x84;
+            arr[31] = 0x80;
+            arr
+        };
+        
+        println!("\nTesting mul_mod_n with small numbers:");
+        println!("1000 * 2000 = {}", u32::from_be_bytes([0, small_result[29], small_result[30], small_result[31]]));
+        
+        assert_eq!(small_result, expected, "1000 * 2000 should equal 2,000,000");
+        
+        // Test commutativity: a * b = b * a (mod n)
+        let result_ba = mul_mod_n(&b, &a);
+        assert_eq!(result, result_ba, "Multiplication should be commutative");
+        
+        println!("✓ mul_mod_n tests passed!");
+    }
+    
+    #[test]
+    fn test_compare_mul_mod_n_implementations() {
+        // Test with the same large numbers from Hoon
+        let a: [u8; 32] = [
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+        ];
+
+        let b: [u8; 32] = [
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+        ];
+        
+        // Expected result from Hoon
+        // 0x6b050596453169d3ddcc7af2776cb4a30223c90de6163a9a2ea6897206afcb6a
+        let expected: [u8; 32] = [
+            0x6b, 0x05, 0x05, 0x96, 0x45, 0x31, 0x69, 0xd3,
+            0xdd, 0xcc, 0x7a, 0xf2, 0x77, 0x6c, 0xb4, 0xa3,
+            0x02, 0x23, 0xc9, 0x0d, 0xe6, 0x16, 0x3a, 0x9a,
+            0x2e, 0xa6, 0x89, 0x72, 0x06, 0xaf, 0xcb, 0x6a,
+        ];
+        
+        // Test with updated implementation
+        let result = mul_mod_n(&a, &b);
+        
+        println!("\nTesting mul_mod_n with BigUint implementation:");
+        print!("Expected (Hoon): 0x");
+        for byte in &expected {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        print!("Result:          0x");
+        for byte in &result {
+            print!("{:02x}", byte);
+        }
+        println!();
+        
+        // Check if result matches expected
+        assert_eq!(result, expected, "mul_mod_n should match Hoon result");
+    }
 }
