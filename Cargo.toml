@@ -47,6 +47,6 @@ pbkdf2 = "0.12"
 zeroize = "1.0"
 
 [patch.crates-io]
-tracy-client-sys = { path = "crates/nockchain-rpc-server/dummy-tracy/tracy-client-sys" }
-tracy-client = { path = "crates/nockchain-rpc-server/dummy-tracy/tracy-client" }
-tracing-tracy = { path = "crates/nockchain-rpc-server/dummy-tracy/tracing-tracy" }
+tracy-client-sys = { path = "crates/dummy-tracy/tracy-client-sys" }
+tracy-client = { path = "crates/dummy-tracy/tracy-client" }
+tracing-tracy = { path = "crates/dummy-tracy/tracing-tracy" }
