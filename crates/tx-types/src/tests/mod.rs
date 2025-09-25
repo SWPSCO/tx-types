@@ -24,3 +24,5 @@ pub mod test_empty_hashes;
 pub mod test_base58_conversion;
 #[cfg(test)]
 pub mod hoon_signature_test;
+#[cfg(test)]
+pub mod signing_test;

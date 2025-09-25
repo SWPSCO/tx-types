@@ -13,9 +13,9 @@ pub mod utils;
 
 // Re-export main types for convenience
 pub use cheetah::{CheetahPoint, F6Element};
-pub use schnorr::{schnorr_sign_txid, verify_signature};
 pub use slip10::{ExtendedKey, master_from_seed, master_from_mnemonic};
 pub use utils::{UBigExt, T8Conversion};
+pub use crate::signer::schnorr_sign_digest;
 
 use crate::transaction_types::{Hash, T8, SchnorrPubkey};
 use ibig::UBig;

@@ -10,6 +10,7 @@
 // Core modules in root
 pub mod transaction_types;
 pub mod tx_to_noun;
+pub mod signer;
 pub mod u320;
 pub mod block_types;
 

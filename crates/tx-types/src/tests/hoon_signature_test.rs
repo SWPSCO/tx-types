@@ -5,7 +5,7 @@ use crate::collections::{ZMap, ZSet};
 use crate::transaction_types::*;
 use crate::hashing::{compute_tx_id, sig_hash_for_input};
 use crate::crypto::cheetah::point::cheetah_pub_from_sk;
-use crate::crypto::schnorr::signature::schnorr_sign_txid;
+use crate::signer::schnorr_sign_digest;
 
 #[test]
 fn test_hoon_signature_generation() {
@@ -234,7 +234,7 @@ fn test_hoon_signature_generation() {
     println!("\nSignature hash (5 words): {:?}", sig_hash_5);
     
     // Generate Schnorr signature using Cheetah  
-    let (chal_t8, sig_t8) = schnorr_sign_txid(secret_key_be, [derived_x_msw, derived_y_msw], sig_hash_5);
+    let (chal_t8, sig_t8) = schnorr_sign_digest(secret_key_be, (derived_x_msw, derived_y_msw), sig_hash_5.values);
     
     // Expected signature from Hoon
     let expected_chal = T8 {
