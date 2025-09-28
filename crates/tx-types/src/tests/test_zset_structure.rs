@@ -27,7 +27,7 @@ mod tests {
             
             let mut slab: NounSlab = NounSlab::new();
             let noun = self.to_noun(&mut slab);
-            Tip5Hasher::hash_noun(noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
     

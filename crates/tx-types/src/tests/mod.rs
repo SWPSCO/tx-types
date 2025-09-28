@@ -22,5 +22,9 @@ pub mod timelock_tests;
 pub mod test_empty_hashes;
 #[cfg(test)]
 pub mod test_base58_conversion;
+// #[cfg(test)]
+// pub mod hoon_signature_test;
 #[cfg(test)]
-pub mod hoon_signature_test;
+pub mod signing_test;
+#[cfg(test)]
+pub mod test_cheetah_pub_from_sk;
