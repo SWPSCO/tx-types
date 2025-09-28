@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc, TimeZone};
 use num_bigint::BigUint;
 
 use nockvm::noun::{Noun, FullDebugCell};
-use noun_serde::{NounDecode, NounDecodeError};
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Page {
@@ -33,6 +33,29 @@ pub struct Pages {
 }
 
 #[derive(NounDecode, Debug, Clone)]
+pub struct PageSummary {
+    pub digest: Hash,
+    pub timestamp: Timestamp,
+    pub epoch_counter: u64,
+    pub target: BigNum,
+    pub accumulated_work: BigNum,
+    pub height: u64,
+    pub parent: Hash,
+}
+
+impl Timestamp {
+    pub fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let base_urbit_epoch = 0x8000000cce9e0d80u64;
+        let raw_value = u64::from_noun(noun)?;
+        let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
+        let datetime_utc = Utc.timestamp_opt(unix_timestamp, 0)
+            .single()
+            .ok_or_else(|| NounDecodeError::Custom("Invalid timestamp".to_string()))?;
+        Ok(Timestamp { value: datetime_utc })
+    }
+}
+
+#[derive(NounDecode, NounEncode, Debug, Clone)]
 pub struct BigNum {
     pub header: String,
     pub body: Vec<u32>,
