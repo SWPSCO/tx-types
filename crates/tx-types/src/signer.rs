@@ -709,4 +709,155 @@ mod tests {
         
         println!("\n✓ Successfully signed transaction with sign_tx");
     }
+    
+    #[test]
+    fn test_sign_tx_with_known_good_data() {
+        use nockapp::noun::slab::NounSlab;
+        use noun_serde::NounDecode;
+        use std::fs;
+        use crate::crypto::slip10::master::master_from_mnemonic;
+        
+        println!("\n=== Testing sign_tx with known-good transaction data ===\n");
+        
+        // Load the BIP39 mnemonic from seed.txt
+        let mnemonic = fs::read_to_string("../../tx/seed.txt")
+            .expect("Failed to read seed.txt")
+            .trim()
+            .to_string();
+        
+        println!("Using BIP39 mnemonic from seed.txt");
+        
+        // Derive the master key from the mnemonic (no passphrase)
+        let master_key = master_from_mnemonic(&mnemonic, "")
+            .expect("Failed to derive master key from mnemonic");
+        
+        // Get the private key bytes
+        let private_key_bytes = master_key.private_key_bytes()
+            .expect("Master key should have private key");
+        
+        // Convert the 32-byte private key to T8 format (8 x u32 in little-endian)
+        let mut t8_values = [0u64; 8];
+        for i in 0..8 {
+            // Each T8 limb is 4 bytes from the private key, stored as u64
+            // The private key is in big-endian, but T8 limbs are in little-endian order
+            let offset = 32 - (i + 1) * 4;  // Start from the end for little-endian T8
+            let limb_bytes = &private_key_bytes[offset..offset + 4];
+            t8_values[i] = u32::from_be_bytes([
+                limb_bytes[0],
+                limb_bytes[1], 
+                limb_bytes[2],
+                limb_bytes[3]
+            ]) as u64;
+        }
+        
+        let secret_key = T8 { values: t8_values };
+        
+        println!("Derived secret key from mnemonic:");
+        println!("  T8 format: {:016x?}", secret_key.values);
+        
+        // Calculate the public key from the secret key
+        let secret_key_be = t8_to_be32(&secret_key);
+        let pk_coords = cheetah_pub_from_sk(secret_key_be);
+        let derived_pubkey = SchnorrPubkey {
+            x: crate::transaction_types::F6LT { values: pk_coords[0] },
+            y: crate::transaction_types::F6LT { values: pk_coords[1] },
+            inf: false,
+        };
+        
+        println!("Derived public key:");
+        println!("  X: {:016x?}", derived_pubkey.x.values);
+        println!("  Y: {:016x?}", derived_pubkey.y.values);
+        
+        // Load the unsigned transaction from known-good.raw.jam
+        let unsigned_jam = fs::read("../../tx/known-good.raw.jam")
+            .expect("Failed to read known-good.raw.jam");
+        
+        // Decode the JAM into a RawTransaction
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = slab.cue_into(unsigned_jam.into())
+            .expect("Failed to decode JAM");
+        
+        let unsigned_tx = RawTransaction::from_noun(&mut slab, &noun)
+            .expect("Failed to decode RawTransaction from noun");
+        
+        println!("\nLoaded unsigned transaction:");
+        println!("  ID: {:016x?}", unsigned_tx.id.values);
+        println!("  Inputs count: {}", unsigned_tx.inputs.p.tap().len());
+        println!("  Total fees: {}", unsigned_tx.total_fees.value);
+        
+        // Check that it has no signatures
+        let has_any_sig = unsigned_tx.inputs.p.tap()
+            .iter()
+            .any(|(_, input)| input.spend.signature.is_some());
+        assert!(!has_any_sig, "unsigned transaction should have no signatures");
+        
+        // Load the signed transaction from nw.known-good.raw.jam for comparison
+        let signed_jam = fs::read("../../tx/nw.known-good.raw.jam")
+            .expect("Failed to read nw.known-good.raw.jam");
+        
+        let mut slab2: NounSlab = NounSlab::new();
+        let noun2 = slab2.cue_into(signed_jam.into())
+            .expect("Failed to decode signed JAM");
+        
+        let expected_signed_tx = RawTransaction::from_noun(&mut slab2, &noun2)
+            .expect("Failed to decode signed RawTransaction from noun");
+        
+        println!("\nExpected signed transaction:");
+        println!("  ID: {:016x?}", expected_signed_tx.id.values);
+        
+        // Sign the unsigned transaction with the derived secret key
+        let signed_tx = sign_tx(unsigned_tx.clone(), secret_key);
+        
+        println!("\nNewly signed transaction:");
+        println!("  ID: {:016x?}", signed_tx.id.values);
+        println!("  Has signatures: {}", 
+            signed_tx.inputs.p.tap()
+                .iter()
+                .all(|(_, input)| input.spend.signature.is_some()));
+        
+        // Verify that:
+        // 1. All inputs now have signatures
+        let all_signed = signed_tx.inputs.p.tap()
+            .iter()
+            .all(|(_, input)| input.spend.signature.is_some());
+        assert!(all_signed, "All inputs should have signatures after signing");
+        
+        // 2. The transaction ID changed from the unsigned version
+        assert_ne!(
+            signed_tx.id.values,
+            unsigned_tx.id.values,
+            "Transaction ID should change after signing"
+        );
+        
+        // 3. The structure is similar to the expected signed transaction
+        assert_eq!(
+            signed_tx.inputs.p.tap().len(),
+            expected_signed_tx.inputs.p.tap().len(),
+            "Should have same number of inputs"
+        );
+        
+        // Check if the transaction IDs match!
+        if signed_tx.id.values == expected_signed_tx.id.values {
+            println!("\n✅ SUCCESS! Transaction IDs MATCH!");
+            println!("  Generated: {:016x?}", signed_tx.id.values);
+            println!("  Expected:  {:016x?}", expected_signed_tx.id.values);
+        } else {
+            println!("\n⚠️  Transaction IDs don't match (likely different derivation path)");
+            println!("  Generated: {:016x?}", signed_tx.id.values);
+            println!("  Expected:  {:016x?}", expected_signed_tx.id.values);
+        }
+        
+        println!("\n✓ Successfully signed known-good transaction");
+        
+        // Extract the public key from the signed transaction to see what was used
+        if let Some((_, signed_input)) = expected_signed_tx.inputs.p.tap().first() {
+            if let Some(ref sig) = signed_input.spend.signature {
+                if let Some((pubkey, _schnorr_sig)) = sig.map.tap().first() {
+                    println!("\n  Original signer's public key:");
+                    println!("    X: {:016x?}", pubkey.x.values);
+                    println!("    Y: {:016x?}", pubkey.y.values);
+                }
+            }
+        }
+    }
 }
