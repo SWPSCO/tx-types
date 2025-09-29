@@ -185,8 +185,9 @@ async fn build_inputs_with_fee(input_notes: Vec<NNote>, payouts: Vec<Payout>, fe
         return Err(anyhow::anyhow!("Selected inputs cannot cover all payouts + fees"));
     }
 
-    let name = tx_types::tx_to_noun::generate_tx_id(inputs.clone()).to_b58();
-    Ok((Inputs { p: inputs }, name))
+    let inputs_struct = Inputs { p: inputs };
+    let name = tx_types::tx_to_noun::generate_tx_id(inputs_struct.clone()).to_b58();
+    Ok((inputs_struct, name))
 }
 
 async fn build_spend_from_payouts(note: NNote, payouts: Vec<Payout>, fee_per_input: u64)

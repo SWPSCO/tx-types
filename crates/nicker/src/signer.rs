@@ -33,7 +33,7 @@ pub enum SecretSource<'a> {
 
 /// Sign a Transaction in-memory, return signed jam bytes.
 pub fn sign_transaction(mut tx: Transaction, secret: SecretSource) -> Result<Bytes, String> {
-    let tx_id: Hash = tx_types::tx_to_noun::generate_tx_id(tx.p.p.clone());
+    let tx_id: Hash = tx_types::tx_to_noun::generate_tx_id(tx_types::Inputs { p: tx.p.p.clone() });
 
     // Master secret
     let (sk_be32, _cc) = match secret {
