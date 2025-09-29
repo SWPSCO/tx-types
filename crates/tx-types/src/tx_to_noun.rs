@@ -132,8 +132,8 @@ pub fn create_raw_transaction_noun(input_list: Vec<Input>) -> NounSlab {
 }
 
 /// Generate a transaction ID from inputs ZMap
-pub fn generate_tx_id(inputs_zmap: ZMap<NName, Input>) -> Hash { 
-    let input_list: Vec<Input> = inputs_zmap.tap().iter().map(|(_, input)| input.clone()).collect();
+pub fn generate_tx_id(inputs: Inputs) -> Hash { 
+    let input_list: Vec<Input> = inputs.p.tap().iter().map(|(_, input)| input.clone()).collect();
 
     // Step 2: Calculate total fees by summing all input fees
     let total_fees_value: u64 = input_list
@@ -146,7 +146,7 @@ pub fn generate_tx_id(inputs_zmap: ZMap<NName, Input>) -> Hash {
     
     // Step 4: Compute tx-id using the hashable implementations from tx/hashing
     // This uses the ToHashable trait implementations and proper TIP5 hashing
-    compute_tx_id(&inputs_zmap, &timelock_range, total_fees_value)
+    compute_tx_id(&inputs.p, &timelock_range, total_fees_value)
 }
 
 // Note: We now use TimelockRange's NounEncode trait implementation directly

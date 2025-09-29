@@ -28,3 +28,7 @@ pub mod test_base58_conversion;
 pub mod signing_test;
 #[cfg(test)]
 pub mod test_cheetah_pub_from_sk;
+#[cfg(test)]
+pub mod test_sig_hashable;
+#[cfg(test)]
+pub mod test_spend_sig_hash;
