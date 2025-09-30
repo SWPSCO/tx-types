@@ -47,7 +47,7 @@ pub fn hash_noun_varlen(data: &[u8]) -> Hash {
     };
     
     // Use the real TIP5 hasher
-    let result = Tip5Hasher::hash_noun(noun).unwrap_or_else(|_e| {
+    let result = Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_e| {
         // eprintln!("  -> TIP5 hash failed: {:?}", e);
         Hash { values: [0; 5] }
     });
@@ -132,7 +132,7 @@ pub fn hash_hashable(h: &Hashable) -> Hash {
             };
             
             // Hash the list using real TIP5
-            Tip5Hasher::hash_noun(list_noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            Tip5Hasher::hash_noun_varlen(list_noun).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
 }

@@ -377,7 +377,7 @@ impl SchnorrPubkey {
         // This is semantically equivalent to Hoon's (hash [%leaf form]).
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun(noun)
+        let hash = Tip5Hasher::hash_noun_varlen(noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         Hashable::Hash(hash)
     }
@@ -506,7 +506,7 @@ impl Lock {
             // Hash each pubkey
             let mut slab: NounSlab = NounSlab::new();
             let pubkey_noun = pubkey.to_noun(&mut slab);
-            let pubkey_hash = Tip5Hasher::hash_noun(pubkey_noun)
+            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun)
                 .unwrap_or_else(|_| Hash { values: [0; 5] });
             Hashable::Hash(pubkey_hash)
         });
@@ -668,7 +668,7 @@ pub struct NNoteHead {
     pub timelock: Timelock,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct T8 {
     pub values: [u64; 8],
 }
@@ -699,7 +699,7 @@ impl SchnorrSignature {
         // This is semantically equivalent to Hoon's (hash [%leaf form]).
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun(noun)
+        let hash = Tip5Hasher::hash_noun_varlen(noun)
             .unwrap_or_else(|_| Hash { values: [0; 5] });
         Hashable::Hash(hash)
     }
@@ -774,6 +774,45 @@ impl Seed {
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
+
+    pub fn to_sig_hashable(&self) -> Hashable {
+        // Seed sig-hashable from Hoon (including output-source):
+        // :*  (hashable-unit:source output-source.sed)
+        //     (hashable:lock recipient.sed)
+        //     (hashable:timelock-intent timelock-intent.sed)
+        //     leaf+gift.sed
+        //     hash+parent-hash.sed
+        // ==
+
+        // This is a 5-element structure represented as nested cells
+        // First element is the hashable-unit for output-source
+        let output_source_hashable = match &self.output_source {
+            None => Hashable::null(),  // ?~  s  leaf+~
+            Some(source) => {
+                // :-  leaf+~
+                // (hashable u.s)
+                Hashable::cell(
+                    Hashable::null(),
+                    source.to_hashable()
+                )
+            }
+        };
+
+        // Create the 5-tuple structure
+        Hashable::cell(
+            output_source_hashable,
+            Hashable::cell(
+                self.recipient.to_hashable(),
+                Hashable::cell(
+                    to_hashable_timelock_intent(&self.timelock_intent),
+                    Hashable::cell(
+                        Hashable::leaf_u64(self.gift.value),
+                        Hashable::Hash(self.parent_hash.clone())
+                    )
+                )
+            )
+        )
+    }
 }
 
 // Seeds structure
@@ -790,11 +829,26 @@ impl Seeds {
         // :+  (hashable:seed n.form)
         //   $(form l.form)
         // $(form r.form)
-        
+
         // Use ZSet's to_hashable method which properly traverses the tree
         self.set.to_hashable(|seed| seed.to_hashable())
     }
-    
+
+    pub fn to_sig_hashable(&self) -> Hashable {
+        // Seeds sig-hashable is a z-set of Seed using sig-hashable
+        // From Hoon:
+        // ++  sig-hashable
+        //   |=  =form
+        //   ^-  hashable:tip5
+        //   ?~  form  leaf+form
+        //   :+  (sig-hashable:seed n.form)
+        //     $(form l.form)
+        //   $(form r.form)
+
+        // Use ZSet's to_hashable method with sig_hashable for each seed
+        self.set.to_hashable(|seed| seed.to_sig_hashable())
+    }
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
@@ -828,6 +882,23 @@ impl Spend {
     
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
+    }
+
+    pub fn sig_hash(&self) -> Hash {
+        // From Hoon tx-engine.hoon:
+        // ++  sig-hash
+        //   |=  sen=form
+        //   ^-  hash
+        //   %-  hash-hashable:tip5
+        //   [(sig-hashable:seeds seeds.sen) leaf+fee.sen]
+
+        // Create the hashable for signature verification
+        let sig_hashable = Hashable::cell(
+            self.seeds.to_sig_hashable(),
+            Hashable::leaf_u64(self.fee.value)
+        );
+
+        hash_hashable(&sig_hashable)
     }
 }
 

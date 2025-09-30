@@ -12,11 +12,13 @@ pub mod transaction_types;
 pub mod tx_to_noun;
 pub mod u320;
 pub mod block_types;
+pub mod signer;
 
 // Submodules
 pub mod hashing;
 pub mod collections;
 pub mod validation;
+pub mod crypto;
 
 
 // Re-export commonly used types from submodules
@@ -30,6 +32,10 @@ pub use hashing::{
 pub use collections::{zmap::ZMap, zset::{ZSet, DorTip}};
 
 pub use validation::{validator::{TransactionValidator, TransactionValidationError}};
+
+pub use crypto::{TransactionSigner, CryptoError};
+
+pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 
 // Re-export main transaction types
 pub use transaction_types::*;
