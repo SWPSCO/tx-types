@@ -95,7 +95,7 @@ impl Hash {
     /// Implements the Hoon from-b58 function:
     /// ++  from-b58  |=(=cord `form`(atom-to-digest:tip5 (de-base58 (trip cord))))
     pub fn from_b58(base58: &str) -> Result<Self, String> {
-        use crate::u320::U320;
+        use crate::hashing::u320::U320;
         
         let n = U320::from_base58(base58)
             .map_err(|e| format!("Invalid base58: {}", e))?;

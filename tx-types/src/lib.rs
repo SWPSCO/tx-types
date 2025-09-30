@@ -10,7 +10,6 @@
 // Core modules in root
 pub mod transaction_types;
 pub mod tx_to_noun;
-pub mod u320;
 pub mod block_types;
 pub mod signer;
 
@@ -46,5 +45,3 @@ pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, Simp
 // Test modules
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod u320_test;
