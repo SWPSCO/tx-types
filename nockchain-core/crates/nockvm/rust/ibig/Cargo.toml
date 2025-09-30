@@ -56,10 +56,10 @@ bench = false
 test = false
 doctest = false
 
-[[bench]]
-name = "benchmarks"
-required-features = ["rand"]
-harness = false
+# [[bench]]
+# name = "benchmarks"
+# required-features = ["rand"]
+# harness = false
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

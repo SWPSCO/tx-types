@@ -1,0 +1,26 @@
+[package]
+name = "tx-types"
+version.workspace = true
+edition.workspace = true
+authors = ["SWPSCO"]
+description = "Transaction types and utilities for Nockchain"
+repository = "https://github.com/SWPSCO/tx-types"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+noun-serde = { workspace = true }
+nockapp = { workspace = true }
+nockvm = { workspace = true }
+nockchain-libp2p-io = { workspace = true }
+zkvm-jetpack = { workspace = true }
+ibig = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+either = { workspace = true }
+num-bigint = { workspace = true }
+bs58 = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+
+[features]
+tracy = []
