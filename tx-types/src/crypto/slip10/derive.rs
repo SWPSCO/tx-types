@@ -83,14 +83,14 @@ impl ExtendedKey {
     /// Derive a child key at the given index
     pub fn derive_child(&self, index: u32) -> Result<Self> {
         let n = cheetah_order();
-        
+
         if self.private_key.is_none() && Self::is_hardened(index) {
             return Err(CryptoError::DerivationFailed);
         }
-        
-        // Prepare HMAC input
+
+        // Prepare base HMAC input
         let mut hmac_input = Vec::with_capacity(37);
-        
+
         if Self::is_hardened(index) {
             // Hardened derivation: HMAC(chain_code, 0x00 || private_key || index)
             hmac_input.push(0x00);
@@ -106,24 +106,37 @@ impl ExtendedKey {
             }
         }
         hmac_input.extend_from_slice(&Self::serialize_u32(index));
-        
-        // Compute HMAC-SHA512
-        let mut mac = HmacSha512::new_from_slice(&self.chain_code)
-            .map_err(|_| CryptoError::DerivationFailed)?;
-        mac.update(&hmac_input);
-        let i = mac.finalize().into_bytes();
-        
-        // Split result
-        let mut il = [0u8; 32];
-        let mut ir = [0u8; 32];
-        il.copy_from_slice(&i[..32]);
-        ir.copy_from_slice(&i[32..]);
-        
-        // Check if il is valid
-        let il_int = UBig::from_be_bytes(&il);
-        if il_int.is_zero() || il_int >= n {
-            return Err(CryptoError::DerivationFailed);
-        }
+
+        // SLIP-10 retry logic: if IL is invalid (zero or >= curve_order), retry with hash of previous output
+        const MAX_RETRIES: u32 = 100;
+        let mut current_input = hmac_input.clone();
+        let (il, ir, il_int) = loop {
+            // Compute HMAC-SHA512
+            let mut mac = HmacSha512::new_from_slice(&self.chain_code)
+                .map_err(|_| CryptoError::DerivationFailed)?;
+            mac.update(&current_input);
+            let i = mac.finalize().into_bytes();
+
+            // Split result
+            let mut il_temp = [0u8; 32];
+            let mut ir_temp = [0u8; 32];
+            il_temp.copy_from_slice(&i[..32]);
+            ir_temp.copy_from_slice(&i[32..]);
+
+            // Check if il is valid
+            let il_int_temp = UBig::from_be_bytes(&il_temp);
+            if !il_int_temp.is_zero() && il_int_temp < n {
+                // Valid IL found
+                break (il_temp, ir_temp, il_int_temp);
+            }
+
+            // Invalid IL, retry per SLIP-10: use I (the entire 64-byte HMAC output) as new input
+            if current_input.len() >= MAX_RETRIES as usize * 64 {
+                // Safety limit to prevent infinite loops
+                return Err(CryptoError::DerivationFailed);
+            }
+            current_input = i.to_vec();
+        };
         
         // Derive child private key if parent has private key
         let child_private_key = if let Some(parent_private) = self.private_key {
