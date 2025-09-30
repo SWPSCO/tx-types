@@ -6,7 +6,8 @@
       "Bash(cargo build:*)",
       "Bash(cargo check:*)",
       "Bash(git commit:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []
