@@ -215,9 +215,9 @@ pub fn sign_tx(
     
     // Recalculate the transaction ID with the signed inputs
     tx.id = compute_tx_id(
-        &tx.inputs.p,
+        &tx.inputs,
         &tx.timelock_range,
-        tx.total_fees.value
+        tx.total_fees
     );
     
     tx

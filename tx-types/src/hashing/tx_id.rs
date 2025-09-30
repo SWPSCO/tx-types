@@ -3,8 +3,7 @@
 
 use super::hashable::Hashable;
 use super::hasher::{hash_hashable, digest_to_base58};
-use crate::collections::ZMap;
-use crate::transaction_types::{Hash, NName, Input, TimelockRange, to_hashable_timelock_intent};
+use crate::transaction_types::{Hash, Inputs, Coins, TimelockRange, to_hashable_timelock_intent};
 
 /// Compute the transaction ID from components
 /// Mirrors Hoon's compute-id function:
@@ -18,32 +17,32 @@ use crate::transaction_types::{Hash, NName, Input, TimelockRange, to_hashable_ti
 ///   leaf+total-fees.raw
 /// ```
 pub fn compute_tx_id(
-    inputs: &ZMap<NName, Input>,
+    inputs: &Inputs,
     timelock_range: &TimelockRange,
-    total_fees: u64,
+    total_fees: Coins,
 ) -> Hash {
     // Build the hashable structure as a triple
     let hashable = Hashable::triple(
         // Convert inputs z-map to hashable
-        inputs.to_hashable(
+        inputs.p.to_hashable(
             |nname| nname.to_hashable(),
             |input| input.to_hashable(),
         ),
         // Convert timelock-range to hashable
         timelock_range.to_hashable(),
         // Total fees as leaf
-        Hashable::leaf_u64(total_fees),
+        Hashable::leaf_u64(total_fees.value),
     );
-    
+
     // Hash the structure
     hash_hashable(&hashable)
 }
 
 /// Compute tx-id and return as base58 string
 pub fn compute_tx_id_base58(
-    inputs: &ZMap<NName, Input>,
+    inputs: &Inputs,
     timelock_range: &TimelockRange,
-    total_fees: u64,
+    total_fees: Coins,
 ) -> String {
     let digest = compute_tx_id(inputs, timelock_range, total_fees);
     digest_to_base58(&digest)
@@ -56,10 +55,10 @@ mod tests {
     #[test]
     fn test_compute_tx_id() {
         // Create a simple z-map with one input
-        use crate::transaction_types::{NNote, NNoteHead, Source, Lock, Coins, Spend, PageNumber, Timelock, TimelockIntent, Seeds};
-        use crate::collections::ZSet;
-        
-        let mut inputs = ZMap::new();
+        use crate::transaction_types::{NName, Input, NNote, NNoteHead, Source, Lock, Coins, Spend, PageNumber, Timelock, TimelockIntent, Seeds};
+        use crate::collections::{ZSet, ZMap};
+
+        let mut inputs_map = ZMap::new();
         let nname = NName {
             p: vec![
                 Hash { values: [1, 2, 3, 4, 5] },
@@ -87,21 +86,22 @@ mod tests {
                 fee: Coins { value: 10 },
             },
         };
-        inputs.put(nname, input);
-        
+        inputs_map.put(nname, input);
+        let inputs = Inputs { p: inputs_map };
+
         let timelock_range = TimelockRange {
             min: None,
             max: None,
         };
-        
-        let total_fees = 100;
-        
+
+        let total_fees = Coins { value: 100 };
+
         // Compute tx-id
         let tx_id = compute_tx_id(&inputs, &timelock_range, total_fees);
-        
+
         // Check we got a digest
         assert_eq!(tx_id.values.len(), 5);
-        
+
         // Get base58 representation
         let base58 = compute_tx_id_base58(&inputs, &timelock_range, total_fees);
         assert!(!base58.is_empty());

@@ -10,14 +10,14 @@ use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
 
 
-// Coin name structure  
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// Coin name structure
+#[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Coins {
    pub value: u64
 }
 
-// page number name structure  
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// page number name structure
+#[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageNumber {
    pub value: u64
 }

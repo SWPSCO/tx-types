@@ -90,27 +90,28 @@ pub fn create_raw_transaction_noun(input_list: Vec<Input>) -> NounSlab {
     let inputs = Inputs { p: inputs_zmap.clone() };
     
     // Step 2: Calculate total fees by summing all input fees
-    let total_fees_value: u64 = input_list
-        .iter()
-        .map(|input| input.spend.fee.value)
-        .sum();
-    
+    let total_fees = Coins {
+        value: input_list
+            .iter()
+            .map(|input| input.spend.fee.value)
+            .sum()
+    };
+
     // Step 3: Calculate timelock range from all inputs
     let timelock_range = calculate_timelock_range(&input_list);
-    
+
     // Step 4: Compute tx-id using the hashable implementations from tx/hashing
     // This uses the to_hashable() method implementations and proper TIP5 hashing
-    let tx_id = compute_tx_id(&inputs.p, &timelock_range, total_fees_value);
-    
+    let tx_id = compute_tx_id(&inputs, &timelock_range, total_fees);
+
     // Step 5: Build the raw_tx_without_id structure as nouns
     // Create inputs noun using NounEncode trait from Inputs struct
     let inputs_noun = inputs.to_noun(&mut slab);
-    
+
     // Create timelock noun
     let timelock_noun = timelock_range.to_noun(&mut slab);
-    
+
     // Create total fees noun using Coins NounEncode trait
-    let total_fees = Coins { value: total_fees_value };
     let total_fees_noun = total_fees.to_noun(&mut slab);
     
     // Assemble raw_tx_without_id: [inputs timelock-range total-fees]
@@ -298,9 +299,10 @@ mod tests {
         // Also compute using compute_tx_id function for comparison
         let mut inputs_zmap = ZMap::new();
         inputs_zmap.put(input.note.name.clone(), input.clone());
+        let inputs = Inputs { p: inputs_zmap };
         let timelock_range = calculate_timelock_range(&input_list);
-        let total_fees = input.spend.fee.value;
-        let computed_tx_id = compute_tx_id(&inputs_zmap, &timelock_range, total_fees);
+        let total_fees = input.spend.fee;
+        let computed_tx_id = compute_tx_id(&inputs, &timelock_range, total_fees);
         
         // Expected tx_id from Hoon
         let expected_tx_id = Hash { values: [
@@ -1002,8 +1004,10 @@ mod tests {
         }
         let inputs = Inputs { p: inputs_zmap };
         let timelock_range = calculate_timelock_range(&input_list);
-        let total_fees: u64 = input_list.iter().map(|i| i.spend.fee.value).sum();
-        let computed_tx_id = compute_tx_id(&inputs.p, &timelock_range, total_fees);
+        let total_fees = Coins {
+            value: input_list.iter().map(|i| i.spend.fee.value).sum()
+        };
+        let computed_tx_id = compute_tx_id(&inputs, &timelock_range, total_fees);
         
         // Expected tx_id from Hoon
         let expected_tx_id = Hash { values: [
@@ -1438,7 +1442,7 @@ mod tests {
         };
         
         // Build the ZMap with all three inputs
-        let mut inputs_zmap: ZMap<NName, Input> = ZMap::new();
+        let mut inputs_zmap = ZMap::new();
         inputs_zmap.put(nname1, input1);
         inputs_zmap.put(nname2, input2);
         inputs_zmap.put(nname3, input3);

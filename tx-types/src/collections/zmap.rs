@@ -1273,8 +1273,8 @@ mod tests {
             )
         ];
         
-        // Build the ZMap
-        let mut zmap: ZMap<NName, Input> = ZMap::new();
+        // Build the ZMap (using raw ZMap for testing)
+        let mut zmap = ZMap::new();
         for (name, input) in inputs {
             zmap.put(name, input);
         }
@@ -1448,11 +1448,11 @@ mod tests {
         };
         println!("Expected hash from Hoon: {:x?}", expected_hash.values);
         
-        // Test that empty ZMap produces appropriate hashable
+        // Test that empty ZMap produces appropriate hashable (using raw ZMap for testing)
         let empty_zmap: ZMap<NName, Input> = ZMap::new();
         let empty_hashable = empty_zmap.to_hashable(
-            |k| k.to_hashable(),
-            |v| v.to_hashable(),
+            |k: &NName| k.to_hashable(),
+            |v: &Input| v.to_hashable(),
         );
         
         match empty_hashable {
