@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/tx-types",
-    "crates/nicker",
 ]
 resolver = "2"
 
