@@ -922,26 +922,43 @@ mod tests {
             "Should have same number of inputs"
         );
         
-        // Check if the transaction IDs match!
-        if signed_tx.id.values == expected_signed_tx.id.values {
-            println!("\n✅ SUCCESS! Transaction IDs MATCH!");
-            println!("  Generated: {:016x?}", signed_tx.id.values);
-            println!("  Expected:  {:016x?}", expected_signed_tx.id.values);
-        } else {
-            println!("\n⚠️  Transaction IDs don't match (likely different derivation path)");
-            println!("  Generated: {:016x?}", signed_tx.id.values);
-            println!("  Expected:  {:016x?}", expected_signed_tx.id.values);
-        }
+        // Assert that the transaction IDs match!
+        println!("\nComparing transaction IDs:");
+        println!("  Generated: {:016x?}", signed_tx.id.values);
+        println!("  Expected:  {:016x?}", expected_signed_tx.id.values);
+
+        assert_eq!(
+            signed_tx.id.values,
+            expected_signed_tx.id.values,
+            "Transaction ID after signing should match expected signed transaction ID"
+        );
+
+        println!("\n✅ SUCCESS! Transaction IDs MATCH!");
         
         println!("\n✓ Successfully signed known-good transaction");
         
-        // Extract the public key from the signed transaction to see what was used
+        // Extract the signature details from the expected signed transaction
         if let Some((_, signed_input)) = expected_signed_tx.inputs.p.tap().first() {
             if let Some(ref sig) = signed_input.spend.signature {
-                if let Some((pubkey, _schnorr_sig)) = sig.map.tap().first() {
-                    println!("\n  Original signer's public key:");
-                    println!("    X: {:016x?}", pubkey.x.values);
-                    println!("    Y: {:016x?}", pubkey.y.values);
+                if let Some((pubkey, schnorr_sig)) = sig.map.tap().first() {
+                    println!("\n  Expected signature from reference data:");
+                    println!("    Public key X: {:016x?}", pubkey.x.values);
+                    println!("    Public key Y: {:016x?}", pubkey.y.values);
+                    println!("    Challenge:    {:016x?}", schnorr_sig.chal.values.values);
+                    println!("    Signature s:  {:016x?}", schnorr_sig.sig.values.values);
+                }
+            }
+        }
+
+        // Extract the signature details from our newly signed transaction
+        if let Some((_, signed_input)) = signed_tx.inputs.p.tap().first() {
+            if let Some(ref sig) = signed_input.spend.signature {
+                if let Some((pubkey, schnorr_sig)) = sig.map.tap().first() {
+                    println!("\n  Generated signature from our code:");
+                    println!("    Public key X: {:016x?}", pubkey.x.values);
+                    println!("    Public key Y: {:016x?}", pubkey.y.values);
+                    println!("    Challenge:    {:016x?}", schnorr_sig.chal.values.values);
+                    println!("    Signature s:  {:016x?}", schnorr_sig.sig.values.values);
                 }
             }
         }

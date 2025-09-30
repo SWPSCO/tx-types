@@ -32,7 +32,7 @@ pub use collections::{zmap::ZMap, zset::{ZSet, DorTip}};
 
 pub use validation::{validator::{TransactionValidator, TransactionValidationError}};
 
-pub use crypto::{TransactionSigner, CryptoError};
+pub use crypto::CryptoError;
 
 pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 
