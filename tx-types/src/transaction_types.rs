@@ -2,6 +2,9 @@ use crate::collections::{ZMap, ZSet};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
+use crate::crypto::ser_a_pt;
+use bs58;
+use num_bigint::BigUint;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
 use nockapp::Noun;
@@ -116,9 +119,6 @@ impl Hash {
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(has=form `cord`(crip (en-base58 (digest-to-atom:tip5 has))))
     pub fn to_b58(&self) -> String {
-        use bs58;
-        use num_bigint::BigUint;
-
         // The Goldilocks prime
         const GOLDILOCKS_PRIME: u64 = 0xFFFF_FFFF_0000_0001;
         let p = BigUint::from(GOLDILOCKS_PRIME);
@@ -432,31 +432,11 @@ impl SchnorrPubkey {
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
     pub fn to_b58(&self) -> String {
-        use bs58;
-        use num_bigint::BigUint;
-
-        // Build the encoding: x coordinates + y coordinates + infinity flag
-        let mut result = BigUint::from(0u32);
-
-        // Add x coordinate (most significant)
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.x.values[i]);
-        }
-
-        // Add y coordinate
-        for i in (0..6).rev() {
-            result <<= 64;
-            result |= BigUint::from(self.y.values[i]);
-        }
-
-        // Add infinity flag (least significant bit)
-        result <<= 1;
-        if self.inf {
-            result |= BigUint::from(1u32);
-        }
-
-        bs58::encode(result.to_bytes_be()).into_string()
+        let ser = ser_a_pt(&(
+            self.x.values,
+            self.y.values,
+        ));
+        bs58::encode(ser).into_string()
     }
 }
 
