@@ -9,7 +9,6 @@ license = "MIT/Apache-2.0"
 edition = "2021"
 
 [dependencies]
-
 [dev-dependencies]
-murmur3-sys = { path = "./murmur3-sys" }
-quickcheck = "1.0.3"
+# Optional test harness dependencies are intentionally disabled in this fork to
+# avoid pulling in the native murmur3 bindings during firmware-oriented builds.
