@@ -8,6 +8,7 @@ repository = "https://github.com/SWPSCO/tx-types"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+bytes = { workspace = true }
 noun-serde = { workspace = true }
 nockapp = { workspace = true }
 nockvm = { workspace = true }

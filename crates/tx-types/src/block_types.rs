@@ -8,13 +8,15 @@ use chrono::{DateTime, Utc, TimeZone};
 use num_bigint::BigUint;
 
 use nockvm::noun::{Noun, FullDebugCell};
+use nockapp::noun::slab::NounSlab;
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use bytes::Bytes;
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Page {
     pub digest: Hash,
     // everything below this is what is hashed for the digest: +.page
-    pub pow: Noun,
+    pub pow: Pow,
     // everything below this is what is hashed for the block commitment: +>.page
     pub parent: Hash,
     pub tx_ids: ZSet<Hash>,
@@ -52,6 +54,20 @@ impl Timestamp {
             .single()
             .ok_or_else(|| NounDecodeError::Custom("Invalid timestamp".to_string()))?;
         Ok(Timestamp { value: datetime_utc })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Pow {
+    pub p: Bytes,
+}
+
+impl NounDecode for Pow {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let mut slab: NounSlab = NounSlab::new();
+        slab.copy_into(*noun);
+        let noun_bytes: Bytes = slab.jam();
+        Ok(Pow { p: noun_bytes })
     }
 }
 
