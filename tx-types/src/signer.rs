@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use crate::crypto::cheetah::point::cheetah_pub_from_sk;
+use crate::crypto::cheetah::cheetah_pub_from_sk;
 use crate::crypto::utils::{
     add_mod_n, be32_atom_to_t8_le, be32_lt, is_zero32, mul_mod_n, trunc_g_order_to_be32, CHEETAH_N,
 };
@@ -68,8 +68,8 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
     // 3) Generate challenge using TIP5([R, pubkey, message]) - matches Hoon line 1645-1647
     // Create transcript list: [x.R y.R x.pubkey y.pubkey message ~]
     let chal_digest = hash_transcript_list(&[
-        &r_pt[0],                 // R.x (6 elements)
-        &r_pt[1],                 // R.y (6 elements)
+        &r_pt.0,                  // R.x (6 elements)
+        &r_pt.1,                  // R.y (6 elements)
         &public_key.x.values[..], // pubkey.x (6 elements)
         &public_key.y.values[..], // pubkey.y (6 elements)
         &message.values[..],      // message (5 elements)
@@ -92,10 +92,13 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
     }
 
     // 5) Convert challenge and signature to T8 format for return
-    let chal_t8 = be32_atom_to_t8_le(&chal_be);
-    let sig_t8 = be32_atom_to_t8_le(&s_be);
+    let chal_t8_vals = be32_atom_to_t8_le(&chal_be).values;
+    let sig_t8_vals = be32_atom_to_t8_le(&s_be).values;
 
-    (chal_t8, sig_t8)
+    (
+        T8 { values: chal_t8_vals },
+        T8 { values: sig_t8_vals },
+    )
 }
 
 /// Convert T8 to 32-byte big-endian array
@@ -163,10 +166,10 @@ pub fn sign_tx(mut tx: RawTransaction, secret_key: T8) -> RawTransaction {
     let pk_coords = cheetah_pub_from_sk(secret_key_be);
     let public_key = SchnorrPubkey {
         x: crate::transaction_types::F6LT {
-            values: pk_coords[0],
+            values: pk_coords.0,
         },
         y: crate::transaction_types::F6LT {
-            values: pk_coords[1],
+            values: pk_coords.1,
         },
         inf: false,
     };

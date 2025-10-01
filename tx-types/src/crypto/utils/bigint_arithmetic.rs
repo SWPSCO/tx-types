@@ -1,5 +1,7 @@
 /// Big-endian 32-byte arithmetic operations modulo curve order
-use crate::hashing::hasher::GOLDILOCKS_PRIME as GOLDILOCKS_P;
+use crate::crypto::cheetah::T8;
+
+const GOLDILOCKS_P: u64 = 0xffff_ffff_0000_0001;
 
 /// Group order n as 32-byte big-endian
 pub const CHEETAH_N: [u8; 32] = [
@@ -238,7 +240,7 @@ fn add64_into(acc: &mut [u64; 4], idx: usize, addend: u64) {
 }
 
 /// Convert 32-byte big-endian to T8 format (8x u32 in u64, little-endian byte order)
-pub fn be32_atom_to_t8_le(be: &[u8; 32]) -> crate::transaction_types::T8 {
+pub fn be32_atom_to_t8_le(be: &[u8; 32]) -> T8 {
     let mut le = [0u8; 32];
     for i in 0..32 {
         le[i] = be[31 - i];
@@ -250,7 +252,7 @@ pub fn be32_atom_to_t8_le(be: &[u8; 32]) -> crate::transaction_types::T8 {
             u32::from_le_bytes([le[i * 4 + 0], le[i * 4 + 1], le[i * 4 + 2], le[i * 4 + 3]]) as u64;
         v[i] = w;
     }
-    crate::transaction_types::T8 { values: v }
+    T8 { values: v }
 }
 
 #[cfg(test)]
