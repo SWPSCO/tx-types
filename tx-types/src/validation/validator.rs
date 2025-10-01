@@ -1,13 +1,12 @@
 /// Transaction validation module
-/// 
+///
 /// This module will contain transaction validation logic such as:
 /// - Signature verification
 /// - Input/output balance validation
 /// - Timelock constraint validation
 /// - Fee validation
-/// 
+///
 /// TODO: Implement transaction validation functions
-
 use crate::transaction_types::Transaction;
 
 /// Placeholder for future transaction validation
@@ -15,9 +14,11 @@ pub struct TransactionValidator;
 
 impl TransactionValidator {
     /// Validate a complete transaction
-    /// 
+    ///
     /// TODO: Implement comprehensive transaction validation
-    pub fn validate_transaction(_transaction: &Transaction) -> Result<(), TransactionValidationError> {
+    pub fn validate_transaction(
+        _transaction: &Transaction,
+    ) -> Result<(), TransactionValidationError> {
         // Placeholder implementation
         Ok(())
     }
@@ -41,11 +42,19 @@ pub enum TransactionValidationError {
 impl std::fmt::Display for TransactionValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TransactionValidationError::InvalidSignature(msg) => write!(f, "Invalid signature: {}", msg),
-            TransactionValidationError::InsufficientFunds(msg) => write!(f, "Insufficient funds: {}", msg),
-            TransactionValidationError::InvalidTimelock(msg) => write!(f, "Invalid timelock: {}", msg),
+            TransactionValidationError::InvalidSignature(msg) => {
+                write!(f, "Invalid signature: {}", msg)
+            }
+            TransactionValidationError::InsufficientFunds(msg) => {
+                write!(f, "Insufficient funds: {}", msg)
+            }
+            TransactionValidationError::InvalidTimelock(msg) => {
+                write!(f, "Invalid timelock: {}", msg)
+            }
             TransactionValidationError::InvalidFee(msg) => write!(f, "Invalid fee: {}", msg),
-            TransactionValidationError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+            TransactionValidationError::ValidationError(msg) => {
+                write!(f, "Validation error: {}", msg)
+            }
         }
     }
 }

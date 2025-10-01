@@ -782,4 +782,3 @@ pub fn derive_noun_decode(input: TokenStream) -> TokenStream {
 
     TokenStream::from(expanded)
 }
-

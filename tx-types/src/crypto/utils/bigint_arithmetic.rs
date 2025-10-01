@@ -3,21 +3,21 @@ use crate::hashing::hasher::GOLDILOCKS_PRIME as GOLDILOCKS_P;
 
 /// Group order n as 32-byte big-endian
 pub const CHEETAH_N: [u8; 32] = [
-    0x7a,0xf2,0x59,0x9b,0x3b,0x3f,0x22,0xd0,0x56,0x3f,0xbf,0x0f,0x99,0x0a,0x37,0xb5,
-    0x32,0x7a,0xa7,0x23,0x30,0x15,0x77,0x22,0xd4,0x43,0x62,0x3e,0xae,0xd4,0xac,0xcf,
+    0x7a, 0xf2, 0x59, 0x9b, 0x3b, 0x3f, 0x22, 0xd0, 0x56, 0x3f, 0xbf, 0x0f, 0x99, 0x0a, 0x37, 0xb5,
+    0x32, 0x7a, 0xa7, 0x23, 0x30, 0x15, 0x77, 0x22, 0xd4, 0x43, 0x62, 0x3e, 0xae, 0xd4, 0xac, 0xcf,
 ];
 
-#[inline] 
-pub fn is_zero32(x: &[u8; 32]) -> bool { 
-    x.iter().fold(0u8, |z, &b| z | b) == 0 
+#[inline]
+pub fn is_zero32(x: &[u8; 32]) -> bool {
+    x.iter().fold(0u8, |z, &b| z | b) == 0
 }
 
 #[inline]
 pub fn be32_lt(a: &[u8; 32], b: &[u8; 32]) -> bool {
-    for k in 0..32 { 
-        if a[k] != b[k] { 
-            return a[k] < b[k]; 
-        } 
+    for k in 0..32 {
+        if a[k] != b[k] {
+            return a[k] < b[k];
+        }
     }
     false
 }
@@ -53,56 +53,51 @@ pub fn be32_sub_inplace(a: &mut [u8; 32], b: &[u8; 32]) {
     let mut brw: i16 = 0;
     for k in (0..32).rev() {
         let v = a[k] as i16 - b[k] as i16 - brw;
-        if v < 0 { 
-            a[k] = (v + 256) as u8; 
-            brw = 1; 
-        } else { 
-            a[k] = v as u8; 
-            brw = 0; 
+        if v < 0 {
+            a[k] = (v + 256) as u8;
+            brw = 1;
+        } else {
+            a[k] = v as u8;
+            brw = 0;
         }
     }
 }
 
 #[inline]
 pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    use num_bigint::BigUint;
-    
-    // Convert inputs to BigUint (big-endian)
-    let a_big = BigUint::from_bytes_be(a);
-    let b_big = BigUint::from_bytes_be(b);
-    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
-    
-    // Compute (a + b) mod n
-    let sum = (a_big + b_big) % n_big;
-    
-    // Convert back to 32-byte big-endian array
-    let bytes = sum.to_bytes_be();
-    let mut result = [0u8; 32];
-    let offset = 32_usize.saturating_sub(bytes.len());
-    result[offset..].copy_from_slice(&bytes);
-    
-    result
+    let (mut sum, carry) = add_be32(a, b);
+    if carry == 1 || !be32_lt(&sum, &CHEETAH_N) {
+        be32_sub_inplace(&mut sum, &CHEETAH_N);
+    }
+    sum
 }
 
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    use num_bigint::BigUint;
-    
-    // Convert inputs to BigUint (big-endian)
-    let a_big = BigUint::from_bytes_be(a);
-    let b_big = BigUint::from_bytes_be(b);
-    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
-    
-    // Compute (a * b) mod n
-    let product = (a_big * b_big) % n_big;
-    
-    // Convert back to 32-byte big-endian array
-    let bytes = product.to_bytes_be();
-    let mut result = [0u8; 32];
-    let offset = 32_usize.saturating_sub(bytes.len());
-    result[offset..].copy_from_slice(&bytes);
-    
-    result
+    let mut prod = [0u8; 64];
+    for i in 0..32 {
+        let mut carry: u32 = 0;
+        for j in 0..32 {
+            let ai = a[31 - i] as u32;
+            let bj = b[31 - j] as u32;
+            let k = 63 - (i + j);
+            let t = ai * bj + prod[k] as u32 + carry;
+            prod[k] = (t & 0xff) as u8;
+            carry = t >> 8;
+        }
+        let mut idx = 63 - (i + 32);
+        let mut c = carry;
+        while c != 0 {
+            let t = prod[idx] as u32 + c;
+            prod[idx] = (t & 0xff) as u8;
+            c = t >> 8;
+            if idx == 0 {
+                break;
+            }
+            idx -= 1;
+        }
+    }
+    mod_n_from_be_bytes(&prod)
 }
 
 #[inline]
@@ -184,19 +179,19 @@ pub fn trunc_g_order_to_be32(digest5: [u64; 5]) -> [u8; 32] {
 
     let mut be = [0u8; 32];
     for i in 0..4 {
-        be[8*(3-i) .. 8*(3-i)+8].copy_from_slice(&v[i].to_be_bytes());
+        be[8 * (3 - i)..8 * (3 - i) + 8].copy_from_slice(&v[i].to_be_bytes());
     }
     mod_n_from_be_bytes(&be)
 }
 
 // Helper functions for trunc_g_order_to_be32
-#[inline] 
+#[inline]
 fn mul_u64x64(a: u64, b: u64) -> (u64, u64) {
     let p = (a as u128) * (b as u128);
     ((p & 0xffff_ffff_ffff_ffff) as u64, (p >> 64) as u64)
 }
 
-#[inline] 
+#[inline]
 fn mul_u64_by_u128_to_192(a: u64, hi: u64, lo: u64) -> (u64, u64, u64) {
     let (l0, l1) = mul_u64x64(a, lo);
     let (h0, h1) = mul_u64x64(a, hi);
@@ -204,7 +199,7 @@ fn mul_u64_by_u128_to_192(a: u64, hi: u64, lo: u64) -> (u64, u64, u64) {
     (l0, m, h1 + (carry as u64))
 }
 
-#[inline] 
+#[inline]
 fn mul_u128_by_u64_to_192(hi: u64, lo: u64, b: u64) -> (u64, u64, u64) {
     let (l0, l1) = mul_u64x64(lo, b);
     let (h0, h1) = mul_u64x64(hi, b);
@@ -212,7 +207,7 @@ fn mul_u128_by_u64_to_192(hi: u64, lo: u64, b: u64) -> (u64, u64, u64) {
     (l0, m, h1 + (carry as u64))
 }
 
-#[inline] 
+#[inline]
 fn mul_u64_by_192_to_256(a: u64, w0: u64, w1: u64, w2: u64) -> (u64, u64, u64, u64) {
     let (p0_lo, p0_hi) = mul_u64x64(a, w0);
     let (p1_lo, p1_hi) = mul_u64x64(a, w1);
@@ -225,7 +220,7 @@ fn mul_u64_by_192_to_256(a: u64, w0: u64, w1: u64, w2: u64) -> (u64, u64, u64, u
     (p0_lo, r1, r2a, r3)
 }
 
-#[inline] 
+#[inline]
 fn add64_into(acc: &mut [u64; 4], idx: usize, addend: u64) {
     let (s, c) = acc[idx].overflowing_add(addend);
     acc[idx] = s;
@@ -234,7 +229,9 @@ fn add64_into(acc: &mut [u64; 4], idx: usize, addend: u64) {
         while k < 4 {
             let (s2, c2) = acc[k].overflowing_add(1);
             acc[k] = s2;
-            if !c2 { break; }
+            if !c2 {
+                break;
+            }
             k += 1;
         }
     }
@@ -243,23 +240,18 @@ fn add64_into(acc: &mut [u64; 4], idx: usize, addend: u64) {
 /// Convert 32-byte big-endian to T8 format (8x u32 in u64, little-endian byte order)
 pub fn be32_atom_to_t8_le(be: &[u8; 32]) -> crate::transaction_types::T8 {
     let mut le = [0u8; 32];
-    for i in 0..32 { 
-        le[i] = be[31 - i]; 
+    for i in 0..32 {
+        le[i] = be[31 - i];
     }
 
     let mut v = [0u64; 8];
     for i in 0..8 {
-        let w = u32::from_le_bytes([
-            le[i*4 + 0],
-            le[i*4 + 1],
-            le[i*4 + 2],
-            le[i*4 + 3],
-        ]) as u64;
+        let w =
+            u32::from_le_bytes([le[i * 4 + 0], le[i * 4 + 1], le[i * 4 + 2], le[i * 4 + 3]]) as u64;
         v[i] = w;
     }
     crate::transaction_types::T8 { values: v }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -270,23 +262,21 @@ mod tests {
         // Test with two large 32-byte numbers
         // First number: 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0
         let a: [u8; 32] = [
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+            0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78,
+            0x9A, 0xBC, 0xDE, 0xF0,
         ];
 
         // Second number: 0xFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210
         let b: [u8; 32] = [
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54,
+            0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98,
+            0x76, 0x54, 0x32, 0x10,
         ];
 
         // Compute a * b mod n
         let result = mul_mod_n(&a, &b);
-        
+
         // Print the inputs and result for debugging
         println!("\nTesting mul_mod_n with large numbers:");
         print!("a = 0x");
@@ -294,28 +284,28 @@ mod tests {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         print!("b = 0x");
         for byte in &b {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         print!("CHEETAH_N = 0x");
         for byte in &CHEETAH_N {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         print!("a * b mod n = 0x");
         for byte in &result {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         // Verify result is less than n
         assert!(be32_lt(&result, &CHEETAH_N), "Result should be less than n");
-        
+
         // Test with smaller numbers that we can manually verify
         // a = 1000 (0x3E8)
         let small_a: [u8; 32] = {
@@ -324,7 +314,7 @@ mod tests {
             arr[31] = 0xE8;
             arr
         };
-        
+
         // b = 2000 (0x7D0)
         let small_b: [u8; 32] = {
             let mut arr = [0u8; 32];
@@ -332,9 +322,9 @@ mod tests {
             arr[31] = 0xD0;
             arr
         };
-        
+
         let small_result = mul_mod_n(&small_a, &small_b);
-        
+
         // 1000 * 2000 = 2,000,000 (0x1E8480)
         let expected: [u8; 32] = {
             let mut arr = [0u8; 32];
@@ -343,61 +333,61 @@ mod tests {
             arr[31] = 0x80;
             arr
         };
-        
+
         println!("\nTesting mul_mod_n with small numbers:");
-        println!("1000 * 2000 = {}", u32::from_be_bytes([0, small_result[29], small_result[30], small_result[31]]));
-        
+        println!(
+            "1000 * 2000 = {}",
+            u32::from_be_bytes([0, small_result[29], small_result[30], small_result[31]])
+        );
+
         assert_eq!(small_result, expected, "1000 * 2000 should equal 2,000,000");
-        
+
         // Test commutativity: a * b = b * a (mod n)
         let result_ba = mul_mod_n(&b, &a);
         assert_eq!(result, result_ba, "Multiplication should be commutative");
-        
+
         println!("✓ mul_mod_n tests passed!");
     }
-    
+
     #[test]
     fn test_compare_mul_mod_n_implementations() {
         // Test with the same large numbers from Hoon
         let a: [u8; 32] = [
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+            0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12, 0x34, 0x56, 0x78,
+            0x9A, 0xBC, 0xDE, 0xF0,
         ];
 
         let b: [u8; 32] = [
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54,
+            0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0xFE, 0xDC, 0xBA, 0x98,
+            0x76, 0x54, 0x32, 0x10,
         ];
-        
+
         // Expected result from Hoon
         // 0x6b050596453169d3ddcc7af2776cb4a30223c90de6163a9a2ea6897206afcb6a
         let expected: [u8; 32] = [
-            0x6b, 0x05, 0x05, 0x96, 0x45, 0x31, 0x69, 0xd3,
-            0xdd, 0xcc, 0x7a, 0xf2, 0x77, 0x6c, 0xb4, 0xa3,
-            0x02, 0x23, 0xc9, 0x0d, 0xe6, 0x16, 0x3a, 0x9a,
-            0x2e, 0xa6, 0x89, 0x72, 0x06, 0xaf, 0xcb, 0x6a,
+            0x6b, 0x05, 0x05, 0x96, 0x45, 0x31, 0x69, 0xd3, 0xdd, 0xcc, 0x7a, 0xf2, 0x77, 0x6c,
+            0xb4, 0xa3, 0x02, 0x23, 0xc9, 0x0d, 0xe6, 0x16, 0x3a, 0x9a, 0x2e, 0xa6, 0x89, 0x72,
+            0x06, 0xaf, 0xcb, 0x6a,
         ];
-        
+
         // Test with updated implementation
         let result = mul_mod_n(&a, &b);
-        
+
         println!("\nTesting mul_mod_n with BigUint implementation:");
         print!("Expected (Hoon): 0x");
         for byte in &expected {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         print!("Result:          0x");
         for byte in &result {
             print!("{:02x}", byte);
         }
         println!();
-        
+
         // Check if result matches expected
         assert_eq!(result, expected, "mul_mod_n should match Hoon result");
     }

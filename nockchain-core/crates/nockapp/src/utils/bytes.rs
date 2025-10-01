@@ -1,4 +1,5 @@
 use bytes::Bytes;
+
 use crate::Result;
 
 pub trait ToBytes {
@@ -34,7 +35,10 @@ where
     {
         let mut data = T::to_bytes(self)?;
         if data.len() > size {
-            return Err(crate::NockAppError::ConversionError(format!("Data too large for {} bytes", size)));
+            return Err(crate::NockAppError::ConversionError(format!(
+                "Data too large for {} bytes",
+                size
+            )));
         }
         data.resize(size, 0);
         Ok(data)
@@ -42,11 +46,12 @@ where
 
     fn to_u64(&self) -> Result<u64> {
         let bytes = T::to_bytes(self)?;
-        let array: [u8; 8] = bytes.try_into()
-            .map_err(|_| crate::NockAppError::ConversionError("Failed to convert to u64".to_string()))?;
+        let array: [u8; 8] = bytes.try_into().map_err(|_| {
+            crate::NockAppError::ConversionError("Failed to convert to u64".to_string())
+        })?;
         Ok(u64::from_le_bytes(array))
     }
-    
+
     fn as_bytes(&self) -> Result<Bytes> {
         let bytes = T::to_bytes(self)?;
         Ok(Bytes::from(bytes))

@@ -14,12 +14,7 @@ use crate::Result;
 /// # Returns
 ///
 /// Result containing the slammed result or an error.
-pub fn slam(
-    context: &mut Context,
-    arvo: Noun,
-    axis: u64,
-    ovo: Noun,
-) -> Result<Noun> {
+pub fn slam(context: &mut Context, arvo: Noun, axis: u64, ovo: Noun) -> Result<Noun> {
     let stack = &mut context.stack;
     let pul = T(stack, &[D(9), D(axis), D(0), D(2)]);
     let sam = T(stack, &[D(6), D(0), D(7)]);

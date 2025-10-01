@@ -263,4 +263,3 @@ impl<'a> From<&'a BPolySliceMut<'_>> for BPolySlice<'a> {
         Self(p.0)
     }
 }
-

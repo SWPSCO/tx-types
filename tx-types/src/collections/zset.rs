@@ -1,3 +1,7 @@
+use crate::hashing::tip5::Tip5Hasher;
+use ibig::UBig;
+use nockvm::noun::D;
+use noun_serde::NounEncode;
 /// Z-Set: A deterministic self-balancing binary search tree (treap) for sets
 /// Based on the Hoon z-set implementation from nockchain
 ///
@@ -5,13 +9,8 @@
 /// - Ordering: gor-tip (single hash comparison)
 /// - Balancing: mor-tip (double hash comparison)
 /// - Fallback: dor-tip (structural comparison)
-
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use nockvm::noun::D;
-use noun_serde::NounEncode;
-use ibig::UBig;
-use crate::hashing::tip5::Tip5Hasher;
 
 /// A z-set is a self-balancing binary search tree for sets
 #[derive(Clone)]
@@ -49,8 +48,8 @@ impl<T: Ord> DorTip for T {
     }
 }
 
-impl<T> ZSet<T> 
-where 
+impl<T> ZSet<T>
+where
     T: NounEncode + DorTip + Clone + Debug + PartialEq,
 {
     /// Create a new empty z-set
@@ -62,18 +61,18 @@ where
     pub fn put(&mut self, value: T) {
         self.root = Self::put_recursive(self.root.take(), value);
     }
-    
+
     /// Insert a value with debug output
-    pub fn put_with_debug(&mut self, value: T) 
-    where 
+    pub fn put_with_debug(&mut self, value: T)
+    where
         T: Debug,
     {
         println!("Inserting value: {:?}", value);
         self.root = Self::put_recursive_debug(self.root.take(), value, 0);
     }
-    
+
     /// Public debug structure method
-    pub fn debug_structure(&self) -> String 
+    pub fn debug_structure(&self) -> String
     where
         T: Debug,
     {
@@ -82,7 +81,7 @@ where
             Some(node) => Self::debug_node_structure_internal(node, 1),
         }
     }
-    
+
     /// Internal debug structure method (always available, not just in tests)
     fn debug_structure_internal(&self) -> String {
         match &self.root {
@@ -90,12 +89,12 @@ where
             Some(node) => Self::debug_node_structure_internal(node, 1),
         }
     }
-    
+
     fn debug_node_structure_internal(node: &Box<Node<T>>, indent: usize) -> String {
         let spaces = "  ".repeat(indent);
         let value_str = format!("{:?}", node.value);
         let mut result = format!("{}Node({})\n", spaces, value_str);
-        
+
         match &node.left {
             None => result.push_str(&format!("{}  L: null\n", spaces)),
             Some(left) => {
@@ -103,7 +102,7 @@ where
                 result.push_str(&Self::debug_node_structure_internal(left, indent + 2));
             }
         }
-        
+
         match &node.right {
             None => result.push_str(&format!("{}  R: null", spaces)),
             Some(right) => {
@@ -111,17 +110,21 @@ where
                 result.push_str(&Self::debug_node_structure_internal(right, indent + 2));
             }
         }
-        
+
         result
     }
 
     /// Recursive insertion with debug output
-    fn put_recursive_debug(node: Option<Box<Node<T>>>, value: T, depth: usize) -> Option<Box<Node<T>>> 
+    fn put_recursive_debug(
+        node: Option<Box<Node<T>>>,
+        value: T,
+        depth: usize,
+    ) -> Option<Box<Node<T>>>
     where
         T: Debug,
     {
         let indent = "  ".repeat(depth);
-        
+
         match node {
             None => {
                 println!("{}Creating new node for {:?}", indent, value);
@@ -129,8 +132,11 @@ where
             }
             Some(mut n) => {
                 let cmp = Self::gor_tip(&value, &n.value);
-                println!("{}Comparing {:?} with node {:?}: {:?}", indent, value, n.value, cmp);
-                
+                println!(
+                    "{}Comparing {:?} with node {:?}: {:?}",
+                    indent, value, n.value, cmp
+                );
+
                 match cmp {
                     Ordering::Equal => {
                         println!("{}Value already exists, no-op", indent);
@@ -139,10 +145,13 @@ where
                     Ordering::Less => {
                         println!("{}Going left", indent);
                         n.left = Self::put_recursive_debug(n.left, value, depth + 1);
-                        
+
                         if let Some(ref left_child) = n.left {
                             let mor_cmp = Self::mor_tip(&n.value, &left_child.value);
-                            println!("{}mor_tip({:?}, {:?}) = {:?}", indent, n.value, left_child.value, mor_cmp);
+                            println!(
+                                "{}mor_tip({:?}, {:?}) = {:?}",
+                                indent, n.value, left_child.value, mor_cmp
+                            );
                             if mor_cmp != Ordering::Less {
                                 println!("{}Rotating right", indent);
                                 Some(Self::rotate_right(n))
@@ -157,10 +166,13 @@ where
                     Ordering::Greater => {
                         println!("{}Going right", indent);
                         n.right = Self::put_recursive_debug(n.right, value, depth + 1);
-                        
+
                         if let Some(ref right_child) = n.right {
                             let mor_cmp = Self::mor_tip(&n.value, &right_child.value);
-                            println!("{}mor_tip({:?}, {:?}) = {:?}", indent, n.value, right_child.value, mor_cmp);
+                            println!(
+                                "{}mor_tip({:?}, {:?}) = {:?}",
+                                indent, n.value, right_child.value, mor_cmp
+                            );
                             if mor_cmp != Ordering::Less {
                                 println!("{}Rotating left", indent);
                                 Some(Self::rotate_left(n))
@@ -176,7 +188,7 @@ where
             }
         }
     }
-    
+
     /// Recursive insertion with rotations
     fn put_recursive(node: Option<Box<Node<T>>>, value: T) -> Option<Box<Node<T>>> {
         match node {
@@ -186,7 +198,7 @@ where
             }
             Some(mut n) => {
                 let cmp = Self::gor_tip(&value, &n.value);
-                
+
                 match cmp {
                     Ordering::Equal => {
                         // Value exists, no-op for set
@@ -195,7 +207,7 @@ where
                     Ordering::Less => {
                         // Insert left
                         n.left = Self::put_recursive(n.left, value);
-                        
+
                         // Check if rotation needed (mor-tip comparison)
                         // In Hoon: if (mor-tip n.a n.c) is true, NO rotation
                         // mor-tip returns Less when first has higher priority (smaller mor value)
@@ -213,7 +225,7 @@ where
                     Ordering::Greater => {
                         // Insert right
                         n.right = Self::put_recursive(n.right, value);
-                        
+
                         // Check if rotation needed (mor-tip comparison)
                         // In Hoon: if (mor-tip n.a n.c) is true, NO rotation
                         // mor-tip returns Less when first has higher priority (smaller mor value)
@@ -235,7 +247,10 @@ where
 
     /// Right rotation
     fn rotate_right(mut n: Box<Node<T>>) -> Box<Node<T>> {
-        let mut left = n.left.take().expect("rotate_right called with no left child");
+        let mut left = n
+            .left
+            .take()
+            .expect("rotate_right called with no left child");
         n.left = left.right.take();
         left.right = Some(n);
         left
@@ -243,7 +258,10 @@ where
 
     /// Left rotation
     fn rotate_left(mut n: Box<Node<T>>) -> Box<Node<T>> {
-        let mut right = n.right.take().expect("rotate_left called with no right child");
+        let mut right = n
+            .right
+            .take()
+            .expect("rotate_left called with no right child");
         n.right = right.left.take();
         right.left = Some(n);
         right
@@ -257,13 +275,11 @@ where
     fn has_recursive(node: &Option<Box<Node<T>>>, value: &T) -> bool {
         match node {
             None => false,
-            Some(n) => {
-                match Self::gor_tip(value, &n.value) {
-                    Ordering::Equal => true,
-                    Ordering::Less => Self::has_recursive(&n.left, value),
-                    Ordering::Greater => Self::has_recursive(&n.right, value),
-                }
-            }
+            Some(n) => match Self::gor_tip(value, &n.value) {
+                Ordering::Equal => true,
+                Ordering::Less => Self::has_recursive(&n.left, value),
+                Ordering::Greater => Self::has_recursive(&n.right, value),
+            },
         }
     }
 
@@ -295,7 +311,10 @@ where
     }
 
     /// Merge two subtrees maintaining heap property
-    fn merge_children(left: Option<Box<Node<T>>>, right: Option<Box<Node<T>>>) -> Option<Box<Node<T>>> {
+    fn merge_children(
+        left: Option<Box<Node<T>>>,
+        right: Option<Box<Node<T>>>,
+    ) -> Option<Box<Node<T>>> {
         match (left, right) {
             (None, None) => None,
             (Some(l), None) => Some(l),
@@ -360,19 +379,26 @@ where
         }
         ZSetIter { stack }
     }
-    
-    
+
     #[cfg(test)]
     fn debug_node_structure(node: &Box<Node<T>>, indent: usize) -> String {
         let spaces = "  ".repeat(indent);
         let value_str = format!("{:?}", node.value);
         let left_str = match &node.left {
             None => format!("{}  L: null", spaces),
-            Some(left) => format!("{}  L:\n{}", spaces, Self::debug_node_structure(left, indent + 2)),
+            Some(left) => format!(
+                "{}  L:\n{}",
+                spaces,
+                Self::debug_node_structure(left, indent + 2)
+            ),
         };
         let right_str = match &node.right {
             None => format!("{}  R: null", spaces),
-            Some(right) => format!("{}  R:\n{}", spaces, Self::debug_node_structure(right, indent + 2)),
+            Some(right) => format!(
+                "{}  R:\n{}",
+                spaces,
+                Self::debug_node_structure(right, indent + 2)
+            ),
         };
         format!("{}Node({})\n{}\n{}", spaces, value_str, left_str, right_str)
     }
@@ -390,17 +416,17 @@ where
 
     /// Compute TIP5 hash of a value and convert to UBig integer
     fn compute_tip5_hash(value: &T) -> UBig {
-        use nockapp::noun::slab::NounSlab;
         use crate::transaction_types::Hash;
-        
+        use nockapp::noun::slab::NounSlab;
+
         // Create a noun slab and convert value to noun
         let mut slab: NounSlab = NounSlab::new();
         let value_noun = value.to_noun(&mut slab);
-        
+
         // Compute the TIP5 hash
-        let hash = Tip5Hasher::hash_noun_varlen(value_noun)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
-        
+        let hash =
+            Tip5Hasher::hash_noun_varlen(value_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+
         // Convert Hash to UBig using our new method
         hash.to_ubig()
     }
@@ -409,9 +435,10 @@ where
     fn gor_tip(a: &T, b: &T) -> Ordering {
         let hash_a = Self::compute_tip5_hash(a);
         let hash_b = Self::compute_tip5_hash(b);
-        
+
         // Compare the UBig integers - ORIGINAL (not reversed)
-        match hash_a.cmp(&hash_b) {  // Note: a compared to b (original)
+        match hash_a.cmp(&hash_b) {
+            // Note: a compared to b (original)
             Ordering::Equal => a.dor_tip(b),
             other => other,
         }
@@ -422,38 +449,39 @@ where
         // Compute double-tip for each value
         let double_a = Self::compute_double_tip5_hash(a);
         let double_b = Self::compute_double_tip5_hash(b);
-        
+
         // ORIGINAL (not reversed)
-        match double_a.cmp(&double_b) {  // Note: a compared to b (original)
+        match double_a.cmp(&double_b) {
+            // Note: a compared to b (original)
             Ordering::Equal => a.dor_tip(b),
             other => other,
         }
     }
-    
+
     /// Compute double-tip: hash(hash(value) ++ hash(value))
     fn compute_double_tip5_hash(value: &T) -> UBig {
-        use nockapp::noun::slab::NounSlab;
-        use crate::transaction_types::Hash;
         use crate::hashing::hasher::hash_ten_cell;
-        
+        use crate::transaction_types::Hash;
+        use nockapp::noun::slab::NounSlab;
+
         // First compute the regular hash
         let mut slab: NounSlab = NounSlab::new();
         let value_noun = value.to_noun(&mut slab);
-        
-        let hash = Tip5Hasher::hash_noun_varlen(value_noun)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
-        
+
+        let hash =
+            Tip5Hasher::hash_noun_varlen(value_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+
         // Use hash_ten_cell with two copies of the hash
         let double_hash = hash_ten_cell(hash.clone(), hash);
-        
+
         // Convert to UBig
         double_hash.to_ubig()
     }
 
     /// Build from an iterator (gas equivalent)
-    pub fn gas<I>(iter: I) -> Self 
-    where 
-        I: IntoIterator<Item = T>
+    pub fn gas<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
     {
         let mut set = Self::new();
         for v in iter {
@@ -461,78 +489,74 @@ where
         }
         set
     }
-    
+
     /// Convert the z-set to a Hashable structure
     /// This preserves the exact tree structure for hashing
-    pub fn to_hashable<F>(&self, val_fn: F) -> crate::hashing::hashable::Hashable 
+    pub fn to_hashable<F>(&self, val_fn: F) -> crate::hashing::hashable::Hashable
     where
         F: Fn(&T) -> crate::hashing::hashable::Hashable + Copy,
     {
         use crate::hashing::hashable::Hashable;
-        
+
         match &self.root {
-            None => Hashable::null(),  // Empty tree
+            None => Hashable::null(), // Empty tree
             Some(node) => Self::node_to_hashable(node, val_fn),
         }
     }
-    
+
     /// Convert a node to hashable recursively
-    fn node_to_hashable<F>(
-        node: &Box<Node<T>>, 
-        val_fn: F
-    ) -> crate::hashing::hashable::Hashable
+    fn node_to_hashable<F>(node: &Box<Node<T>>, val_fn: F) -> crate::hashing::hashable::Hashable
     where
         F: Fn(&T) -> crate::hashing::hashable::Hashable + Copy,
     {
         use crate::hashing::hashable::Hashable;
-        
+
         // Get hashable for the current node's value
         let node_hashable = val_fn(&node.value);
-        
+
         // Process left subtree
         let left = match &node.left {
             None => Hashable::null(),
             Some(left_node) => Self::node_to_hashable(left_node, val_fn),
         };
-        
+
         // Process right subtree
         let right = match &node.right {
             None => Hashable::null(),
             Some(right_node) => Self::node_to_hashable(right_node, val_fn),
         };
-        
+
         // Return as triple: [node_value, left, right]
         // This matches the Hoon z-set hashable structure
         Hashable::triple(node_hashable, left, right)
     }
-    
+
     /// Convert a node to noun recursively for NounEncode
     fn node_to_noun<A: nockvm::noun::NounAllocator>(
-        node: &Box<Node<T>>, 
-        alloc: &mut A
+        node: &Box<Node<T>>,
+        alloc: &mut A,
     ) -> nockvm::noun::Noun {
         use nockvm::noun::T;
-        
+
         // Get noun for the current node's value
         let value_noun = node.value.to_noun(alloc);
-        
+
         // Process left subtree
         let left_noun = match &node.left {
             None => D(0),
             Some(left_node) => Self::node_to_noun(left_node, alloc),
         };
-        
+
         // Process right subtree
         let right_noun = match &node.right {
             None => D(0),
             Some(right_node) => Self::node_to_noun(right_node, alloc),
         };
-        
+
         // Return as triple: [value left-tree right-tree]
         // This matches the Hoon z-set structure
         T(alloc, &[value_noun, left_noun, right_noun])
     }
-    
 }
 
 /// Iterator over ZSet values
@@ -540,7 +564,7 @@ pub struct ZSetIter<'a, T> {
     stack: Vec<&'a Box<Node<T>>>,
 }
 
-impl<'a, T> Iterator for ZSetIter<'a, T> 
+impl<'a, T> Iterator for ZSetIter<'a, T>
 where
     T: NounEncode + DorTip + Clone + Debug + PartialEq,
 {
@@ -560,8 +584,8 @@ where
 }
 
 // Implement Default
-impl<T> Default for ZSet<T> 
-where 
+impl<T> Default for ZSet<T>
+where
     T: NounEncode + DorTip + Clone + Debug + PartialEq,
 {
     fn default() -> Self {
@@ -590,11 +614,7 @@ where
 }
 
 // Implement Eq for ZSet
-impl<T> Eq for ZSet<T>
-where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq + Eq,
-{
-}
+impl<T> Eq for ZSet<T> where T: NounEncode + DorTip + Clone + Debug + PartialEq + Eq {}
 
 // Implement Hash for ZSet
 use std::hash::{Hash, Hasher};
@@ -647,42 +667,37 @@ where
 }
 
 // Implement NounDecode for ZSet
-use noun_serde::{NounDecode, NounDecodeError};
 use nockvm::noun::{Noun, NounAllocator};
+use noun_serde::{NounDecode, NounDecodeError};
 
 impl<T> ZSet<T>
 where
     T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
 {
     /// Decode a node from noun recursively for NounDecode
-    fn node_from_noun(
-        noun: &Noun
-    ) -> Result<Option<Box<Node<T>>>, NounDecodeError> {
+    fn node_from_noun(noun: &Noun) -> Result<Option<Box<Node<T>>>, NounDecodeError> {
         // Check if it's empty (~ = 0)
         if noun.as_atom().is_ok() && noun.as_atom().unwrap().as_u64().unwrap_or(1) == 0 {
             return Ok(None);
         }
-        
+
         // Otherwise it should be a cell [value left right]
-        let cell = noun.as_cell()
-            .map_err(|_| NounDecodeError::ExpectedCell)?;
-        
+        let cell = noun.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
+
         // First element is the value
         let value = T::from_noun(&cell.head())?;
-        
+
         // Second element should be a cell [left right]
-        let tail_cell = cell.tail().as_cell()
+        let tail_cell = cell
+            .tail()
+            .as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?;
-        
+
         // Recursively decode left and right subtrees
         let left = Self::node_from_noun(&tail_cell.head())?;
         let right = Self::node_from_noun(&tail_cell.tail())?;
-        
-        Ok(Some(Box::new(Node {
-            value,
-            left,
-            right,
-        })))
+
+        Ok(Some(Box::new(Node { value, left, right })))
     }
 }
 
@@ -698,7 +713,11 @@ where
 }
 
 // Helper function for debug formatting
-fn fmt_node<T: Debug>(node: &Option<Box<Node<T>>>, f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
+fn fmt_node<T: Debug>(
+    node: &Option<Box<Node<T>>>,
+    f: &mut std::fmt::Formatter<'_>,
+    depth: usize,
+) -> std::fmt::Result {
     match node {
         None => write!(f, "~"),
         Some(n) => {
@@ -717,11 +736,11 @@ fn fmt_node<T: Debug>(node: &Option<Box<Node<T>>>, f: &mut std::fmt::Formatter<'
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // Wrapper for i32 to implement NounEncode
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct TestInt(i32);
-    
+
     impl NounEncode for TestInt {
         fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
             use nockvm::noun::Atom;
@@ -739,7 +758,7 @@ mod tests {
     #[test]
     fn test_basic_operations() {
         let mut set: ZSet<TestInt> = ZSet::new();
-        
+
         // Test insertion
         set.put(TestInt(5));
         set.put(TestInt(3));
@@ -747,20 +766,20 @@ mod tests {
         set.put(TestInt(1));
         set.put(TestInt(9));
         set.put(TestInt(5)); // Duplicate, should be ignored
-        
+
         // Test has
         assert!(set.has(&TestInt(5)));
         assert!(set.has(&TestInt(3)));
         assert!(!set.has(&TestInt(10)));
-        
+
         // Test wyt (count)
         assert_eq!(set.wyt(), 5);
-        
+
         // Test deletion
         set.del(&TestInt(3));
         assert!(!set.has(&TestInt(3)));
         assert_eq!(set.wyt(), 4);
-        
+
         // Test tap (in-order traversal)
         // Note: ZSet uses hash-based ordering (gor-tip), not natural ordering
         let items = set.tap();
@@ -783,12 +802,12 @@ mod tests {
             TestInt(25),
             TestInt(20), // Duplicate
         ];
-        
+
         let set = ZSet::gas(values);
-        
+
         assert_eq!(set.wyt(), 5); // Only 5 unique values
         assert!(set.has(&TestInt(15)));
-        
+
         // Check all items are present
         let items = set.tap();
         assert_eq!(items.len(), 5);
@@ -806,36 +825,36 @@ mod tests {
         for i in [5, 2, 8, 1, 9, 3] {
             set.put(TestInt(i));
         }
-        
+
         let collected: Vec<_> = set.iter().map(|t| t.0).collect();
         assert_eq!(collected.len(), 6);
-        
+
         // All values should be present
         for i in [1, 2, 3, 5, 8, 9] {
             assert!(collected.contains(&i));
         }
     }
-    
+
     #[test]
     fn test_numbers_1_to_10_tree_structure() {
         use crate::hashing::tip5::Tip5Hasher;
         use nockapp::noun::slab::NounSlab;
         use noun_serde::NounEncode;
-        
+
         println!("\n=== Testing ZSet with numbers 1 through 10 ===\n");
-        
+
         let mut set = ZSet::new();
-        
+
         // Insert numbers 1 through 10
         for i in 1..=10 {
             println!("Inserting {}", i);
             set.put(TestInt(i));
         }
-        
+
         // Get the tree structure
         println!("\n--- Tree Structure ---");
         println!("{}", set.debug_structure());
-        
+
         // Get the in-order traversal
         let items = set.tap();
         println!("\n--- In-order Traversal (based on gor-tip ordering) ---");
@@ -844,9 +863,10 @@ mod tests {
             let mut slab: NounSlab = NounSlab::new();
             let noun = item.to_noun(&mut slab);
             let hash = Tip5Hasher::hash_noun_varlen(noun).unwrap();
-            println!("{}: value={}, hash={:x?}", idx, item.0, &hash.values[0..2]); // Show first 2 values of hash
+            println!("{}: value={}, hash={:x?}", idx, item.0, &hash.values[0..2]);
+            // Show first 2 values of hash
         }
-        
+
         // Verify all numbers are present
         println!("\n--- Verification ---");
         assert_eq!(set.wyt(), 10, "Should have exactly 10 elements");
@@ -854,7 +874,7 @@ mod tests {
             assert!(set.has(&TestInt(i)), "Should contain {}", i);
         }
         println!("✓ All numbers 1-10 are present in the set");
-        
+
         // Show the actual order
         let ordered_values: Vec<i32> = items.iter().map(|t| t.0).collect();
         println!("\n--- Final Order ---");

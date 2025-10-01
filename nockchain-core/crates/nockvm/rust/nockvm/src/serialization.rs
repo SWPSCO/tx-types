@@ -17,7 +17,7 @@ pub fn met0_usize(atom: Atom) -> usize {
 
 /// Calculate the number of bits needed to represent a u64 as a usize
 pub fn met0_u64_to_usize(x: u64) -> usize {
-    // Convert u64 to u32 array for BitSlice  
+    // Convert u64 to u32 array for BitSlice
     let x_as_u32s = [x as u32, (x >> 32) as u32];
     let usize_bitslice = BitSlice::<u32, Lsb0>::from_slice(&x_as_u32s);
     usize_bitslice.last_one().map_or(0, |last_one| last_one + 1)
@@ -811,7 +811,7 @@ mod tests {
 
         // Create a jammed representation of a cyclic structure
         // [0 *] where * refers back to the entire cell, i.e. 0b11110001
-        let mut jammed = BitVec::<u64, Lsb0>::new();
+        let mut jammed = BitVec::<u32, Lsb0>::new();
         jammed.extend_from_bitslice(bits![u64, Lsb0; 1, 1, 1]); // Backref to the entire structure
         jammed.extend_from_bitslice(bits![u64, Lsb0; 1, 0, 0]); // Atom 0
         jammed.extend_from_bitslice(bits![u64, Lsb0; 0, 1]); // Cell

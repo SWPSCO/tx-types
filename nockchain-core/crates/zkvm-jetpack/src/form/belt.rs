@@ -196,4 +196,3 @@ impl From<Belt> for u32 {
         b.0 as u32
     }
 }
-

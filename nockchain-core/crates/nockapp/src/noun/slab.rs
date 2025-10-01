@@ -656,8 +656,9 @@ impl Jammer for NockJammer {
             let backref_as_u32s = [backref as u32, (backref >> 32) as u32];
             #[cfg(target_pointer_width = "32")]
             let backref_as_u32s = [backref as u32, 0u32];
-            buffer
-                .extend_from_bitslice(&BitSlice::<u32, Lsb0>::from_slice(&backref_as_u32s)[0..backref_sz]);
+            buffer.extend_from_bitslice(
+                &BitSlice::<u32, Lsb0>::from_slice(&backref_as_u32s)[0..backref_sz],
+            );
         }
 
         fn mat_atom(buffer: &mut BitVec<u8, Lsb0>, atom: Atom) {

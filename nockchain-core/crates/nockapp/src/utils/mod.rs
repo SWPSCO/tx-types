@@ -3,7 +3,6 @@ pub mod error;
 
 pub use bytes::ToBytes;
 pub use error::{CrownError, Result};
-
 use nockvm::noun::{Atom, IndirectAtom, NounAllocator};
 
 pub fn make_tas<A: NounAllocator>(allocator: &mut A, tas: &str) -> Atom {

@@ -57,7 +57,8 @@ impl NounExt for Noun {
 // The goal would be to canonicalize the Atom representations of various Rust types. When it needs to be specialized, users can make a newtype.
 pub trait AtomExt {
     fn from_bytes<A: NounAllocator>(allocator: &mut A, bytes: &Bytes) -> Atom;
-    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> crate::Result<Atom>;
+    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T)
+        -> crate::Result<Atom>;
     fn eq_bytes(self, bytes: impl AsRef<[u8]>) -> bool;
     fn to_bytes_until_nul(self) -> crate::Result<Vec<u8>>;
     fn into_string(self) -> crate::Result<String>;
@@ -72,7 +73,10 @@ impl AtomExt for Atom {
     }
 
     // TODO: This is worth making into a public/supported part of [`nockvm`]'s API.
-    fn from_value<A: NounAllocator, T: ToBytes>(allocator: &mut A, value: T) -> crate::Result<Atom> {
+    fn from_value<A: NounAllocator, T: ToBytes>(
+        allocator: &mut A,
+        value: T,
+    ) -> crate::Result<Atom> {
         unsafe {
             let data: Bytes = value.as_bytes()?;
             Ok(

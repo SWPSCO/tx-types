@@ -129,7 +129,6 @@ impl<'a> From<&'a Felt> for &'a [Belt] {
     }
 }
 
-
 impl Add for Felt {
     type Output = Self;
 

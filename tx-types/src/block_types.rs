@@ -1,6 +1,6 @@
+use crate::transaction_types::Transaction;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::transaction_types::Transaction;
 
 /// High-level block representation for RPC responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,20 +49,18 @@ impl BlockPage {
         BlockPage {
             height,
             hash: format!("hash_{}", height),
-            parent_hash: if height > 0 { 
-                format!("hash_{}", height - 1) 
-            } else { 
-                "genesis".to_string() 
+            parent_hash: if height > 0 {
+                format!("hash_{}", height - 1)
+            } else {
+                "genesis".to_string()
             },
             timestamp: Utc::now(),
             transactions: vec![],
             target: "00000000ffff0000000000000000000000000000000000000000000000000000".to_string(),
-            coinbase: vec![
-                CoinbaseRecipient {
-                    address: "mock_miner".to_string(),
-                    amount: 5000000000,
-                }
-            ],
+            coinbase: vec![CoinbaseRecipient {
+                address: "mock_miner".to_string(),
+                amount: 5000000000,
+            }],
         }
     }
 }
