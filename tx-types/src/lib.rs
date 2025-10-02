@@ -1,5 +1,5 @@
 /// Transaction processing module
-/// 
+///
 /// This module contains all transaction-related functionality organized into:
 /// - Core transaction types (transaction_types.rs)
 /// - Noun encoding/decoding (to_noun.rs)
