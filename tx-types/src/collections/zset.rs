@@ -662,22 +662,22 @@ where
         if noun.as_atom().is_ok() && noun.as_atom().unwrap().as_u64().unwrap_or(1) == 0 {
             return Ok(None);
         }
-        
+
         // Otherwise it should be a cell [value left right]
         let cell = noun.as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?;
-        
+
         // First element is the value
         let value = T::from_noun(&cell.head())?;
-        
+
         // Second element should be a cell [left right]
         let tail_cell = cell.tail().as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?;
-        
+
         // Recursively decode left and right subtrees
         let left = Self::node_from_noun(&tail_cell.head())?;
         let right = Self::node_from_noun(&tail_cell.tail())?;
-        
+
         Ok(Some(Box::new(Node {
             value,
             left,

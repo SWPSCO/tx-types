@@ -314,7 +314,7 @@ impl NounDecode for F6LT {
         // Extract 6 values from nested cell structure
         let mut values = [0u64; 6];
         let mut current = *noun;
-        
+
         for i in 0..5 {
             let cell = current.as_cell()
                 .map_err(|_| NounDecodeError::ExpectedCell)?;
@@ -323,12 +323,12 @@ impl NounDecode for F6LT {
                 .as_u64()?;
             current = cell.tail();
         }
-        
+
         // Last element
         values[5] = current.as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;
-        
+
         Ok(F6LT { values })
     }
 }

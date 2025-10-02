@@ -8,17 +8,17 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Nockchain dependencies - by default from git
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad", default-features = false }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
-nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "e2d96bc8421b724ca84c4e93aad6e97ee9b7f4ad" }
+noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17", default-features = false }
+nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17", default-features = false }
+zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
+nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
 
-# Standard dependencies (matching nockchain-core workspace)
+# Standard dependencies (matching nockchain-minimal workspace)
 aes = { version = "0.8.3", default-features = false }
 aes-siv = { version = "0.7.0", default-features = false, features = ["alloc"] }
 anyhow = "1.0"
@@ -81,12 +81,12 @@ tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }
 
 # Uncomment the following section to use local nockchain dependencies for WASM compilation
 # [patch."https://github.com/SWPSCO/nockchain.git"]
-# noun-serde = { path = "./nockchain-core/crates/noun-serde" }
-# noun-serde-derive = { path = "./nockchain-core/crates/noun-serde-derive" }
-# nockapp = { path = "./nockchain-core/crates/nockapp" }
-# nockvm = { path = "./nockchain-core/crates/nockvm/rust/nockvm" }
-# nockchain-libp2p-io = { path = "./nockchain-core/crates/nockchain-libp2p-io" }
-# zkvm-jetpack = { path = "./nockchain-core/crates/zkvm-jetpack" }
-# ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig" }
-# murmur3 = { path = "./nockchain-core/crates/nockvm/rust/murmur3" }
-# nockvm_macros = { path = "./nockchain-core/crates/nockvm/rust/nockvm_macros" }
+# noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
+# noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
+# nockapp = { path = "./nockchain-minimal/crates/nockapp" }
+# nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
+# nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io" }
+# zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
+# ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig" }
+# murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
+# nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }

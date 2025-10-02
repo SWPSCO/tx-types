@@ -1592,16 +1592,16 @@ where
         noun: &nockvm::noun::Noun,
     ) -> Result<Self, noun_serde::NounDecodeError> {
         use nockvm::noun::Noun;
-        
+
         // Check if it's ~ (empty map)
         if noun.is_atom() && noun.as_atom().unwrap().as_u64()? == 0 {
             return Ok(ZMap::new());
         }
-        
+
         // Otherwise it should be a cell [[key value] [left right]]
         let cell = noun.as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        
+
         // Decode the node recursively
         let mut map = ZMap::new();
         Self::decode_node_recursive(noun, &mut map)?;
@@ -1622,29 +1622,29 @@ where
         if noun.is_atom() && noun.as_atom().unwrap().as_u64()? == 0 {
             return Ok(());
         }
-        
+
         // Otherwise it's [[key value] [left right]]
         let cell = noun.as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        
+
         // Get [key value] pair
         let pair_cell = cell.head().as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        
+
         let key = K::from_noun(&pair_cell.head())?;
         let value = V::from_noun(&pair_cell.tail())?;
-        
+
         // Insert the key-value pair
         map.put(key, value);
-        
+
         // Get [left right] children
         let children_cell = cell.tail().as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        
+
         // Recursively decode left and right subtrees
         Self::decode_node_recursive(&children_cell.head(), map)?;
         Self::decode_node_recursive(&children_cell.tail(), map)?;
-        
+
         Ok(())
     }
 }

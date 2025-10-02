@@ -1,6 +1,5 @@
 /// F^6 extension field arithmetic for Cheetah curve (copied from working siger-esp implementation)
-use zkvm_jetpack::form::poly::Belt;
-use zkvm_jetpack::form::math::base::bneg;
+use zkvm_jetpack::form::math::belt::{Belt, bneg};
 use zkvm_jetpack::form::math::bpoly::{bpegcd, bpscal};
 use std::ops::{Add, Mul, Sub, Neg};
 

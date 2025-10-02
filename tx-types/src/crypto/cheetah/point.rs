@@ -1,6 +1,6 @@
 /// Cheetah elliptic curve point operations (copied from working siger-esp implementation)
 use super::field::{F6Element, F6_ZERO, F6_ONE};
-use zkvm_jetpack::form::poly::Belt;
+use zkvm_jetpack::form::math::belt::Belt;
 use ibig::UBig;
 use crate::transaction_types::{SchnorrPubkey, F6LT};
 

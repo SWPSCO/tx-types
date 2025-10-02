@@ -252,7 +252,7 @@ mod tests {
         let master_sk = [1u8; 32];
         let chain_code = [2u8; 32];
         let master = ExtendedKey::new_master(master_sk, chain_code);
-        
+
         // Test path derivation: m/44'/0'/0'/0/0
         let path = [0x8000002C, 0x80000000, 0x80000000, 0, 0];
         let derived = master.derive_path(&path).unwrap();

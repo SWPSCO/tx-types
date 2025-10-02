@@ -1,6 +1,6 @@
 /// Constants for the Cheetah elliptic curve
 use super::field::F6Element;
-use zkvm_jetpack::form::poly::Belt;
+use zkvm_jetpack::form::math::belt::Belt;
 
 /// Group order for the Cheetah curve (hex string)
 pub const GROUP_ORDER_HEX: &str = "7af2599b3b3f22d0563fbf0f990a37b5327aa72330157722d443623eaed4accf";
