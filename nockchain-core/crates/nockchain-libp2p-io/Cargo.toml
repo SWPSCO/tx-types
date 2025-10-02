@@ -1,0 +1,14 @@
+[package]
+name = "nockchain-libp2p-io"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nockapp = { workspace = true }
+nockvm = { workspace = true }
+noun-serde = { workspace = true }
+bs58 = { workspace = true }
+ibig = { workspace = true }
+
+[dev-dependencies]
+quickcheck = { workspace = true }
