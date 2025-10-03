@@ -13,6 +13,7 @@ noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "86
 nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17", default-features = false }
 nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
 nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17", default-features = false }
+nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
 zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
 ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
 murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "865a6f70b0bb8c44989839f19b288587c5c37b17" }
@@ -52,6 +53,7 @@ quote = "1.0.37"
 quickcheck = "1.0.3"
 rand = { version = "0.9.2", features = ["std"] }
 rayon = "1.8.0"
+rkyv = "0.8.10"
 serde = "1.0.217"
 serde_bytes = { version = "0.11.15", features = ["alloc"] }
 serde_json = "1.0.104"
@@ -79,14 +81,15 @@ tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }
 tracy-client = { path = "./dummy-tracy/tracy-client" }
 tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }
 
-# Uncomment the following section to use local nockchain dependencies for WASM compilation
-# [patch."https://github.com/SWPSCO/nockchain.git"]
-# noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
-# noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
-# nockapp = { path = "./nockchain-minimal/crates/nockapp" }
-# nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
-# nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io" }
-# zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
-# ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig" }
-# murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
-# nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }
+# Use local nockchain dependencies for WASM compilation
+[patch."https://github.com/SWPSCO/nockchain.git"]
+noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
+noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
+nockapp = { path = "./nockchain-minimal/crates/nockapp" }
+nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
+nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io" }
+nockchain-math = { path = "./nockchain-minimal/crates/nockchain-math" }
+zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
+ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig" }
+murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
+nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }

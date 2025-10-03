@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(cargo audit:*)"
     ],
     "deny": [],
     "ask": []

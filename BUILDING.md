@@ -15,7 +15,7 @@ This configuration matches the main branch and is suitable for most development 
 
 ## WASM Compilation (Local Dependencies)
 
-For WASM compilation, you need to use local path dependencies from the `nockchain-core` submodule. This is required because WASM targets need access to the full source code.
+For WASM compilation, you need to use local path dependencies from the `nockchain-minimal` submodule. This is required because WASM targets need access to the full source code.
 
 ### Switching to Local Dependencies
 
@@ -61,7 +61,7 @@ The `Cargo.toml` file is configured with:
 2. **Patch section (commented by default)**: Local path overrides
    ```toml
    # [patch."https://github.com/SWPSCO/nockchain.git"]
-   # noun-serde = { path = "./nockchain-core/crates/noun-serde" }
+   # noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
    ```
 
 When the patch section is uncommented, Cargo will use the local paths instead of fetching from git. This allows the same codebase to work in both configurations.

@@ -1,6 +1,6 @@
 # WASM Compilation Changes Documentation
 
-This document thoroughly describes all changes made to enable WebAssembly (WASM) compilation for the tx-types codebase, particularly focusing on the nockchain-core folder. The changes were implemented across 15 commits on the `fix-wasm2` branch.
+This document thoroughly describes all changes made to enable WebAssembly (WASM) compilation for the tx-types codebase, particularly focusing on the nockchain-minimal folder. The changes were implemented across 15 commits on the `fix-wasm2` branch.
 
 ## Overview
 
@@ -9,19 +9,19 @@ The primary goal was to enable compilation to the `wasm32-unknown-unknown` targe
 ## Detailed Changes by Commit
 
 ### 1. Initial Setup and Dependency Updates (686411f)
-**Date:** Sep 3, 2025  
-**Purpose:** Fix WASM compilation and update to local nockchain-core dependencies
+**Date:** Sep 3, 2025
+**Purpose:** Fix WASM compilation and update to local nockchain-minimal dependencies
 
 **Changes:**
-- Updated all nockchain dependencies to use local nockchain-core folder paths instead of git references
+- Updated all nockchain dependencies to use local nockchain-minimal folder paths instead of git references
 - Fixed `from_noun` API compatibility by removing allocator parameter requirements
 - Added dummy-tracy crates to resolve C++ compilation issues that were blocking the build
 - Fixed failing doctests by converting code blocks to text blocks where appropriate
-- Cleaned up nockchain-core folder (removed 6.8GB of build artifacts)
+- Cleaned up nockchain-minimal folder (removed 6.8GB of build artifacts)
 
 ### 2. Remove Unused Crates (eb8ed81)
-**Date:** Sep 3, 2025  
-**Purpose:** Remove unused crates from nockchain-core
+**Date:** Sep 3, 2025
+**Purpose:** Remove unused crates from nockchain-minimal
 
 **Changes:**
 - Deleted 7 unused crates that were blocking WASM compilation:
@@ -41,13 +41,13 @@ The primary goal was to enable compilation to the `wasm32-unknown-unknown` targe
 - Removed all other jet implementations not needed for tx-types
 
 ### 4. Remove Unnecessary Files and Directories (709fd4a)
-**Date:** Sep 3, 2025  
+**Date:** Sep 3, 2025
 **Purpose:** Clean up repository structure
 
 **Changes:**
 - Removed all `hoon/` directories throughout the codebase
 - Removed all test data directories (`resources/`, `test-jams/`)
-- Removed all documentation files (.md files, docs/) from nockchain-core
+- Removed all documentation files (.md files, docs/) from nockchain-minimal
 - This significantly reduced the repository size and removed unused code paths
 
 ### 5. Clean Up nockchain-libp2p-io (78ce604)
@@ -251,3 +251,87 @@ The BitStore trait in bitvec crate doesn't support u64 on 32-bit architectures. 
 
 ## Impact
 The changes enable tx-types to compile to WebAssembly while maintaining full functionality for its core purpose of noun manipulation and TIP5 hashing. The removal of cryptographic functions and platform-specific code makes the codebase more portable and maintainable.
+
+---
+
+## Migration to nockchain 865a6f7 (October 2025)
+
+### 16. Sync nockchain-minimal to Latest Master (865a6f7)
+**Date:** October 2, 2025
+**Purpose:** Update all nockchain-minimal crates to latest nockchain master (revision 865a6f70b0bb8c44989839f19b288587c5c37b17) while preserving all WASM compatibility fixes
+
+**Major Changes:**
+
+1. **Added nockchain-math crate:**
+   - New crate extracted from zkvm-jetpack in master containing math functions
+   - Removed incompatible modules for WASM: `crypto/` (argon2), `zoon/`
+   - Removed quickcheck dependency and Arbitrary implementations
+   - Contains: belt, bpoly, convert, felt, fpoly, handle, mary, noun_ext, poly, shape, structs, tip5
+
+2. **Updated ibig crate:**
+   - Preserved WASM fix: `Stack::alloc_layout` returns `*mut Word` (not `*mut u64`)
+   - Preserved: No rand dependency or rand.rs file
+   - Added stack-based allocation functions (pow_stack, mul_stack, etc.)
+   - Made Word type public in all architecture modules
+   - Deprecated global allocator methods with warnings
+
+3. **Updated nockvm crate:**
+   - Preserved WASM fixes: Stack trait using `*mut Word`
+   - Preserved: Safe Rust memcmp instead of libc::memcmp
+   - Preserved: No signal-hook or nockvm_crypto dependencies
+   - Updated `weld()` function to use generic `NounAllocator` parameter
+   - Updated various jet APIs for generic allocators
+
+4. **Updated nockapp crate:**
+   - Preserved critical WASM fix: All BitSlice usage remains `BitSlice<u32>` (not u64)
+   - Simplified BitSlice operations using type inference for usize (becomes u32 on wasm32)
+   - Maintained explicit `[u32; 2]` conversion for u64 data
+   - Updated error handling with new ConversionError enum
+   - Verified: Zero instances of `BitSlice<u64>` in codebase
+
+5. **Updated noun-serde crate:**
+   - Added `From<NounDecodeError> for JetErr` implementation
+   - This fixed nockchain-math compilation (tip5 hash functions needed this conversion)
+   - Removed verbose trace! debug statement
+
+6. **Updated nockchain-libp2p-io crate:**
+   - Added stack-aware tip5 hash functions using ibig's new stack API
+   - Functions: `tip5_hash_to_base58_stack`, `base_p_to_decimal_stack`, `accum_prime_ubig_stack`
+
+7. **Updated zkvm-jetpack crate:**
+   - Migrated to use nockchain-math for all math functions
+   - Removed local modules: form/belt.rs, form/felt.rs, form/mary.rs, form/poly.rs
+   - Removed directories: hand/, noun/ (moved to nockchain-math)
+   - Updated all jet imports to use nockchain_math::*
+   - Re-exports from nockchain_math through form/mod.rs
+
+8. **No changes needed:**
+   - murmur3 - already up to date
+   - nockvm_macros - already up to date
+   - noun-serde-derive - only whitespace difference
+
+**WASM Fixes Preserved:**
+- ✅ BitSlice<u32> (not u64) throughout all code
+- ✅ No randomness/getrandom dependencies
+- ✅ No signal-hook (Unix-specific)
+- ✅ No crypto dependencies (argon2, nockvm_crypto)
+- ✅ Stack trait returns `*mut Word` for architecture portability
+- ✅ Safe Rust memcmp instead of libc
+- ✅ Conditional MAX_BIT_LENGTH for 32/64 bit
+- ✅ Architecture-aware Stack trait implementation
+
+**Testing Results After Migration:**
+- ✅ All 87 tests pass on native 64-bit architecture (up from 71)
+- ✅ WASM compilation succeeds: `cargo build --target wasm32-unknown-unknown`
+- ✅ Regular build succeeds: `cargo build`
+- ✅ All nockchain-minimal crates compile independently
+
+**Key Technical Decisions:**
+1. Used agents to systematically update complex crates (nockvm, ibig, nockapp)
+2. Added nockchain-math to both git and local path patches in Cargo.toml
+3. Fixed missing `weld()` generic allocator parameter that agent initially missed
+4. Maintained minimal dependency footprint (did not add async, metrics, observability)
+5. Re-exported types through form/mod.rs to maintain API compatibility
+
+**Impact:**
+Successfully synchronized nockchain-minimal to latest master (865a6f7) while maintaining 100% WASM compatibility. The codebase now has access to latest nockchain improvements including better memory management (stack-based allocation) and improved API ergonomics, while remaining fully portable to wasm32-unknown-unknown target.
