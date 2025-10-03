@@ -22,3 +22,5 @@ pub mod timelock_tests;
 pub mod test_empty_hashes;
 #[cfg(test)]
 pub mod test_base58_conversion;
+#[cfg(test)]
+pub mod test_coinbase;
