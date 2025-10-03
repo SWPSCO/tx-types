@@ -30,12 +30,12 @@ bip39 = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
-    "ibig/std",
+    "dep:ibig",
+    "ibig?/std",
     "dep:anyhow",
     "dep:bs58",
     "dep:chrono",
     "dep:either",
-    "dep:ibig",
     "dep:nockapp",
     "dep:nockchain-libp2p-io",
     "dep:nockvm",
@@ -47,4 +47,6 @@ std = [
     "dep:zkvm-jetpack",
     "dep:bip39",
 ]
+# Enable ibig for no-std crypto operations
+no-std-crypto = ["dep:ibig"]
 tracy = []

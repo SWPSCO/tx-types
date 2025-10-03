@@ -1,6 +1,9 @@
 /// Big-endian 32-byte arithmetic operations modulo curve order
 use crate::crypto::cheetah::T8;
 
+#[cfg(feature = "no-std-crypto")]
+use ibig::UBig;
+
 const GOLDILOCKS_P: u64 = 0xffff_ffff_0000_0001;
 
 /// Group order n as 32-byte big-endian
@@ -70,15 +73,12 @@ pub fn be32_sub_inplace(a: &mut [u8; 32], b: &[u8; 32]) {
 pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     use num_bigint::BigUint;
 
-    // Convert inputs to BigUint (big-endian)
     let a_big = BigUint::from_bytes_be(a);
     let b_big = BigUint::from_bytes_be(b);
     let n_big = BigUint::from_bytes_be(&CHEETAH_N);
 
-    // Perform modular addition
     let sum_big = (a_big + b_big) % n_big;
 
-    // Convert back to 32-byte big-endian array
     let sum_bytes = sum_big.to_bytes_be();
     let mut result = [0u8; 32];
     let offset = 32 - sum_bytes.len();
@@ -92,15 +92,12 @@ pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     use num_bigint::BigUint;
 
-    // Convert inputs to BigUint (big-endian)
     let a_big = BigUint::from_bytes_be(a);
     let b_big = BigUint::from_bytes_be(b);
     let n_big = BigUint::from_bytes_be(&CHEETAH_N);
 
-    // Perform modular multiplication
     let prod_big = (a_big * b_big) % n_big;
 
-    // Convert back to 32-byte big-endian array
     let prod_bytes = prod_big.to_bytes_be();
     let mut result = [0u8; 32];
     let offset = 32 - prod_bytes.len();
@@ -112,41 +109,163 @@ pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
 #[cfg(not(feature = "std"))]
 #[inline]
 pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    let (mut sum, carry) = add_be32(a, b);
+    let (mut sum, carry) = be32_add(a, b);
     if carry == 1 || !be32_lt(&sum, &CHEETAH_N) {
         be32_sub_inplace(&mut sum, &CHEETAH_N);
     }
     sum
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), feature = "no-std-crypto"))]
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
-    // Note: This is the NO-STD version using manual byte multiplication
+    let a_big = UBig::from_be_bytes(a);
+    let b_big = UBig::from_be_bytes(b);
+    let n_big = UBig::from_be_bytes(&CHEETAH_N);
+
+    let prod_big = (a_big * b_big) % n_big;
+
+    let prod_bytes = prod_big.to_be_bytes();
+    let mut result = [0u8; 32];
+    if !prod_bytes.is_empty() {
+        let offset = 32 - prod_bytes.len();
+        result[offset..].copy_from_slice(&prod_bytes);
+    }
+
+    result
+}
+
+#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+#[inline]
+pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    // Schoolbook multiplication: compute full 64-byte product
     let mut prod = [0u8; 64];
+
+    // Multiply each byte of b by all of a
     for i in 0..32 {
-        let mut carry: u32 = 0;
+        let mut carry: u16 = 0;
+        let b_byte = b[31 - i] as u16;  // Process b from LSB to MSB
+
         for j in 0..32 {
-            let ai = a[31 - i] as u32;
-            let bj = b[31 - j] as u32;
-            let k = 63 - (i + j);
-            let t = ai * bj + prod[k] as u32 + carry;
-            prod[k] = (t & 0xff) as u8;
-            carry = t >> 8;
+            let a_byte = a[31 - j] as u16;  // Process a from LSB to MSB
+            let prod_idx = 63 - (i + j);     // Result index in prod array
+
+            let temp = a_byte * b_byte + (prod[prod_idx] as u16) + carry;
+            prod[prod_idx] = (temp & 0xff) as u8;
+            carry = temp >> 8;
         }
-        let mut idx = 63 - (i + 32);
-        let mut c = carry;
-        while c != 0 {
-            let t = prod[idx] as u32 + c;
-            prod[idx] = (t & 0xff) as u8;
-            c = t >> 8;
+
+        // Propagate remaining carry
+        if carry != 0 {
+            let mut idx = 63 - (i + 32);
+            while carry != 0 && idx < 64 {
+                let temp = (prod[idx] as u16) + carry;
+                prod[idx] = (temp & 0xff) as u8;
+                carry = temp >> 8;
+                if idx == 0 {
+                    break;
+                }
+                idx -= 1;
+            }
+        }
+    }
+
+    // Reduce modulo n using simple repeated subtraction
+    reduce_64byte_mod_n(&prod)
+}
+
+// Reduce a 64-byte big-endian value modulo CHEETAH_N
+#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+fn reduce_64byte_mod_n(val: &[u8; 64]) -> [u8; 32] {
+    // Copy the value to a mutable buffer
+    let mut rem = [0u8; 64];
+    rem.copy_from_slice(val);
+
+    // Repeatedly subtract n (shifted appropriately) until rem < n
+    // We need to compare the upper 32 bytes to n
+
+    // First, reduce by subtracting n<<256, n<<248, etc. until the upper 32 bytes are zero
+    for shift in (0..32).rev() {
+        while be64_has_bit_set_above(&rem, 32 * 8 + shift * 8) ||
+              (shift == 0 && be64_upper32_gte_n(&rem)) {
+            be64_sub_n_shifted(&mut rem, shift);
+        }
+    }
+
+    // Now the result fits in 32 bytes, extract it
+    let mut result = [0u8; 32];
+    result.copy_from_slice(&rem[32..]);
+
+    // Final reduction: subtract n while result >= n
+    while !be32_lt(&result, &CHEETAH_N) {
+        be32_sub_inplace(&mut result, &CHEETAH_N);
+    }
+
+    result
+}
+
+// Check if any bit above position `bit_pos` is set
+#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+fn be64_has_bit_set_above(val: &[u8; 64], bit_pos: usize) -> bool {
+    let byte_pos = bit_pos / 8;
+    if byte_pos == 0 {
+        return false;
+    }
+    for i in 0..byte_pos {
+        if val[i] != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+// Check if the upper 32 bytes (interpreted as a 256-bit number) >= CHEETAH_N
+#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+fn be64_upper32_gte_n(val: &[u8; 64]) -> bool {
+    for i in 0..32 {
+        if val[i] != CHEETAH_N[i] {
+            return val[i] > CHEETAH_N[i];
+        }
+    }
+    true // Equal
+}
+
+// Subtract CHEETAH_N << (shift * 8) from val
+#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+fn be64_sub_n_shifted(val: &mut [u8; 64], shift: usize) {
+    let mut borrow: i16 = 0;
+    for i in (0..32).rev() {
+        let idx = 32 + i + shift;
+        if idx >= 64 {
+            continue;
+        }
+        let v = val[idx] as i16 - CHEETAH_N[i] as i16 - borrow;
+        if v < 0 {
+            val[idx] = (v + 256) as u8;
+            borrow = 1;
+        } else {
+            val[idx] = v as u8;
+            borrow = 0;
+        }
+    }
+    // Propagate borrow to higher bytes
+    if borrow != 0 && shift > 0 {
+        let mut idx = 32 + shift - 1;
+        loop {
+            let v = val[idx] as i16 - borrow;
+            if v < 0 {
+                val[idx] = (v + 256) as u8;
+                borrow = 1;
+            } else {
+                val[idx] = v as u8;
+                break;
+            }
             if idx == 0 {
                 break;
             }
             idx -= 1;
         }
     }
-    mod_n_from_be_bytes(&prod)
 }
 
 #[inline]

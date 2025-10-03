@@ -14,7 +14,7 @@ nockapp = { path = "./nockchain-core/crates/nockapp", default-features = false, 
 nockvm = { path = "./nockchain-core/crates/nockvm/rust/nockvm" }
 nockchain-libp2p-io = { path = "./nockchain-core/crates/nockchain-libp2p-io", default-features = false }
 zkvm-jetpack = { path = "./nockchain-core/crates/zkvm-jetpack" }
-ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig", default-features = false, features = ["num-traits"] }
+ibig = { path = "./nockchain-core/crates/nockvm/rust/ibig", default-features = false }
 murmur3 = { path = "./nockchain-core/crates/nockvm/rust/murmur3" }
 nockvm_macros = { path = "./nockchain-core/crates/nockvm/rust/nockvm_macros" }
 
