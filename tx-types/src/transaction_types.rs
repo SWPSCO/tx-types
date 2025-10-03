@@ -154,7 +154,7 @@ impl NName {
         // - First hash wrapped with %hash tag
         // - Second hash wrapped with %hash tag
         // - The nil (~) wrapped with %leaf tag
-        
+
         if self.p.len() >= 2 {
             // Create the structure: [[%hash hash1] [%hash hash2] [%leaf 0]]
             // This is a triple where each hash is wrapped with Hash variant
@@ -177,9 +177,66 @@ impl NName {
             Hashable::null()
         }
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
+    }
+
+    /// Create a default NName from components
+    /// Used for generating note names from lock, source, and timelock
+    pub fn new_default(owners: Lock, source: Source, timelock: Timelock) -> Self {
+        Self {
+            p: vec![
+                Self::first(owners, timelock.intent.is_some()),
+                Self::last(source, timelock),
+            ],
+        }
+    }
+
+    /// Compute the first hash component of an NName
+    /// Based on Hoon implementation:
+    /// |=  [owners=lock has-timelock=?]
+    /// %-  hash-hashable:tip5
+    /// :*  leaf+&                   :: outcome of first pact
+    ///     leaf+has-timelock        :: does it have a timelock?
+    ///     hash+(hash:lock owners)  :: owners of note
+    ///     leaf+~                   :: first pact
+    /// ==
+    pub fn first(owners: Lock, has_timelock: bool) -> Hash {
+        let hashable = Hashable::cell(
+            Hashable::null(),
+            Hashable::cell(
+                Hashable::leaf_u64(if has_timelock { 0 } else { 1 }),
+                Hashable::cell(
+                    Hashable::Hash(owners.to_hash()),
+                    Hashable::null()
+                )
+            )
+        );
+        hash_hashable(&hashable)
+    }
+
+    /// Compute the last hash component of an NName
+    /// Based on Hoon implementation:
+    /// |=  [=source =timelock]
+    /// %-  hash-hashable:tip5
+    /// :*  leaf+&                          :: outcome of second pact
+    ///     (hashable:^source source)       :: source of note
+    ///     hash+(hash:^timelock timelock)  :: timelock of note
+    ///     leaf+~                          :: second pact
+    /// ==
+    pub fn last(source: Source, timelock: Timelock) -> Hash {
+        let hashable = Hashable::cell(
+            Hashable::null(),
+            Hashable::cell(
+                Hashable::Hash(source.to_hash()),
+                Hashable::cell(
+                    Hashable::Hash(timelock.to_hash()),
+                    Hashable::null()
+                )
+            )
+        );
+        hash_hashable(&hashable)
     }
 }
 
@@ -1070,6 +1127,26 @@ impl Inputs {
 pub struct Transaction {
     pub name: String,
     pub p: Inputs
+}
+
+// Tx-engine transaction representation (actual blockchain transaction)
+// This is different from the wallet Transaction type above
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Tx {
+    pub raw_tx: RawTransaction,
+    pub total_size: u64,
+    pub outputs: Outputs,
+}
+
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Outputs {
+    pub map: ZMap<Lock, Output>,
+}
+
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Output {
+    pub note: NNote,
+    pub seeds: Seeds,
 }
 
 // Raw transaction structure matching Hoon raw-tx form

@@ -43,6 +43,9 @@ pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 // Re-export main transaction types
 pub use transaction_types::*;
 
+// Re-export tx-engine types
+pub use transaction_types::{Tx, Outputs, Output};
+
 // Re-export block types for RPC usage
 pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, SimpleTransactionOutput, CoinbaseRecipient};
 
