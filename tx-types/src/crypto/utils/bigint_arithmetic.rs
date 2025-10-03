@@ -1,7 +1,7 @@
 /// Big-endian 32-byte arithmetic operations modulo curve order
 use crate::crypto::cheetah::T8;
 
-#[cfg(feature = "no-std-crypto")]
+#[cfg(not(feature = "std"))]
 use ibig::UBig;
 
 const GOLDILOCKS_P: u64 = 0xffff_ffff_0000_0001;
@@ -116,7 +116,7 @@ pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     sum
 }
 
-#[cfg(all(not(feature = "std"), feature = "no-std-crypto"))]
+#[cfg(not(feature = "std"))]
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     let a_big = UBig::from_be_bytes(a);
@@ -135,7 +135,8 @@ pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     result
 }
 
-#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+// Old manual implementation - no longer used
+#[cfg(all(not(feature = "std"), feature = "never"))]
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     // Schoolbook multiplication: compute full 64-byte product
@@ -174,8 +175,8 @@ pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     reduce_64byte_mod_n(&prod)
 }
 
-// Reduce a 64-byte big-endian value modulo CHEETAH_N
-#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+// Old manual implementation - no longer used
+#[cfg(all(not(feature = "std"), feature = "never"))]
 fn reduce_64byte_mod_n(val: &[u8; 64]) -> [u8; 32] {
     // Copy the value to a mutable buffer
     let mut rem = [0u8; 64];
@@ -204,8 +205,8 @@ fn reduce_64byte_mod_n(val: &[u8; 64]) -> [u8; 32] {
     result
 }
 
-// Check if any bit above position `bit_pos` is set
-#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+// Old manual implementation - no longer used
+#[cfg(all(not(feature = "std"), feature = "never"))]
 fn be64_has_bit_set_above(val: &[u8; 64], bit_pos: usize) -> bool {
     let byte_pos = bit_pos / 8;
     if byte_pos == 0 {
@@ -219,8 +220,8 @@ fn be64_has_bit_set_above(val: &[u8; 64], bit_pos: usize) -> bool {
     false
 }
 
-// Check if the upper 32 bytes (interpreted as a 256-bit number) >= CHEETAH_N
-#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+// Old manual implementation - no longer used
+#[cfg(all(not(feature = "std"), feature = "never"))]
 fn be64_upper32_gte_n(val: &[u8; 64]) -> bool {
     for i in 0..32 {
         if val[i] != CHEETAH_N[i] {
@@ -230,8 +231,8 @@ fn be64_upper32_gte_n(val: &[u8; 64]) -> bool {
     true // Equal
 }
 
-// Subtract CHEETAH_N << (shift * 8) from val
-#[cfg(all(not(feature = "std"), not(feature = "no-std-crypto")))]
+// Old manual implementation - no longer used
+#[cfg(all(not(feature = "std"), feature = "never"))]
 fn be64_sub_n_shifted(val: &mut [u8; 64], shift: usize) {
     let mut borrow: i16 = 0;
     for i in (0..32).rev() {

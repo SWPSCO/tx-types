@@ -13,7 +13,7 @@ nockapp = { workspace = true, optional = true }
 nockvm = { workspace = true, optional = true }
 nockchain-libp2p-io = { workspace = true, optional = true }
 zkvm-jetpack = { workspace = true, optional = true }
-ibig = { workspace = true, optional = true }
+ibig = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 either = { workspace = true, optional = true }
@@ -28,10 +28,9 @@ zeroize = { workspace = true }
 bip39 = { workspace = true, optional = true }
 
 [features]
-default = ["std"]
+default = []
 std = [
-    "dep:ibig",
-    "ibig?/std",
+    "ibig/std",
     "dep:anyhow",
     "dep:bs58",
     "dep:chrono",
@@ -47,6 +46,4 @@ std = [
     "dep:zkvm-jetpack",
     "dep:bip39",
 ]
-# Enable ibig for no-std crypto operations
-no-std-crypto = ["dep:ibig"]
 tracy = []
