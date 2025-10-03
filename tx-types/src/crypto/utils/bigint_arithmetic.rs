@@ -65,6 +65,51 @@ pub fn be32_sub_inplace(a: &mut [u8; 32], b: &[u8; 32]) {
     }
 }
 
+#[cfg(feature = "std")]
+#[inline]
+pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    use num_bigint::BigUint;
+
+    // Convert inputs to BigUint (big-endian)
+    let a_big = BigUint::from_bytes_be(a);
+    let b_big = BigUint::from_bytes_be(b);
+    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
+
+    // Perform modular addition
+    let sum_big = (a_big + b_big) % n_big;
+
+    // Convert back to 32-byte big-endian array
+    let sum_bytes = sum_big.to_bytes_be();
+    let mut result = [0u8; 32];
+    let offset = 32 - sum_bytes.len();
+    result[offset..].copy_from_slice(&sum_bytes);
+
+    result
+}
+
+#[cfg(feature = "std")]
+#[inline]
+pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    use num_bigint::BigUint;
+
+    // Convert inputs to BigUint (big-endian)
+    let a_big = BigUint::from_bytes_be(a);
+    let b_big = BigUint::from_bytes_be(b);
+    let n_big = BigUint::from_bytes_be(&CHEETAH_N);
+
+    // Perform modular multiplication
+    let prod_big = (a_big * b_big) % n_big;
+
+    // Convert back to 32-byte big-endian array
+    let prod_bytes = prod_big.to_bytes_be();
+    let mut result = [0u8; 32];
+    let offset = 32 - prod_bytes.len();
+    result[offset..].copy_from_slice(&prod_bytes);
+
+    result
+}
+
+#[cfg(not(feature = "std"))]
 #[inline]
 pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     let (mut sum, carry) = add_be32(a, b);
@@ -74,8 +119,10 @@ pub fn add_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     sum
 }
 
+#[cfg(not(feature = "std"))]
 #[inline]
 pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    // Note: This is the NO-STD version using manual byte multiplication
     let mut prod = [0u8; 64];
     for i in 0..32 {
         let mut carry: u32 = 0;
