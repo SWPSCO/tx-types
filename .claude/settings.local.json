@@ -3,7 +3,11 @@
     "allow": [
       "Bash(git fetch:*)",
       "WebFetch(domain:github.com)",
-      "Bash(cargo audit:*)"
+      "Bash(cargo audit:*)",
+      "WebSearch",
+      "Bash(git log:*)",
+      "Bash(git checkout:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []
