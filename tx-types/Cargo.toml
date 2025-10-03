@@ -28,7 +28,7 @@ zeroize = { workspace = true }
 bip39 = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["std"]
 std = [
     "ibig/std",
     "dep:anyhow",
