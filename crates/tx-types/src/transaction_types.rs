@@ -143,6 +143,54 @@ pub struct NName {
 }
 
 impl NName {
+    pub fn new_default(owners: Lock, source: Source, timelock: Timelock) -> Self {
+        Self {
+            p: vec![
+                Self::first(owners, timelock.intent.is_some()),
+                Self::last(source, timelock),
+            ],
+        }
+    }
+    pub fn first(owners: Lock, has_timelock: bool) -> Hash {
+        // |=  [owners=lock has-timelock=?]
+        // %-  hash-hashable:tip5
+        // :*  leaf+&                   :: outcome of first pact
+        //     leaf+has-timelock        :: does it have a timelock?
+        //     hash+(hash:lock owners)  :: owners of note
+        //     leaf+~                   :: first pact
+        // ==
+        let hashable = Hashable::cell(
+            Hashable::null(),
+            Hashable::cell(
+                Hashable::leaf_u64(if has_timelock { 0 } else { 1 }),
+                Hashable::cell(
+                    Hashable::Hash(owners.to_hash()),
+                    Hashable::null()
+                )
+            )
+        );
+        hash_hashable(&hashable)
+    }
+    pub fn last(source: Source, timelock: Timelock) -> Hash {
+        // |=  [=source =timelock]
+        // %-  hash-hashable:tip5
+        // :*  leaf+&                          :: outcome of second pact
+        //     (hashable:^source source)       :: source of note
+        //     hash+(hash:^timelock timelock)  :: timelock of note
+        //     leaf+~                          :: second pact
+        // ==
+        let hashable = Hashable::cell(
+            Hashable::null(),
+            Hashable::cell(
+                Hashable::Hash(source.to_hash()),
+                Hashable::cell(
+                    Hashable::Hash(timelock.to_hash()),
+                    Hashable::null()
+                )
+            )
+        );
+        hash_hashable(&hashable)
+    }
     pub fn to_hashable(&self) -> Hashable {
         // NName hashable from Hoon (found in tx-engine.hoon):
         // ++  hashable
@@ -999,6 +1047,26 @@ impl Inputs {
 pub struct Transaction {
     pub name: String,
     pub p: Inputs
+}
+
+// Actual tx-engine transaction, not to be confused with the wallet Transaction type
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Tx {
+    pub raw_tx: RawTransaction,
+    pub total_size: u64,
+    pub outputs: Outputs,
+}
+
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Outputs {
+    pub map: ZMap<Lock, Output>,
+}
+
+// Output
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct Output {
+    pub note: NNote,
+    pub seeds: Seeds,
 }
 
 // Raw transaction structure matching Hoon raw-tx form

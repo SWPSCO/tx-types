@@ -1,4 +1,4 @@
-use crate::transaction_types::{Hash, Lock, Coins};
+use crate::transaction_types::*;
 use crate::collections::zset::ZSet;
 use crate::collections::zmap::ZMap;
 
@@ -25,8 +25,55 @@ pub struct Page {
     pub epoch_counter: u64,
     pub target: BigNum,
     pub accumulated_work: BigNum,
-    pub height: u64,
+    pub height: PageNumber,
     pub msg: Vec<u64>,
+}
+
+use tracing::info;
+
+impl Page {
+    pub fn coinbase_notes(&self) -> Vec<NNote> {
+        // init the notes vector
+        let mut notes: Vec<NNote> = Vec::new();
+
+        // get the locks coinbases
+        let locks: Vec<(Lock, Coins)> = self.coinbase.tap()
+            .into_iter().map(|(lock, coins)| (lock, coins)).collect();
+
+        for (lock, assets) in locks {
+            let page = self.clone();
+
+            let timelock = Self::coinbase_timelock(self.height.clone());
+
+            let meta = NNoteHead {
+                version: 0, // TODO
+                origin_page: page.height,
+                timelock: timelock.clone(),
+            };
+
+            let source = Source { p: self.parent.clone(), is_coinbase: true };
+            let name = NName::new_default(lock.clone(), source.clone(), timelock.clone());
+
+            let note = NNote { meta, name, lock, source, assets };
+
+            notes.push(note);
+        }
+        notes
+    }
+    pub fn coinbase_timelock(height: PageNumber) -> Timelock {
+        const first_month_coinbase_min: u64 = 4383;
+        const coinbase_timelock_min: u64 = 100;
+
+        let val = if height.value < first_month_coinbase_min {
+            Some(PageNumber { value: first_month_coinbase_min })
+        } else {
+            Some(PageNumber { value: coinbase_timelock_min })
+        };
+        Timelock::new_unchecked(Some((
+            TimelockRange { min: None, max: None },
+            TimelockRange { min: val, max: None },
+        )))
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]
