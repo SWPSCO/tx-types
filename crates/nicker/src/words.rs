@@ -1,5 +1,4 @@
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
+// Simple deterministic word selection without external RNG
 
 const ADJECTIVES: &[&str] = &[
     "sleepy", "hungry", "brave", "fuzzy", "clever", "rusty",
@@ -29,29 +28,28 @@ const NOUNS2: &[&str] = &[
 
 pub fn generate_tx_name(input: String) -> String {
     // 1. Convert the input data to u64
-    let input_data: u64 = input.as_bytes().into_iter().fold(0u64, |h, b| h.wrapping_mul(131) ^ *b as u64) | 1;
-    
+    let input_data: u64 = input.as_bytes().iter().fold(0u64, |h, b| h.wrapping_mul(131) ^ *b as u64) | 1;
+
     // 2. Pull current time in millis:
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time went backwards")
         .as_secs() as u64;
-    
-    // 3. Mix in some randomness:
-    let extra: u64 = rand::random();
 
-    // 4. Combine into one 64‑bit seed (e.g. XOR or wrapping add):
-    let seed = input_data ^ extra;
+    // 3. Use a simple hash-based deterministic selection
+    let seed = input_data.wrapping_mul(now);
 
-    // 5. Seed a small, fast RNG:
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    // 4. Select words deterministically using the seed
+    let adj_idx = (seed.wrapping_mul(2654435761) >> 32) as usize % ADJECTIVES.len();
+    let noun_idx = (seed.wrapping_mul(2654435789) >> 32) as usize % NOUNS.len();
+    let verb_idx = (seed.wrapping_mul(2654435813) >> 32) as usize % VERBS.len();
+    let noun2_idx = (seed.wrapping_mul(2654435831) >> 32) as usize % NOUNS2.len();
 
-    // 6. Construct the phrases:
-    let adj = ADJECTIVES[rng.gen_range(0..ADJECTIVES.len())];
-    let noun = NOUNS[rng.gen_range(0..NOUNS.len())];
-    let verb = VERBS[rng.gen_range(0..VERBS.len())];
-    let noun2 = NOUNS2[rng.gen_range(0..NOUNS2.len())];
+    let adj = ADJECTIVES[adj_idx];
+    let noun = NOUNS[noun_idx];
+    let verb = VERBS[verb_idx];
+    let noun2 = NOUNS2[noun2_idx];
 
-    // 6. Combine with an underscore:
+    // 5. Combine with timestamp and words:
     format!("{}-{}-{}-{}-{}", now, adj, noun, verb, noun2)
 }

@@ -15,11 +15,11 @@ use nockapp::Bytes;
 
 use tx_types::collections::ZMap;
 use tx_types::transaction_types::*;
-use zkvm_jetpack::form::math::base::bneg;
-use zkvm_jetpack::form::math::bpoly::{bpegcd, bpscal};
-use zkvm_jetpack::form::math::badd;
-use zkvm_jetpack::form::math::tip5::permute as tip5_permute;
-use zkvm_jetpack::form::poly::Belt;
+use nockchain_math::belt::bneg;
+use nockchain_math::bpoly::{bpegcd, bpscal};
+use nockchain_math::belt::badd;
+use nockchain_math::tip5::permute as tip5_permute;
+use nockchain_math::belt::Belt;
 
 
 // ===========================================================================
@@ -33,7 +33,13 @@ pub enum SecretSource<'a> {
 
 /// Sign a Transaction in-memory, return signed jam bytes.
 pub fn sign_transaction(mut tx: Transaction, secret: SecretSource) -> Result<Bytes, String> {
-    let tx_id: Hash = tx_types::tx_to_noun::generate_tx_id(tx.p.p.clone());
+    // For now, compute tx_id with default timelock range and fees based on inputs
+    // TODO: Update Transaction struct to include timelock_range and total_fees
+    let inputs = &tx.p;
+    let timelock_range = TimelockRange { min: None, max: None };
+    let total_fees = Coins { value: tx.p.p.tap().iter().map(|(_, input)| input.spend.fee.value).sum() };
+
+    let tx_id: Hash = tx_types::hashing::tx_id::compute_tx_id(inputs, &timelock_range, total_fees);
 
     // Master secret
     let (sk_be32, _cc) = match secret {

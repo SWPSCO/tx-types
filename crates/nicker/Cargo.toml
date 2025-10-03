@@ -6,7 +6,7 @@ version.workspace = true
 [features]
 default = ["host"]
 host = ["dep:nockapp", "dep:noun-serde", "dep:noun-serde-derive", "dep:nockvm",
-        "dep:nockvm_macros", "dep:nockchain-libp2p-io", "dep:tx-types", "dep:proc-macro2", "dep:zkvm-jetpack"]
+        "dep:nockvm_macros", "dep:nockchain-libp2p-io", "dep:nockchain-math", "dep:tx-types", "dep:proc-macro2", "dep:zkvm-jetpack"]
 # firmware = pure no_std core (alloc only)
 fw = []
 
@@ -24,8 +24,6 @@ toml = "0.9.4"
 reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "json"] }
 futures = { workspace = true }
 hex = { workspace = true }
-rand = { workspace = true }
-rand_chacha = "0.3"
 num-traits = { workspace = true }
 serialport = "4"
 postcard = "1"
@@ -48,6 +46,7 @@ noun-serde = { workspace = true, optional = true }
 nockvm = { workspace = true, optional = true }
 nockvm_macros = { workspace = true, optional = true }
 nockchain-libp2p-io = { workspace = true, optional = true }
+nockchain-math = { workspace = true, optional = true }
 zkvm-jetpack = { workspace = true, optional = true }
 proc-macro2 = { workspace = true, optional = true }
 

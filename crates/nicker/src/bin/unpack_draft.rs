@@ -24,8 +24,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let noun = slab.cue_into(draft_bytes.into())?;
     println!("JAM decoded successfully\n");
     
-    // Parse as Transaction (from_noun takes 2 arguments: slab and noun)
-    let transaction = Transaction::from_noun(&mut slab, &noun)
+    // Parse as Transaction
+    let transaction = Transaction::from_noun(&noun)
         .map_err(|e| format!("Failed to decode transaction: {:?}", e))?;
     
     println!("=== Transaction Contents ===");

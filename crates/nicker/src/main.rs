@@ -123,7 +123,7 @@ async fn sign_draft_transaction(cfg: &Config, sargs: SignArgs) -> Result<()> {
     // cue transaction
     let mut slab: NounSlab = NounSlab::new();
     let noun = slab.cue_into(draft_bytes.into())?;
-    let transaction = Transaction::from_noun(&mut slab, &noun)
+    let transaction = Transaction::from_noun(&noun)
         .map_err(|e| anyhow::anyhow!("Failed to decode transaction: {:?}", e))?;
     
     // get seed
@@ -185,8 +185,14 @@ async fn build_inputs_with_fee(input_notes: Vec<NNote>, payouts: Vec<Payout>, fe
         return Err(anyhow::anyhow!("Selected inputs cannot cover all payouts + fees"));
     }
 
-    let name = tx_types::tx_to_noun::generate_tx_id(inputs.clone()).to_b58();
-    Ok((Inputs { p: inputs }, name))
+    // Compute tx_id using the new API
+    let inputs_struct = Inputs { p: inputs };
+    let timelock_range = TimelockRange { min: None, max: None };
+    let total_fees = Coins { value: fee_per_input * inputs_struct.p.tap().len() as u64 };
+    let tx_id = tx_types::hashing::tx_id::compute_tx_id(&inputs_struct, &timelock_range, total_fees);
+    let name = tx_id.to_b58();
+
+    Ok((inputs_struct, name))
 }
 
 async fn build_spend_from_payouts(note: NNote, payouts: Vec<Payout>, fee_per_input: u64)

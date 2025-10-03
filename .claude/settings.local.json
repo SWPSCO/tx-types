@@ -7,7 +7,8 @@
       "WebSearch",
       "Bash(git log:*)",
       "Bash(git checkout:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(cargo build:*)"
     ],
     "deny": [],
     "ask": []
