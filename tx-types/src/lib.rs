@@ -30,7 +30,11 @@ pub use hashing::{
 
 pub use collections::{zmap::ZMap, zset::{ZSet, DorTip}};
 
-pub use validation::{validator::{TransactionValidator, TransactionValidationError}};
+pub use validation::{
+    TransactionValidator,
+    TransactionValidationError,
+    schnorr_verify_digest,
+};
 
 pub use crypto::CryptoError;
 

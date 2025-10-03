@@ -157,6 +157,50 @@ pub fn digest_to_base58(digest: &Hash) -> String {
     bs58::encode(result.to_bytes_be()).into_string()
 }
 
+/// Hash a transcript list using TIP5 with proper Hoon list structure
+///
+/// This function is used by the Schnorr signature process to generate nonces
+/// and challenges. It takes multiple arrays of u64 values, flattens them into
+/// a single list, and hashes the list using TIP5.
+///
+/// The list is constructed in Hoon format: [a [b [c [d ... 0]]]]
+/// (right-associative with nil terminator)
+///
+/// # Arguments
+/// * `element_arrays` - Arrays of u64 values to hash (e.g., public key coordinates, message)
+///
+/// # Returns
+/// * `Ok(Hash)` - The TIP5 hash of the transcript list
+/// * `Err(Tip5Error)` - If hashing fails
+///
+/// # Used in Schnorr signatures:
+/// - Nonce generation: TIP5([pubkey.x, pubkey.y, message])
+/// - Challenge generation: TIP5([R.x, R.y, pubkey.x, pubkey.y, message])
+pub fn hash_transcript_list(element_arrays: &[&[u64]]) -> Result<Hash, crate::hashing::tip5::Tip5Error> {
+    use super::tip5::Tip5Hasher;
+    use nockvm::noun::Cell;
+
+    let mut slab: NounSlab<nockvm::noun::IndirectAtom> = NounSlab::new();
+
+    // Flatten all elements into a single list
+    let mut all_elements = Vec::new();
+    for array in element_arrays {
+        all_elements.extend_from_slice(array);
+    }
+
+    // Build Hoon list structure: [a [b [c [d ... 0]]]]
+    let mut list = nockvm::noun::Atom::new(&mut slab, 0).as_noun(); // Start with nil (0)
+
+    // Build list in reverse order (right-associative)
+    for &element in all_elements.iter().rev() {
+        let atom = nockvm::noun::Atom::new(&mut slab, element).as_noun();
+        list = Cell::new(&mut slab, atom, list).as_noun();
+    }
+
+    // Hash the list using TIP5
+    Tip5Hasher::hash_varlen(list)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +264,43 @@ mod tests {
         );
         
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_transcript_list_deterministic() {
+        // Test that hashing is deterministic
+        let numbers = [1u64, 2u64, 3u64, 4u64, 5u64];
+        let element_arrays: &[&[u64]] = &[&numbers];
+
+        let result1 = hash_transcript_list(element_arrays)
+            .expect("hash_transcript_list should succeed");
+        let result2 = hash_transcript_list(element_arrays)
+            .expect("hash_transcript_list should succeed");
+
+        assert_eq!(result1.values, result2.values, "Hash should be deterministic");
+    }
+
+    #[test]
+    fn test_hash_transcript_list_multiple_arrays() {
+        // Test hashing with multiple input arrays
+        let arr1 = [1u64, 2u64, 3u64];
+        let arr2 = [4u64, 5u64];
+        let arr3 = [6u64, 7u64, 8u64, 9u64];
+
+        let element_arrays: &[&[u64]] = &[&arr1, &arr2, &arr3];
+
+        let result = hash_transcript_list(element_arrays)
+            .expect("hash_transcript_list should succeed");
+
+        // Verify it produces a valid hash (5 u64 values)
+        assert_eq!(result.values.len(), 5);
+
+        // Compare with hashing all elements in one array
+        let all_elements = [1u64, 2u64, 3u64, 4u64, 5u64, 6u64, 7u64, 8u64, 9u64];
+        let result_flat = hash_transcript_list(&[&all_elements])
+            .expect("hash_transcript_list should succeed");
+
+        assert_eq!(result.values, result_flat.values,
+            "Multiple arrays should hash same as flattened array");
     }
 }

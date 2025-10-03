@@ -5,17 +5,16 @@ extern crate alloc;
 use crate::transaction_types::{Hash, T8, SchnorrPubkey, Signature, SchnorrSignature, Chal, Sig, RawTransaction, Inputs, Input, NName, Coins, Spend};
 use crate::crypto::cheetah::point::cheetah_pub_from_sk;
 use crate::crypto::utils::{
-    trunc_g_order_to_be32, 
-    is_zero32, 
-    mul_mod_n, 
+    trunc_g_order_to_be32,
+    is_zero32,
+    mul_mod_n,
     add_mod_n,
     be32_atom_to_t8_le,
     be32_lt,
-    CHEETAH_N
+    CHEETAH_N,
+    t8_to_be32,
 };
-use crate::hashing::tip5::Tip5Hasher;
-use nockvm::noun::Cell;
-use nockapp::noun::slab::NounSlab;
+use crate::hashing::hasher::hash_transcript_list;
 
 /// Sign a TIP-5 digest with Schnorr over Cheetah, Hoon-compatible
 /// Uses proper transaction types: T8 for secret keys, SchnorrPubkey for public keys, Hash for messages
@@ -99,44 +98,6 @@ pub fn schnorr_sign_digest(
   let sig_t8 = be32_atom_to_t8_le(&s_be);
 
   (chal_t8, sig_t8)
-}
-
-/// Convert T8 to 32-byte big-endian array
-fn t8_to_be32(t8: &T8) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    // T8 stores 8 limbs in little-endian order, each limb is 32 bits
-    for i in 0..8 {
-        let limb = t8.values[i] as u32;
-        let bytes = limb.to_le_bytes();
-        // Place in big-endian position: bytes for limb i go to positions [28-4*i..32-4*i]
-        for j in 0..4 {
-            result[31 - (i * 4 + j)] = bytes[j];
-        }
-    }
-    result
-}
-
-/// Hash a transcript list using TIP5 with proper Hoon list structure
-fn hash_transcript_list(element_arrays: &[&[u64]]) -> Result<Hash, crate::hashing::tip5::Tip5Error> {
-    let mut slab: NounSlab<nockvm::noun::IndirectAtom> = NounSlab::new();
-    
-    // Flatten all elements into a single list
-    let mut all_elements = Vec::new();
-    for array in element_arrays {
-        all_elements.extend_from_slice(array);
-    }
-    
-    // Build Hoon list structure: [a [b [c [d ... 0]]]]
-    let mut list = nockvm::noun::Atom::new(&mut slab, 0).as_noun(); // Start with nil (0)
-    
-    // Build list in reverse order (right-associative)
-    for &element in all_elements.iter().rev() {
-        let atom = nockvm::noun::Atom::new(&mut slab, element).as_noun();
-        list = Cell::new(&mut slab, atom, list).as_noun();
-    }
-    
-    // Hash the list using TIP5
-    Tip5Hasher::hash_varlen(list)
 }
 
 /// Sign a Spend structure using Schnorr signature
