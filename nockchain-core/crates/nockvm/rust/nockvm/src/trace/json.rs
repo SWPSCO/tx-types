@@ -48,9 +48,7 @@ impl TraceBackend for JsonBackend {
                 .start
                 .saturating_duration_since(self.process_start)
                 .as_micros() as f64;
-            let dur = now
-                .saturating_duration_since(data.start)
-                .as_micros() as f64;
+            let dur = now.saturating_duration_since(data.start).as_micros() as f64;
 
             // Don't write out traces less than 33us
             // (same threshhold used in vere)

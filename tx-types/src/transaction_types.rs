@@ -1,15 +1,15 @@
 use crate::collections::{ZMap, ZSet};
+use crate::crypto::ser_a_pt;
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
-use crate::crypto::ser_a_pt;
 use bs58;
-use num_bigint::BigUint;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
 use nockapp::Noun;
 use nockvm::noun::{Atom, NounAllocator, D, T};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use num_bigint::BigUint;
 use std::collections::HashMap;
 
 // Coin name structure
@@ -432,10 +432,7 @@ impl SchnorrPubkey {
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
     pub fn to_b58(&self) -> String {
-        let ser = ser_a_pt(&(
-            self.x.values,
-            self.y.values,
-        ));
+        let ser = ser_a_pt(&(self.x.values, self.y.values));
         bs58::encode(ser).into_string()
     }
 }

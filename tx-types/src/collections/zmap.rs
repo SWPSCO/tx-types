@@ -257,18 +257,30 @@ where
     /// Returns a UBig representing the hash for comparison
     fn compute_tip5_hash(key: &K) -> UBig {
         use crate::transaction_types::Hash;
-        use nockapp::noun::slab::NounSlab;
 
-        // Create a noun slab and convert key to noun
-        let mut slab: NounSlab = NounSlab::new();
-        let key_noun = key.to_noun(&mut slab);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use nockapp::noun::slab::NounSlab;
 
-        // Compute the TIP5 hash
-        let hash =
-            Tip5Hasher::hash_noun_varlen(key_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+            // Create a noun slab and convert key to noun
+            let mut slab: NounSlab = NounSlab::new();
+            let key_noun = key.to_noun(&mut slab);
 
-        // Convert Hash to UBig using our new method
-        hash.to_ubig()
+            // Compute the TIP5 hash
+            let hash =
+                Tip5Hasher::hash_noun_varlen(key_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+
+            // Convert Hash to UBig using our new method
+            hash.to_ubig()
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // For WASM: use dor-tip only (structural ordering) to avoid NockStack allocation
+            // This means we lose the hash-based treap balancing, but avoid 64MB allocations
+            // The map will still work correctly, just potentially with worse balance
+            UBig::from(0u64) // Return constant so gor_tip falls back to dor_tip
+        }
     }
 
     /// gor-tip: Compare by single hash (UBig integer), fallback to dor-tip

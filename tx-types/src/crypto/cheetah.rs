@@ -5,7 +5,7 @@ use hmac::{Hmac, Mac};
 use sha2::{Sha256, Sha512};
 
 use crate::crypto::goldilocks::{bpegcd_full, tip5_permute, Belt, GOLDILOCKS_P};
-use crate::crypto::utils::{mul_mod_n, add_mod_n};
+use crate::crypto::utils::{add_mod_n, mul_mod_n};
 
 // ---- Constants --------------------------------------------------------------
 
@@ -391,20 +391,32 @@ pub fn test_tip5_hash_words_debug(words: &[u64]) -> [u64; DIGEST_LENGTH] {
         padded.push(0);
     }
 
-    println!("  After padding ({} elements): {:?}", padded.len(), &padded[..core::cmp::min(padded.len(), 15)]);
+    println!(
+        "  After padding ({} elements): {:?}",
+        padded.len(),
+        &padded[..core::cmp::min(padded.len(), 15)]
+    );
 
     // Montify all elements
     for i in 0..padded.len() {
         padded[i] = f_montify(padded[i]);
     }
 
-    println!("  After montification: {:016x?}", &padded[..core::cmp::min(padded.len(), 10)]);
+    println!(
+        "  After montification: {:016x?}",
+        &padded[..core::cmp::min(padded.len(), 10)]
+    );
 
     // Absorb blocks
     let mut offset = 0;
     let mut block_num = 0;
     while offset < padded.len() {
-        println!("  Block {}: absorbing elements {}..{}", block_num, offset, offset + RATE);
+        println!(
+            "  Block {}: absorbing elements {}..{}",
+            block_num,
+            offset,
+            offset + RATE
+        );
 
         // Replace first RATE elements of state
         for i in 0..RATE {
@@ -419,7 +431,10 @@ pub fn test_tip5_hash_words_debug(words: &[u64]) -> [u64; DIGEST_LENGTH] {
         block_num += 1;
     }
 
-    println!("  State before demontification: {:016x?}", &[state[0], state[1], state[2], state[3], state[4]]);
+    println!(
+        "  State before demontification: {:016x?}",
+        &[state[0], state[1], state[2], state[3], state[4]]
+    );
 
     // Demontify the digest
     let digest = [
@@ -732,13 +747,9 @@ mod schnorr_tests {
         // Test vectors from reference implementation (Hoon test)
         let sk_be: [u8; 32] = [
             0x12, 0x34, 0x56, 0x78, // MSB
-            0x9a, 0xbc, 0xde, 0xf0,
-            0x11, 0x11, 0x22, 0x22,
-            0x33, 0x33, 0x44, 0x44,
-            0x55, 0x55, 0x66, 0x66,
-            0x77, 0x77, 0x88, 0x88,
-            0x99, 0x99, 0xaa, 0xaa,
-            0xbb, 0xbb, 0xcc, 0xcc, // LSB
+            0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55,
+            0x66, 0x66, 0x77, 0x77, 0x88, 0x88, 0x99, 0x99, 0xaa, 0xaa, 0xbb, 0xbb, 0xcc,
+            0xcc, // LSB
         ];
 
         let pk = cheetah_pub_from_sk(sk_be);
@@ -748,24 +759,13 @@ mod schnorr_tests {
 
         // Expected values from reference implementation
         let expected_challenge: [u64; 8] = [
-            0x364619a6,  // LSW
-            0x6af9178c,
-            0x46e47b17,
-            0xf8609591,
-            0xf4c6b69a,
-            0x1a511b32,
-            0xd7e56411,
-            0x2f519cb9,  // MSW
+            0x364619a6, // LSW
+            0x6af9178c, 0x46e47b17, 0xf8609591, 0xf4c6b69a, 0x1a511b32, 0xd7e56411,
+            0x2f519cb9, // MSW
         ];
 
         let expected_signature: [u64; 8] = [
-            0x0918903a,
-            0x0e94f5a7,
-            0x34d7585a,
-            0xb809abfe,
-            0x55753257,
-            0x5b73fced,
-            0x4ac8fd17,
+            0x0918903a, 0x0e94f5a7, 0x34d7585a, 0xb809abfe, 0x55753257, 0x5b73fced, 0x4ac8fd17,
             0x21b70dda,
         ];
 
@@ -778,10 +778,7 @@ mod schnorr_tests {
             challenge.values, expected_challenge,
             "Challenge mismatch - hashing implementation may be incorrect"
         );
-        assert_eq!(
-            signature.values, expected_signature,
-            "Signature mismatch"
-        );
+        assert_eq!(signature.values, expected_signature, "Signature mismatch");
     }
 }
 // ---- SLIP-10 child derivation (xprv/xpub) ----------------------------------

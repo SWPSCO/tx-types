@@ -145,11 +145,11 @@ pub fn mul_mod_n(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     // Multiply each byte of b by all of a
     for i in 0..32 {
         let mut carry: u16 = 0;
-        let b_byte = b[31 - i] as u16;  // Process b from LSB to MSB
+        let b_byte = b[31 - i] as u16; // Process b from LSB to MSB
 
         for j in 0..32 {
-            let a_byte = a[31 - j] as u16;  // Process a from LSB to MSB
-            let prod_idx = 63 - (i + j);     // Result index in prod array
+            let a_byte = a[31 - j] as u16; // Process a from LSB to MSB
+            let prod_idx = 63 - (i + j); // Result index in prod array
 
             let temp = a_byte * b_byte + (prod[prod_idx] as u16) + carry;
             prod[prod_idx] = (temp & 0xff) as u8;
@@ -187,8 +187,9 @@ fn reduce_64byte_mod_n(val: &[u8; 64]) -> [u8; 32] {
 
     // First, reduce by subtracting n<<256, n<<248, etc. until the upper 32 bytes are zero
     for shift in (0..32).rev() {
-        while be64_has_bit_set_above(&rem, 32 * 8 + shift * 8) ||
-              (shift == 0 && be64_upper32_gte_n(&rem)) {
+        while be64_has_bit_set_above(&rem, 32 * 8 + shift * 8)
+            || (shift == 0 && be64_upper32_gte_n(&rem))
+        {
             be64_sub_n_shifted(&mut rem, shift);
         }
     }

@@ -162,6 +162,7 @@ pub enum AllocType {
 pub enum Memory {
     Mmap(MmapMut),
     Malloc(*mut u8, usize),
+    Static(*mut u8, usize),
 }
 
 impl Deref for Memory {
@@ -172,6 +173,7 @@ impl Deref for Memory {
         match self {
             Memory::Mmap(mmap) => mmap.deref(),
             Memory::Malloc(ptr, size) => unsafe { core::slice::from_raw_parts(*ptr, *size) },
+            Memory::Static(ptr, size) => unsafe { core::slice::from_raw_parts(*ptr, *size) },
         }
     }
 }
@@ -182,6 +184,7 @@ impl DerefMut for Memory {
         match self {
             Memory::Mmap(mmap) => mmap.deref_mut(),
             Memory::Malloc(ptr, size) => unsafe { core::slice::from_raw_parts_mut(*ptr, *size) },
+            Memory::Static(ptr, size) => unsafe { core::slice::from_raw_parts_mut(*ptr, *size) },
         }
     }
 }
@@ -222,6 +225,12 @@ impl Memory {
             }
         };
         Ok(memory)
+    }
+
+    pub(crate) fn from_static_slice(slice: &'static mut [u64]) -> Self {
+        let ptr = slice.as_mut_ptr() as *mut u8;
+        let size_bytes = slice.len() << 3;
+        Memory::Static(ptr, size_bytes)
     }
 }
 
@@ -306,15 +315,15 @@ impl NockStack {
         }
     }
 
-    pub fn new_(size: usize, top_slots: usize) -> Result<(NockStack, usize), NewStackError> {
+    fn init_with_memory(
+        mut memory: Memory,
+        size: usize,
+        top_slots: usize,
+    ) -> Result<(NockStack, usize), NewStackError> {
         if top_slots + RESERVED > size {
             return Err(NewStackError::StackTooSmall);
         }
         let free = size - (top_slots + RESERVED);
-        #[cfg(feature = "mmap")]
-        let mut memory = Memory::allocate(AllocType::Mmap, size)?;
-        #[cfg(feature = "malloc")]
-        let mut memory = Memory::allocate(AllocType::Malloc, size)?;
         let start = memory.as_mut_ptr() as *mut u64;
 
         // Here, frame_offset < alloc_offset, so the initial frame is West
@@ -351,6 +360,30 @@ impl NockStack {
             },
             free,
         ))
+    }
+
+    pub fn new_(size: usize, top_slots: usize) -> Result<(NockStack, usize), NewStackError> {
+        #[cfg(feature = "mmap")]
+        let memory = Memory::allocate(AllocType::Mmap, size)?;
+        #[cfg(feature = "malloc")]
+        let memory = Memory::allocate(AllocType::Malloc, size)?;
+        Self::init_with_memory(memory, size, top_slots)
+    }
+
+    pub fn new_static(
+        slice: &'static mut [u64],
+        top_slots: usize,
+    ) -> Result<(NockStack, usize), NewStackError> {
+        let size = slice.len();
+        let memory = Memory::from_static_slice(slice);
+        Self::init_with_memory(memory, size, top_slots)
+    }
+
+    pub fn new_static_stack(slice: &'static mut [u64], top_slots: usize) -> NockStack {
+        match Self::new_static(slice, top_slots) {
+            Ok((stack, _)) => stack,
+            Err(e) => std::panic::panic_any(e),
+        }
     }
 
     fn memory_state(&self, words: Option<usize>) -> MemoryState {

@@ -1,6 +1,6 @@
+use crate::crypto::cheetah::cheetah_pub_from_sk;
 use crate::crypto::cheetah::{xprv_derive_child, xpub_derive_child, XKey};
 use crate::crypto::slip10::{CryptoError, Result};
-use crate::crypto::cheetah::cheetah_pub_from_sk;
 
 /// Wrapper around `XKey` that provides SLIP-10 API
 #[derive(Clone)]

@@ -96,8 +96,12 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
     let sig_t8_vals = be32_atom_to_t8_le(&s_be).values;
 
     (
-        T8 { values: chal_t8_vals },
-        T8 { values: sig_t8_vals },
+        T8 {
+            values: chal_t8_vals,
+        },
+        T8 {
+            values: sig_t8_vals,
+        },
     )
 }
 

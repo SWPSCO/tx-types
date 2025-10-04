@@ -2,8 +2,8 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cmp;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -184,7 +184,11 @@ impl Neg for Belt {
 pub fn badd(a: u64, b: u64) -> u64 {
     let (res, carry) = a.overflowing_add(b);
     let res = if carry { res.wrapping_sub(PRIME) } else { res };
-    if res >= PRIME { res - PRIME } else { res }
+    if res >= PRIME {
+        res - PRIME
+    } else {
+        res
+    }
 }
 
 /// Subtraction modulo GOLDILOCKS_P
@@ -200,7 +204,11 @@ pub fn bsub(a: u64, b: u64) -> u64 {
 /// Negation modulo GOLDILOCKS_P
 #[inline(always)]
 pub fn bneg(a: u64) -> u64 {
-    if a == 0 { 0 } else { PRIME - a }
+    if a == 0 {
+        0
+    } else {
+        PRIME - a
+    }
 }
 
 /// Multiplication modulo GOLDILOCKS_P
@@ -265,11 +273,8 @@ fn reduce_159(low: u64, mid: u32, high: u64) -> u64 {
 pub fn bpsub(a: &[Belt], b: &[Belt], res: &mut [Belt]) {
     let len = cmp::max(a.len(), b.len());
     for i in 0..len {
-        res[i] = if i < a.len() {
-            a[i]
-        } else {
-            Belt::zero()
-        } - if i < b.len() { b[i] } else { Belt::zero() };
+        res[i] = if i < a.len() { a[i] } else { Belt::zero() }
+            - if i < b.len() { b[i] } else { Belt::zero() };
     }
 }
 

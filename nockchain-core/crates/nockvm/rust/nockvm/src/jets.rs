@@ -316,6 +316,14 @@ pub mod util {
         use crate::noun::{Atom, Noun, D, T};
         use crate::unifying_equality::unifying_equality;
 
+        #[cfg(target_arch = "wasm32")]
+        const WASM_STACK_WORDS: usize = 8 * 1024 * 1024; // 8M words = 64 MiB
+
+        #[cfg(target_arch = "wasm32")]
+        #[link_section = ".data.nock_stack"]
+        #[used]
+        static mut NOCK_STACK_ARENA: [u64; WASM_STACK_WORDS] = [0; WASM_STACK_WORDS];
+
         struct TestSlogger {}
 
         impl Slogger for TestSlogger {
@@ -329,7 +337,11 @@ pub mod util {
         }
 
         pub fn init_context() -> Context {
-            let mut stack = NockStack::new(8 << 10 << 10, 0);
+            #[cfg(target_arch = "wasm32")]
+            let mut stack = unsafe { NockStack::new_static_stack(&mut NOCK_STACK_ARENA, 0) };
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let mut stack = NockStack::new(8 << 10 << 10, 0); // 8M words = 64MB
             let cold = Cold::new(&mut stack);
             let warm = Warm::new(&mut stack);
             let hot = Hot::init(&mut stack, URBIT_HOT_STATE);

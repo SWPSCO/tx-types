@@ -8,7 +8,9 @@ const TARGET_B58: &str = "32Mn83P3BDJiA8xXXTPh89zPghFa6GfdtHYTaKvELbnJirfxHRtiFD
 fn main() {
     let seed = bip39_to_seed(MNEMONIC, "").expect("seed");
 
-    let mut bases: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 32, 33, 44, 45, 57, 58, 60, 61, 62, 63, 64, 99, 1337];
+    let mut bases: Vec<u32> = vec![
+        0, 1, 2, 3, 4, 5, 32, 33, 44, 45, 57, 58, 60, 61, 62, 63, 64, 99, 1337,
+    ];
     bases.sort();
     bases.dedup();
 

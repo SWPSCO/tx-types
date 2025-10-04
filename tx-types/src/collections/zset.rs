@@ -18,12 +18,21 @@ pub struct ZSet<T> {
     root: Option<Box<Node<T>>>,
 }
 
+impl<T> ZSet<T> {
+    /// WASM helper: Get access to the root node for manual traversal
+    /// This allows WASM code to traverse the tree structure without NockStack
+    #[cfg(target_arch = "wasm32")]
+    pub fn root_ref(&self) -> Option<&Node<T>> {
+        self.root.as_deref()
+    }
+}
+
 /// Internal node structure
 #[derive(Clone)]
-struct Node<T> {
-    value: T,
-    left: Option<Box<Node<T>>>,
-    right: Option<Box<Node<T>>>,
+pub struct Node<T> {
+    pub value: T,
+    pub left: Option<Box<Node<T>>>,
+    pub right: Option<Box<Node<T>>>,
 }
 
 impl<T> Node<T> {

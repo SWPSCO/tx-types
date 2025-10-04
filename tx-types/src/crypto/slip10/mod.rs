@@ -10,10 +10,10 @@ pub mod derive;
 pub mod master;
 
 pub use derive::{DerivationError, ExtendedKey};
-#[cfg(feature = "std")]
-pub use master::{bip39_to_seed, master_from_mnemonic, master_from_seed};
 #[cfg(not(feature = "std"))]
 pub use master::master_from_seed;
+#[cfg(feature = "std")]
+pub use master::{bip39_to_seed, master_from_mnemonic, master_from_seed};
 
 #[derive(Debug, Clone)]
 pub enum CryptoError {
