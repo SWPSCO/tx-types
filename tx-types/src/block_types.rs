@@ -73,7 +73,7 @@ pub struct Page {
     pub epoch_counter: u64,
     pub target: BigNum,
     pub accumulated_work: BigNum,
-    pub height: u64,
+    pub height: PageNumber,
     pub msg: Vec<u64>,
 }
 
@@ -212,9 +212,6 @@ impl Page {
     pub fn coinbase_notes(&self) -> Vec<NNote> {
         let mut notes: Vec<NNote> = Vec::new();
 
-        // Convert u64 height to PageNumber for this function
-        let page_height = PageNumber { value: self.height };
-
         // Get the locks and their coinbase rewards
         let locks: Vec<(Lock, Coins)> = self.coinbase.tap()
             .into_iter()
@@ -222,11 +219,11 @@ impl Page {
             .collect();
 
         for (lock, assets) in locks {
-            let timelock = Self::coinbase_timelock(page_height);
+            let timelock = Self::coinbase_timelock(self.height);
 
             let meta = NNoteHead {
                 version: 0,
-                origin_page: page_height,
+                origin_page: self.height,
                 timelock: timelock.clone(),
             };
 

@@ -90,7 +90,7 @@ pub mod tests {
                 header: "".to_string(),
                 body: vec![],
             },
-            height: 100,
+            height: PageNumber { value: 100 },
             msg: vec![],
         };
 
@@ -149,7 +149,7 @@ pub mod tests {
                 header: "".to_string(),
                 body: vec![],
             },
-            height: 5000,
+            height: PageNumber { value: 5000 },
             msg: vec![],
         };
 
