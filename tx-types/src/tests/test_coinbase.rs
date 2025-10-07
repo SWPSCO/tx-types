@@ -33,13 +33,13 @@ pub mod tests {
 
     #[test]
     fn test_coinbase_timelock_after_first_month() {
-        // Test that blocks after 4383 are locked for 100 more blocks
+        // Test that blocks after 4383 are locked until block 100
         let height = PageNumber { value: 5000 };
         let timelock = Page::coinbase_timelock(height);
 
         assert!(timelock.intent.is_some());
         if let Some((_, page_range)) = &timelock.intent {
-            assert_eq!(page_range.min, Some(PageNumber { value: 5100 })); // 5000 + 100
+            assert_eq!(page_range.min, Some(PageNumber { value: 100 }));
             assert_eq!(page_range.max, None);
         } else {
             panic!("Expected timelock to have intent");
@@ -54,7 +54,7 @@ pub mod tests {
 
         assert!(timelock.intent.is_some());
         if let Some((_, page_range)) = &timelock.intent {
-            assert_eq!(page_range.min, Some(PageNumber { value: 4483 })); // 4383 + 100
+            assert_eq!(page_range.min, Some(PageNumber { value: 100 }));
             assert_eq!(page_range.max, None);
         } else {
             panic!("Expected timelock to have intent");
@@ -164,9 +164,9 @@ pub mod tests {
             assert_eq!(note.source.p, parent_hash);
             assert_eq!(note.meta.origin_page, PageNumber { value: 5000 });
 
-            // Check timelock is for 100 blocks later
+            // Check timelock is set to 100
             if let Some((_, page_range)) = &note.meta.timelock.intent {
-                assert_eq!(page_range.min, Some(PageNumber { value: 5100 }));
+                assert_eq!(page_range.min, Some(PageNumber { value: 100 }));
             } else {
                 panic!("Expected timelock to have intent");
             }

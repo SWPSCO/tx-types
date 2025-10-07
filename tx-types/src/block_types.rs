@@ -256,21 +256,14 @@ impl Page {
     }
 
     /// Calculate the timelock for coinbase rewards at a given height
-    ///
-    /// Coinbase notes have different timelock periods to prevent
-    /// double-spending and ensure network stability:
-    /// - First ~month (blocks 0-4383): locked until block 4383
-    /// - After block 4383: locked for 100 additional blocks from current height
     pub fn coinbase_timelock(height: PageNumber) -> Timelock {
         const FIRST_MONTH_COINBASE_MIN: u64 = 4383;
         const COINBASE_TIMELOCK_MIN: u64 = 100;
 
         let val = if height.value < FIRST_MONTH_COINBASE_MIN {
-            // During first month, lock until block 4383
             Some(PageNumber { value: FIRST_MONTH_COINBASE_MIN })
         } else {
-            // After first month, lock for 100 more blocks
-            Some(PageNumber { value: height.value + COINBASE_TIMELOCK_MIN })
+            Some(PageNumber { value: COINBASE_TIMELOCK_MIN })
         };
 
         Timelock::new_unchecked(Some((

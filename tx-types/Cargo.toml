@@ -27,6 +27,7 @@ hmac = { workspace = true }
 pbkdf2 = { workspace = true }
 zeroize = { workspace = true }
 sha2 = { workspace = true }
+bytes = { workspace = true }
 
 [features]
 tracy = []
