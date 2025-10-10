@@ -233,14 +233,12 @@ impl BigNum {
     }
 
     pub fn to_hashable(&self) -> Hashable {
-        // Extract the numeric value from the body (Vec<u32> as little-endian bytes)
-        // and convert it to an atom using leaf_from_atom
-        if self.body.is_empty() {
-            Hashable::leaf_from_atom(&[])
-        } else {
-            let bytes: Vec<u8> = self.body.iter().flat_map(|w| w.to_le_bytes()).collect();
-            Hashable::leaf_from_atom(&bytes)
-        }
+        // Jam the full BigNum noun structure (including header tag)
+        // This matches how Hoon treats leaf+target.form where target.form is the full noun
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = self.to_noun(&mut slab);
+        slab.set_root(noun);
+        Hashable::Leaf(slab.jam().to_vec())
     }
 }
 
@@ -258,7 +256,9 @@ impl Timestamp {
     }
 
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::leaf_from_atom(&self.to_urbit_u64().to_le_bytes())
+        // For hashing purposes, use Unix timestamp (seconds since epoch)
+        // The Hoon page structure stores timestamps as Unix timestamps, not Urbit epoch format
+        Hashable::leaf_from_atom(&(self.value.timestamp() as u64).to_le_bytes())
     }
 }
 
@@ -413,17 +413,40 @@ impl Page {
     ///     leaf+msg.form
     /// ==
     pub fn to_hashable_block_commitment(&self) -> Hashable {
-        // Build the structure using Hashable::List for the tuple
-        Hashable::List(vec![
+        // Build the structure using nested cells for the Hoon tuple
+        // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
+        Hashable::cell(
             Hashable::Hash(self.parent.clone()),
-            Hashable::Hash(self.tx_ids.to_hash()),
-            Hashable::Hash(self.coinbase.to_hash()),
-            self.timestamp.to_hashable(),
-            self.epoch_counter.to_hashable(),
-            self.target.to_hashable(),
-            self.accumulated_work.to_hashable(),
-            self.height.to_hashable(),
-            self.msg.to_hashable(),
-        ])
+            Hashable::cell(
+                Hashable::Hash(self.tx_ids.to_hash()),
+                Hashable::cell(
+                    Hashable::Hash(self.coinbase.to_hash()),
+                    Hashable::cell(
+                        self.timestamp.to_hashable(),
+                        Hashable::cell(
+                            self.epoch_counter.to_hashable(),
+                            Hashable::cell(
+                                self.target.to_hashable(),
+                                Hashable::cell(
+                                    self.accumulated_work.to_hashable(),
+                                    Hashable::cell(
+                                        self.height.to_hashable(),
+                                        self.msg.to_hashable()
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    /// Hash the block commitment to produce the commitment hash
+    ///
+    /// Corresponds to ++ block-commitment on line 502 of tx-engine.hoon
+    /// This is the hash of the block commitment structure (everything after PoW)
+    pub fn hash_block_commitment(&self) -> Hash {
+        hash_hashable(&self.to_hashable_block_commitment())
     }
 }
