@@ -3,11 +3,118 @@ use serde::{Deserialize, Serialize};
 use crate::transaction_types::*;
 use crate::collections::zset::ZSet;
 use crate::collections::zmap::ZMap;
+use crate::hashing::hashable::Hashable;
+use crate::hashing::hasher::hash_hashable;
 use num_bigint::BigUint;
 use nockvm::noun::Noun;
 use nockapp::noun::slab::NounSlab;
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use bytes::Bytes;
+
+// ============================================================================
+// Block Type Wrapper Types
+// ============================================================================
+
+/// Wrapper for coinbase rewards mapping locks to coin amounts
+#[derive(Debug, Clone, NounDecode, NounEncode)]
+pub struct Coinbase {
+    pub map: ZMap<Lock, Coins>,
+}
+
+impl Coinbase {
+    pub fn new() -> Self {
+        Coinbase {
+            map: ZMap::new(),
+        }
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        // Coinbase is a ZMap<Lock, Coins>
+        // Delegate to ZMap's to_hashable which handles the tree structure
+        self.map.to_hashable(
+            |lock| lock.to_hashable(),
+            |coins| coins.to_hashable(),
+        )
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
+
+/// Wrapper for transaction ID set
+#[derive(Debug, Clone, NounDecode, NounEncode)]
+pub struct TransactionIds {
+    pub set: ZSet<Hash>,
+}
+
+impl TransactionIds {
+    pub fn new() -> Self {
+        TransactionIds {
+            set: ZSet::new(),
+        }
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        // TransactionIds is a ZSet<Hash>
+        // Delegate to ZSet's to_hashable which handles the tree structure
+        self.set.to_hashable(|hash| Hashable::Hash(hash.clone()))
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
+
+/// Wrapper for epoch counter values
+#[derive(Debug, Clone, Copy, PartialEq, Eq, NounDecode, NounEncode)]
+pub struct EpochCounter {
+    pub value: u64,
+}
+
+impl EpochCounter {
+    pub fn new(value: u64) -> Self {
+        EpochCounter { value }
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        Hashable::leaf_from_atom(&self.value.to_le_bytes())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
+
+/// Wrapper for page message data
+#[derive(Debug, Clone, NounDecode, NounEncode)]
+pub struct PageMsg {
+    pub values: Vec<u64>,
+}
+
+impl PageMsg {
+    pub fn new() -> Self {
+        PageMsg { values: Vec::new() }
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        let mut slab: NounSlab = NounSlab::new();
+        use nockvm::noun::{Atom, Cell};
+
+        // Build Hoon list structure: [a [b [c [d ... 0]]]]
+        let mut list = Atom::new(&mut slab, 0).as_noun(); // Start with nil
+        for &value in self.values.iter().rev() {
+            let atom = Atom::new(&mut slab, value).as_noun();
+            list = Cell::new(&mut slab, atom, list).as_noun();
+        }
+
+        Hashable::Leaf(slab.jam().to_vec())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
 
 // ============================================================================
 // Simple RPC Types (from main branch)
@@ -67,14 +174,14 @@ pub struct Page {
     pub pow: Pow,
     // everything below this is what is hashed for the block commitment: +>.page
     pub parent: Hash,
-    pub tx_ids: ZSet<Hash>,
-    pub coinbase: ZMap<Lock, Coins>,
+    pub tx_ids: TransactionIds,
+    pub coinbase: Coinbase,
     pub timestamp: Timestamp,
-    pub epoch_counter: u64,
+    pub epoch_counter: EpochCounter,
     pub target: BigNum,
     pub accumulated_work: BigNum,
     pub height: PageNumber,
-    pub msg: Vec<u64>,
+    pub msg: PageMsg,
 }
 
 /// Collection of pages
@@ -88,10 +195,10 @@ pub struct Pages {
 pub struct PageSummary {
     pub digest: Hash,
     pub timestamp: Timestamp,
-    pub epoch_counter: u64,
+    pub epoch_counter: EpochCounter,
     pub target: BigNum,
     pub accumulated_work: BigNum,
-    pub height: u64,
+    pub height: PageNumber,
     pub parent: Hash,
 }
 
@@ -124,12 +231,35 @@ impl BigNum {
         let bytes: Vec<u8> = le_u32.iter().flat_map(|w| w.to_le_bytes()).collect();
         BigUint::from_bytes_le(&bytes).to_str_radix(10)
     }
+
+    pub fn to_hashable(&self) -> Hashable {
+        // Extract the numeric value from the body (Vec<u32> as little-endian bytes)
+        // and convert it to an atom using leaf_from_atom
+        if self.body.is_empty() {
+            Hashable::leaf_from_atom(&[])
+        } else {
+            let bytes: Vec<u8> = self.body.iter().flat_map(|w| w.to_le_bytes()).collect();
+            Hashable::leaf_from_atom(&bytes)
+        }
+    }
 }
 
 /// Timestamp with Urbit epoch conversion
 #[derive(Debug, Clone)]
 pub struct Timestamp {
     pub value: DateTime<Utc>,
+}
+
+impl Timestamp {
+    /// Convert DateTime back to Urbit epoch format (u64)
+    pub fn to_urbit_u64(&self) -> u64 {
+        const BASE_URBIT_EPOCH: u64 = 0x8000000cce9e0d80u64;
+        self.value.timestamp() as u64 + BASE_URBIT_EPOCH
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        Hashable::leaf_from_atom(&self.to_urbit_u64().to_le_bytes())
+    }
 }
 
 impl NounDecode for Timestamp {
@@ -206,14 +336,14 @@ impl From<Transaction> for SimpleTransaction {
 impl Page {
     /// Generate coinbase reward notes for this page
     ///
-    /// Converts the coinbase ZMap<Lock, Coins> into actual NNote instances
+    /// Converts the coinbase Coinbase wrapper into actual NNote instances
     /// that can be spent by the recipients. Each coinbase recipient gets a
     /// separate note with appropriate timelock constraints.
     pub fn coinbase_notes(&self) -> Vec<NNote> {
         let mut notes: Vec<NNote> = Vec::new();
 
         // Get the locks and their coinbase rewards
-        let locks: Vec<(Lock, Coins)> = self.coinbase.tap()
+        let locks: Vec<(Lock, Coins)> = self.coinbase.map.tap()
             .into_iter()
             .map(|(lock, coins)| (lock, coins))
             .collect();
@@ -267,5 +397,33 @@ impl Page {
             TimelockRange { min: None, max: None },
             TimelockRange { min: val, max: None },
         )))
+    }
+
+    /// Convert block commitment (everything after PoW in +>.page) to hashable
+    ///
+    /// Matches Hoon structure hashable-block-commitment on line 478 of tx-engine.hoon
+    /// :*  hash+parent.form
+    ///     hash+(hash-hashable:tip5 (hashable-tx-ids tx-ids.form))
+    ///     hash+(hash:coinbase-split coinbase.form)
+    ///     leaf+timestamp.form
+    ///     leaf+epoch-counter.form
+    ///     leaf+target.form
+    ///     leaf+accumulated-work.form
+    ///     leaf+height.form
+    ///     leaf+msg.form
+    /// ==
+    pub fn to_hashable_block_commitment(&self) -> Hashable {
+        // Build the structure using Hashable::List for the tuple
+        Hashable::List(vec![
+            Hashable::Hash(self.parent.clone()),
+            Hashable::Hash(self.tx_ids.to_hash()),
+            Hashable::Hash(self.coinbase.to_hash()),
+            self.timestamp.to_hashable(),
+            self.epoch_counter.to_hashable(),
+            self.target.to_hashable(),
+            self.accumulated_work.to_hashable(),
+            self.height.to_hashable(),
+            self.msg.to_hashable(),
+        ])
     }
 }

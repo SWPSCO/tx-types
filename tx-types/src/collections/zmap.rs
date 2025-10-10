@@ -680,8 +680,8 @@ mod tests {
         
         // Generate hashable
         let hashable = map.to_hashable(
-            |k| Hashable::leaf_u64(k.0 as u64),
-            |v| Hashable::leaf_u64(v.0 as u64)
+            |k| Hashable::leaf_from_atom(&(k.0 as u64).to_le_bytes()),
+            |v| Hashable::leaf_from_atom(&(v.0 as u64).to_le_bytes())
         );
         
         // Should not panic and should generate a valid structure
@@ -1457,9 +1457,10 @@ mod tests {
         
         match empty_hashable {
             Hashable::Leaf(data) => {
-                // Should be 0u64 encoded as little-endian bytes
-                let expected = 0u64.to_le_bytes().to_vec();
-                assert_eq!(data, expected, "Empty ZMap should produce Leaf with 0 bytes");
+                // Should be jammed representation of atom 0
+                // Jam of atom 0 is [2]
+                let expected = vec![2u8];
+                assert_eq!(data, expected, "Empty ZMap should produce Leaf with jammed 0");
                 println!("Empty ZMap correctly produces null Leaf hashable");
             }
             _ => {

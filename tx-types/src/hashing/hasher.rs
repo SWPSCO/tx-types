@@ -10,48 +10,31 @@ use nockvm::noun::{Atom, T};
 /// Goldilocks prime: 2^64 - 2^32 + 1
 pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
 
-/// Hash a raw noun using variable-length hashing
-/// This mirrors the Hoon hash-noun-varlen function
+/// Hash a jammed noun using variable-length hashing
+///
+/// This function expects `data` to contain jammed (serialized) noun bytes.
+/// It will cue (deserialize) the bytes back to a noun before hashing.
+///
+/// This mirrors the Hoon hash-noun-varlen function where the input is
+/// a noun that gets hashed directly.
 pub fn hash_noun_varlen(data: &[u8]) -> Hash {
     use super::tip5::Tip5Hasher;
-    use nockapp::noun::AtomExt;
-    
-    // Debug: log what we're hashing (disabled for now)
-    // if data.len() <= 16 {
-    //     eprintln!("hash_noun_varlen: hashing {} bytes: {:02x?}", data.len(), data);
-    // } else {
-    //     eprintln!("hash_noun_varlen: hashing {} bytes (first 16): {:02x?}...", data.len(), &data[..16]);
-    // }
-    
-    // Convert bytes to a noun (as an atom)
+    use nockapp::Bytes;
+
     let mut slab: NounSlab = NounSlab::new();
-    
-    // Create an atom from the bytes
-    let noun = if data.is_empty() {
-        Atom::new(&mut slab, 0).as_noun()
-    } else if data.len() <= 8 {
-        // For small data, convert directly to u64
-        let mut value = 0u64;
-        for (i, &byte) in data.iter().enumerate() {
-            value |= (byte as u64) << (i * 8);
-        }
-        // eprintln!("  -> Created atom with value: {:#x}", value);
-        Atom::new(&mut slab, value).as_noun()
-    } else {
-        // For larger data, use Atom::from_bytes
-        // Note: from_bytes expects a nockapp::Bytes, not &[u8]
-        use nockapp::Bytes;
-        // eprintln!("  -> Creating large atom from {} bytes", data.len());
-        let bytes = Bytes::copy_from_slice(data);
-        Atom::from_bytes(&mut slab, &bytes).as_noun()
-    };
-    
+
+    // Cue the jammed bytes back to a noun
+    let noun = slab.cue_into(Bytes::copy_from_slice(data))
+        .unwrap_or_else(|_e| {
+            // If cue fails, return atom 0 as fallback
+            use nockvm::noun::Atom;
+            Atom::new(&mut slab, 0).as_noun()
+        });
+
     // Use the real TIP5 hasher
     let result = Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_e| {
-        // eprintln!("  -> TIP5 hash failed: {:?}", e);
         Hash { values: [0; 5] }
     });
-    // eprintln!("  -> Hash result: {:x?}", result.values);
     result
 }
 
@@ -207,7 +190,7 @@ mod tests {
     
     #[test]
     fn test_hash_hashable_leaf() {
-        let h = Hashable::leaf(b"test");
+        let h = Hashable::leaf_from_atom(b"test");
         let digest = hash_hashable(&h);
         // Just check it doesn't panic and produces a digest
         assert_eq!(digest.values.len(), 5);
@@ -216,8 +199,8 @@ mod tests {
     #[test]
     fn test_hash_hashable_cell() {
         let h = Hashable::cell(
-            Hashable::leaf(b"left"),
-            Hashable::leaf(b"right")
+            Hashable::leaf_from_atom(b"left"),
+            Hashable::leaf_from_atom(b"right")
         );
         let digest = hash_hashable(&h);
         assert_eq!(digest.values.len(), 5);

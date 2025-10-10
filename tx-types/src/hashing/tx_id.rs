@@ -31,7 +31,7 @@ pub fn compute_tx_id(
         // Convert timelock-range to hashable
         timelock_range.to_hashable(),
         // Total fees as leaf
-        Hashable::leaf_u64(total_fees.value),
+        total_fees.to_hashable(),
     );
 
     // Hash the structure
@@ -268,10 +268,16 @@ mod tests {
                 match *rest {
                     Hashable::Cell(_seeds_part, fee_part) => {
                         // seeds_part should be the seeds hashable
-                        // fee_part should be a cell with the fee
+                        // fee_part should be a leaf with jammed fee
                         match *fee_part {
                             Hashable::Leaf(ref data) => {
-                                let fee_val = u64::from_le_bytes(data[..8].try_into().unwrap());
+                                // Cue the jammed bytes to get the noun
+                                use nockapp::noun::slab::NounSlab;
+                                use nockapp::Bytes;
+                                let mut slab: NounSlab = NounSlab::new();
+                                let noun = slab.cue_into(Bytes::copy_from_slice(data)).unwrap();
+                                // Extract the u64 value from the atom
+                                let fee_val = unsafe { noun.as_atom().unwrap().as_u64().unwrap() };
                                 assert_eq!(fee_val, 10);
                             }
                             _ => panic!("Expected fee to be a leaf"),

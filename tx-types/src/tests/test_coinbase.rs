@@ -69,6 +69,7 @@ pub mod tests {
 
         let mut coinbase_map = ZMap::new();
         coinbase_map.put(lock.clone(), coins.clone());
+        let coinbase = crate::block_types::Coinbase { map: coinbase_map };
 
         let parent_hash = Hash { values: [1, 2, 3, 4, 5] };
 
@@ -76,12 +77,12 @@ pub mod tests {
             digest: Hash { values: [0, 0, 0, 0, 0] },
             pow: crate::block_types::Pow { p: bytes::Bytes::new() },
             parent: parent_hash.clone(),
-            tx_ids: ZSet::new(),
-            coinbase: coinbase_map,
+            tx_ids: crate::block_types::TransactionIds::new(),
+            coinbase,
             timestamp: crate::block_types::Timestamp {
                 value: chrono::Utc::now()
             },
-            epoch_counter: 0,
+            epoch_counter: crate::block_types::EpochCounter::new(0),
             target: crate::block_types::BigNum {
                 header: "".to_string(),
                 body: vec![],
@@ -91,7 +92,7 @@ pub mod tests {
                 body: vec![],
             },
             height: PageNumber { value: 100 },
-            msg: vec![],
+            msg: crate::block_types::PageMsg::new(),
         };
 
         let notes = page.coinbase_notes();
@@ -128,6 +129,7 @@ pub mod tests {
         let mut coinbase_map = ZMap::new();
         coinbase_map.put(lock1.clone(), coins1.clone());
         coinbase_map.put(lock2.clone(), coins2.clone());
+        let coinbase = crate::block_types::Coinbase { map: coinbase_map };
 
         let parent_hash = Hash { values: [5, 4, 3, 2, 1] };
 
@@ -135,12 +137,12 @@ pub mod tests {
             digest: Hash { values: [0, 0, 0, 0, 0] },
             pow: crate::block_types::Pow { p: bytes::Bytes::new() },
             parent: parent_hash.clone(),
-            tx_ids: ZSet::new(),
-            coinbase: coinbase_map,
+            tx_ids: crate::block_types::TransactionIds::new(),
+            coinbase,
             timestamp: crate::block_types::Timestamp {
                 value: chrono::Utc::now()
             },
-            epoch_counter: 0,
+            epoch_counter: crate::block_types::EpochCounter::new(0),
             target: crate::block_types::BigNum {
                 header: "".to_string(),
                 body: vec![],
@@ -150,7 +152,7 @@ pub mod tests {
                 body: vec![],
             },
             height: PageNumber { value: 5000 },
-            msg: vec![],
+            msg: crate::block_types::PageMsg::new(),
         };
 
         let notes = page.coinbase_notes();

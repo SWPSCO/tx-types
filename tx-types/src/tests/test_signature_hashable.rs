@@ -198,7 +198,7 @@ mod test_signature_hashable {
             // Root node: [hash, signature_data]
             Hashable::cell(
                 Hashable::Hash(root_hash),
-                Hashable::leaf(root_sig_bytes),
+                Hashable::leaf_from_atom(root_sig_bytes),
             ),
             // Subtrees
             Hashable::cell(
@@ -207,7 +207,7 @@ mod test_signature_hashable {
                     // Left node: [hash, signature_data]
                     Hashable::cell(
                         Hashable::Hash(left_hash),
-                        Hashable::leaf(left_sig_bytes),
+                        Hashable::leaf_from_atom(left_sig_bytes),
                     ),
                     // Left subtree's children (both empty)
                     Hashable::cell(
@@ -220,7 +220,7 @@ mod test_signature_hashable {
                     // Right node: [hash, signature_data]
                     Hashable::cell(
                         Hashable::Hash(right_hash),
-                        Hashable::leaf(right_sig_bytes),
+                        Hashable::leaf_from_atom(right_sig_bytes),
                     ),
                     // Right subtree's children (both empty)
                     Hashable::cell(

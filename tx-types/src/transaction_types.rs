@@ -18,10 +18,22 @@ pub struct Coins {
    pub value: u64
 }
 
+impl Coins {
+    pub fn to_hashable(&self) -> Hashable {
+        Hashable::leaf_from_atom(&self.value.to_le_bytes())
+    }
+}
+
 // page number name structure
 #[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageNumber {
    pub value: u64
+}
+
+impl PageNumber {
+    pub fn to_hashable(&self) -> Hashable {
+        Hashable::leaf_from_atom(&self.value.to_le_bytes())
+    }
 }
 
 // Hash wrapper for transaction IDs and other hashes
@@ -203,10 +215,11 @@ impl NName {
     ///     leaf+~                   :: first pact
     /// ==
     pub fn first(owners: Lock, has_timelock: bool) -> Hash {
+        let value = if has_timelock { 0u64 } else { 1u64 };
         let hashable = Hashable::cell(
             Hashable::null(),
             Hashable::cell(
-                Hashable::leaf_u64(if has_timelock { 0 } else { 1 }),
+                Hashable::leaf_from_atom(&value.to_le_bytes()),
                 Hashable::cell(
                     Hashable::Hash(owners.to_hash()),
                     Hashable::null()
@@ -332,15 +345,15 @@ impl TimelockRange {
             None => Hashable::null(),
             Some(val) => Hashable::cell(
                 Hashable::null(),
-                Hashable::leaf_u64(val.value)
+                val.to_hashable()
             ),
         };
-        
+
         let max_hashable = match &self.max {
             None => Hashable::null(),
             Some(val) => Hashable::cell(
                 Hashable::null(),
-                Hashable::leaf_u64(val.value)
+                val.to_hashable()
             ),
         };
         
@@ -412,23 +425,15 @@ impl SchnorrPubkey {
 
     pub fn to_hashable(&self) -> Hashable {
         // In Hoon, this is [%leaf form] where form is the pubkey noun.
-        // Since our Hashable::Leaf only supports bytes (not arbitrary nouns),
-        // and since the Hoon implementation ultimately hashes the noun anyway,
-        // we pre-hash the noun and return Hashable::Hash.
-        // This is semantically equivalent to Hoon's (hash [%leaf form]).
+        // We jam the noun and store it in Hashable::Leaf.
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun_varlen(noun)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
-        Hashable::Hash(hash)
+        slab.set_root(noun);
+        Hashable::Leaf(slab.jam().to_vec())
     }
-    
+
     pub fn to_hash(&self) -> Hash {
-        // Since to_hashable returns Hash, extract it directly
-        match self.to_hashable() {
-            Hashable::Hash(h) => h,
-            _ => hash_hashable(&self.to_hashable())
-        }
+        hash_hashable(&self.to_hashable())
     }
     
     /// Convert base58 encoded string to SchnorrPubkey
@@ -632,7 +637,7 @@ impl Lock {
         
         // Create the cell [leaf+m hashable-pubkeys]
         Hashable::cell(
-            Hashable::leaf_u64(self.m),
+            Hashable::leaf_from_atom(&self.m.to_le_bytes()),
             pubkeys_hashable
         )
     }
@@ -722,9 +727,10 @@ impl Source {
         // Source hashable based on Hoon implementation (tx-engine.hoon lines 275-279)
         // Source is [hash, is_coinbase]
         // Note: In Hoon, %.y (true) = 0 and %.n (false) = 1
+        let value = if self.is_coinbase { 0u64 } else { 1u64 };
         Hashable::cell(
             Hashable::Hash(self.p.clone()),
-            Hashable::leaf_u64(if self.is_coinbase { 0 } else { 1 }),
+            Hashable::leaf_from_atom(&value.to_le_bytes()),
         )
     }
     
@@ -759,8 +765,8 @@ impl NNote {
         Hashable::cell(
             // First part: [version origin-page timelock-hash]
             Hashable::triple(
-                Hashable::leaf_u64(self.meta.version),
-                Hashable::leaf_u64(self.meta.origin_page.value),
+                Hashable::leaf_from_atom(&self.meta.version.to_le_bytes()),
+                self.meta.origin_page.to_hashable(),
                 Hashable::Hash(hash_hashable(&self.meta.timelock.to_hashable())),
             ),
             // Second part: [name-hash lock-hash source-hash assets]
@@ -771,7 +777,7 @@ impl NNote {
                     Hashable::Hash(hash_hashable(&self.lock.to_hashable())),
                     Hashable::cell(
                         Hashable::Hash(hash_hashable(&self.source.to_hashable())),
-                        Hashable::leaf_u64(self.assets.value),
+                        self.assets.to_hashable(),
                     ),
                 ),
             ),
@@ -812,23 +818,15 @@ pub struct SchnorrSignature {
 impl SchnorrSignature {
     pub fn to_hashable(&self) -> Hashable {
         // In Hoon, this is [%leaf form] where form is the signature noun.
-        // Since our Hashable::Leaf only supports bytes (not arbitrary nouns),
-        // and since the Hoon implementation ultimately hashes the noun anyway,
-        // we pre-hash the noun and return Hashable::Hash.
-        // This is semantically equivalent to Hoon's (hash [%leaf form]).
+        // We jam the noun and store it in Hashable::Leaf.
         let mut slab: NounSlab = NounSlab::new();
         let noun = self.to_noun(&mut slab);
-        let hash = Tip5Hasher::hash_noun_varlen(noun)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
-        Hashable::Hash(hash)
+        slab.set_root(noun);
+        Hashable::Leaf(slab.jam().to_vec())
     }
-    
+
     pub fn to_hash(&self) -> Hash {
-        // Since to_hashable returns Hash, extract it directly
-        match self.to_hashable() {
-            Hashable::Hash(h) => h,
-            _ => hash_hashable(&self.to_hashable())
-        }
+        hash_hashable(&self.to_hashable())
     }
 }
 // signature structure
@@ -883,7 +881,7 @@ impl Seed {
             Hashable::cell(
                 to_hashable_timelock_intent(&self.timelock_intent),
                 Hashable::cell(
-                    Hashable::leaf_u64(self.gift.value),
+                    self.gift.to_hashable(),
                     Hashable::Hash(self.parent_hash.clone())
                 )
             )
@@ -925,7 +923,7 @@ impl Seed {
                 Hashable::cell(
                     to_hashable_timelock_intent(&self.timelock_intent),
                     Hashable::cell(
-                        Hashable::leaf_u64(self.gift.value),
+                        self.gift.to_hashable(),
                         Hashable::Hash(self.parent_hash.clone())
                     )
                 )
@@ -995,7 +993,7 @@ impl Spend {
                 ),
             },
             self.seeds.to_hashable(),
-            Hashable::leaf_u64(self.fee.value),
+            self.fee.to_hashable(),
         )
     }
     
@@ -1014,7 +1012,7 @@ impl Spend {
         // Create the hashable for signature verification
         let sig_hashable = Hashable::cell(
             self.seeds.to_sig_hashable(),
-            Hashable::leaf_u64(self.fee.value)
+            self.fee.to_hashable()
         );
 
         hash_hashable(&sig_hashable)
