@@ -8,8 +8,10 @@ use crate::collections::{ZSet, ZMap};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
+use crate::generic_noun::UntypedNoun;
 use num_bigint::BigUint;
 use num_traits::{Zero, One};
+use bytes::Bytes;
 
 
 // Coin name structure
@@ -745,7 +747,7 @@ impl Source {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct NNoteV1 {
     pub version: u64,
     pub origin_page: PageNumber,
@@ -1207,6 +1209,11 @@ impl NounEncode for T8 {
         }
         res_cell
     }
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct NoteData {
+    pub map: ZMap<String, UntypedNoun>,
 }
 
 #[cfg(test)]

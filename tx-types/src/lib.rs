@@ -12,6 +12,7 @@ pub mod transaction_types;
 pub mod tx_to_noun;
 pub mod block_types;
 pub mod signer;
+pub mod generic_noun;
 
 // Submodules
 pub mod hashing;
@@ -46,8 +47,11 @@ pub use transaction_types::*;
 // Re-export tx-engine types
 pub use transaction_types::{Tx, Outputs, Output};
 
-// Re-export block types for RPC usage
-pub use block_types::{BlockPage, SimpleTransaction, SimpleTransactionInput, SimpleTransactionOutput, CoinbaseRecipient};
+// Re-export block types
+pub use block_types::*;
+
+// Re-export generic noun
+pub use generic_noun::*;
 
 // Test modules
 #[cfg(test)]
