@@ -3,7 +3,7 @@ use nockvm::noun::Noun;
 use nockapp::noun::slab::NounSlab;
 use bytes::Bytes;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UntypedNoun {
     pub p: Bytes,
 }

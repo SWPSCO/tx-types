@@ -150,7 +150,7 @@ impl Hash {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NNameV1 {
     pub p: Vec<Hash>,
 }
@@ -747,7 +747,7 @@ impl Source {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NNoteV1 {
     pub version: u64,
     pub origin_page: PageNumber,
@@ -949,10 +949,24 @@ impl Seed {
     }
 }
 
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SeedV1 {
+    pub output_source: Option<Source>, // if Some, enforces that output note must have precisely this source
+    pub lock_root: Hash, // merkle root of lock script
+    pub note_data: NoteData, // data to store with note
+    pub gift: Coins, // asset quantity
+    pub parent_hash: Hash, // check that parent hash of every seed is the hash of the parent note
+}
+
 // Seeds structure
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct Seeds {
     pub set: ZSet<Seed>,
+}
+
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SeedsV1 {
+    pub set: ZSet<SeedV1>,
 }
 
 impl Seeds {
@@ -1153,15 +1167,34 @@ pub struct Tx {
     pub outputs: Outputs,
 }
 
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TxV1 {
+    pub version: u64,
+    pub raw_tx: RawTransactionV1,
+    pub total_size: u64,
+    pub outputs: OutputsV1,
+}
+
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct Outputs {
     pub map: ZMap<Lock, Output>,
+}
+
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct OutputsV1 {
+    pub set: ZSet<OutputV1>,
 }
 
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct Output {
     pub note: NNote,
     pub seeds: Seeds,
+}
+
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct OutputV1 {
+    pub note: NNoteV1,
+    pub seeds: SeedsV1,
 }
 
 // Raw transaction structure matching Hoon raw-tx form
@@ -1175,6 +1208,14 @@ pub struct Output {
 pub struct RawTransaction {
     pub id: Hash,                       // tx-id: hash of the transaction
     pub inputs: Inputs,                 // inputs map
+    pub timelock_range: TimelockRange,  // union of valid page-number ranges
+    pub total_fees: Coins,              // sum of all fees paid by all inputs
+}
+
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct RawTransactionV1 {
+    pub id: Hash,                       // tx-id: hash of the transaction
+    pub inputs: InputsV1,                 // inputs map
     pub timelock_range: TimelockRange,  // union of valid page-number ranges
     pub total_fees: Coins,              // sum of all fees paid by all inputs
 }
@@ -1211,7 +1252,7 @@ impl NounEncode for T8 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NoteData {
     pub map: ZMap<String, UntypedNoun>,
 }
