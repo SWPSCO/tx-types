@@ -22,11 +22,7 @@ pub struct Coinbase {
 }
 
 impl Coinbase {
-    pub fn new() -> Self {
-        Coinbase {
-            map: ZMap::new(),
-        }
-    }
+    pub fn new() -> Self { Coinbase { map: ZMap::new() } }
 
     pub fn to_hashable(&self) -> Hashable {
         // Coinbase is a ZMap<Lock, Coins>
@@ -40,6 +36,11 @@ impl Coinbase {
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
+}
+
+#[derive(Debug, Clone, NounDecode, NounEncode)]
+pub struct CoinbaseV1 {
+    pub map: ZMap<Hash, Coins>,
 }
 
 /// Wrapper for transaction ID set
@@ -190,6 +191,23 @@ pub struct Pages {
     pub pages: ZMap<Hash, Page>,
 }
 
+#[derive(Debug, Clone, NounDecode)]
+pub struct PageV1 {
+    pub version: u64,
+    pub digest: Hash,
+    // everything below this is what is hashed for the digest: +.page
+    pub pow: Pow,
+    // everything below this is what is hashed for the block commitment: +>.page
+    pub parent: Hash,
+    pub tx_ids: TransactionIds,
+    pub coinbase: CoinbaseV1,
+    pub timestamp: Timestamp,
+    pub epoch_counter: EpochCounter,
+    pub target: BigNum,
+    pub accumulated_work: BigNum,
+    pub height: PageNumber,
+    pub msg: PageMsg,
+}
 /// Summarized page information
 #[derive(NounDecode, Debug, Clone)]
 pub struct PageSummary {
