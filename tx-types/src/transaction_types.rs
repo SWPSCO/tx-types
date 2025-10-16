@@ -148,6 +148,12 @@ impl Hash {
     }
 }
 
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct NNameV1 {
+    pub p: Vec<Hash>,
+}
+
+
 // Note name structure  
 #[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NName {
@@ -737,6 +743,15 @@ impl Source {
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
+}
+
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct NNoteV1 {
+    pub version: u64,
+    pub origin_page: PageNumber,
+    pub name: NNameV1,
+    pub note_data: NoteData,
+    pub assets: Coins,
 }
 
 // Note structure
