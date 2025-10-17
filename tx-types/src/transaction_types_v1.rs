@@ -110,16 +110,26 @@ pub enum LockPrimitiveBody {
 }
 
 #[derive(Debug, Clone)]
-pub struct Pkh {}
+pub struct Pkh {
+    pub m: u64,
+    pub h: ZSet<Hash>,
+}
 
 #[derive(Debug, Clone)]
-pub struct Tim {}
+pub struct Tim { // lockscript timelock
+    pub rel: TimelockRange,
+    pub abs: TimelockRange,
+}
 
 #[derive(Debug, Clone)]
-pub struct Hax {}
+pub struct Hax {
+    pub set: ZSet<Hash>,
+}
 
 #[derive(Debug, Clone)]
-pub struct Brn {}
+pub struct Brn {
+    pub value: u64, // this will always be 0
+}
 
 #[derive(Debug, Clone)]
 pub struct LockPrimitive {
