@@ -82,26 +82,26 @@ pub struct SpendV1 {
     pub fee: Coins,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct Witness {
     pub lmp: LockMerkleProof,
     pub pkh: PkhSignature,
     pub hax: ZMap<Hash, UntypedNoun>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct LockMerkleProof {
     pub spend_condition: SpendCondition,
     pub axis: u64,
     pub merkle_proof: MerkleProof,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct SpendCondition {
     pub p: Vec<LockPrimitive>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub enum LockPrimitiveBody {
     Pkh(Pkh),
     Tim(Tim),
@@ -109,41 +109,41 @@ pub enum LockPrimitiveBody {
     Brn(Brn),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct Pkh {
     pub m: u64,
     pub h: ZSet<Hash>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct Tim { // lockscript timelock
     pub rel: TimelockRange,
     pub abs: TimelockRange,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct Hax {
     pub set: ZSet<Hash>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct Brn {
     pub value: u64, // this will always be 0
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct LockPrimitive {
     pub header: String,
     pub body: LockPrimitiveBody,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct MerkleProof {
     pub root: Hash,
     pub path: Vec<Hash>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct PkhSignature {
     pub map: ZMap<SchnorrPubkey, SchnorrSignature>,
 }
