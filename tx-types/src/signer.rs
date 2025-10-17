@@ -2,7 +2,8 @@
 
 extern crate alloc;
 
-use crate::transaction_types::{Hash, T8, SchnorrPubkey, Signature, SchnorrSignature, Chal, Sig, RawTransaction, Inputs, Input, NName, Coins, Spend};
+use crate::transaction_types::{Hash, T8, SchnorrPubkey, Signature, SchnorrSignature, Chal, Sig, RawTransaction, Inputs, NName, Coins, Spend};
+use crate::transaction_types_v0::{InputsV0, InputV0, SpendV0};
 use crate::crypto::cheetah::point::cheetah_pub_from_sk;
 use crate::crypto::utils::{
     trunc_g_order_to_be32,
@@ -105,7 +106,7 @@ pub fn schnorr_sign_digest(
 /// Takes a Spend, computes its sig_hash, and signs it with the provided keys
 /// Returns the signature components (challenge, signature) as T8 values
 pub fn sign_spend(
-    spend: Spend,
+    spend: SpendV0,
     secret_key: T8,
     public_key: SchnorrPubkey,
 ) -> (T8, T8) {
@@ -140,7 +141,11 @@ pub fn sign_tx(
     let mut new_inputs = ZMap::new();
     
     // Iterate through each input and sign its spend
-    for (name, input) in tx.inputs.p.tap() {
+    let mut inputs_handle = match &mut tx {
+        RawTransaction::V0(v0) => &mut v0.inputs,
+        _ => panic!("sign_tx placeholder only supports V0"),
+    };
+    for (name, input) in inputs_handle.p.tap() {
         let mut signed_input = input.clone();
         
         // Sign the spend if it doesn't already have a signature
@@ -172,14 +177,12 @@ pub fn sign_tx(
     }
     
     // Update the transaction with signed inputs
-    tx.inputs = Inputs { p: new_inputs };
+    if let RawTransaction::V0(v0) = &mut tx { v0.inputs = InputsV0 { p: new_inputs }; }
     
     // Recalculate the transaction ID with the signed inputs
-    tx.id = compute_tx_id(
-        &tx.inputs,
-        &tx.timelock_range,
-        tx.total_fees
-    );
+    if let RawTransaction::V0(v0) = &mut tx {
+        v0.id = compute_tx_id(&Inputs::V0(v0.inputs.clone()), &v0.timelock_range, v0.total_fees);
+    }
     
     tx
 }

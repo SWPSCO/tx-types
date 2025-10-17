@@ -4,8 +4,9 @@ use noun_serde::NounEncode;
 
 // Import from transaction_types instead of txo
 use crate::transaction_types::{
-    Inputs, Input, Coins,
+    Inputs, Input, Coins, NNote, Spend, Seeds, Signature,
 };
+use crate::transaction_types_v0::{InputsV0, InputV0, NNoteV0, SpendV0, SeedsV0, SeedV0};
 use crate::collections::ZMap;
 use crate::hashing::compute_tx_id;
 
@@ -21,7 +22,7 @@ use crate::hashing::compute_tx_id;
 /// - max: The minimum of all input maximums (must spend before earliest expiry)
 /// 
 /// Returns a TimelockRange with None for min/max if there are no constraints in that direction.
-pub fn calculate_timelock_range(inputs: &[Input]) -> crate::transaction_types::TimelockRange {
+pub fn calculate_timelock_range(inputs: &[InputV0]) -> crate::transaction_types::TimelockRange {
     use crate::transaction_types::{TimelockRange, PageNumber};
     
     let mut global_min: Option<u64> = None;
@@ -76,7 +77,7 @@ pub fn calculate_timelock_range(inputs: &[Input]) -> crate::transaction_types::T
 /// 
 /// # Returns
 /// * `NounSlab` - A NounSlab containing the raw transaction as a noun
-pub fn create_raw_transaction_noun(input_list: Vec<Input>) -> NounSlab {
+pub fn create_raw_transaction_noun(input_list: Vec<InputV0>) -> NounSlab {
     let mut slab = NounSlab::new();
     
     // Step 1: Build Inputs structure from input list
@@ -87,7 +88,7 @@ pub fn create_raw_transaction_noun(input_list: Vec<Input>) -> NounSlab {
         let key = input.note.name.clone();
         inputs_zmap.put(key, input.clone());
     }
-    let inputs = Inputs { p: inputs_zmap.clone() };
+    let inputs = Inputs::V0(InputsV0 { p: inputs_zmap.clone() });
     
     // Step 2: Calculate total fees by summing all input fees
     let total_fees = Coins {
@@ -200,7 +201,7 @@ mod tests {
         };
         
         // Create the NNote
-        let note = NNote {
+        let note = NNote::V0(NNoteV0 {
             meta: NNoteHead {
                 version: 0,
                 origin_page: PageNumber { value: 1 },
@@ -210,7 +211,7 @@ mod tests {
             lock,
             source,
             assets: Coins { value: 100 },
-        };
+        });
         
         // Create the signature
         let signature = Some(Signature {
@@ -232,13 +233,13 @@ mod tests {
         });
         
         // Create the seeds
-        let seeds = Seeds {
+        let seeds = Seeds::V0(SeedsV0 {
             set: {
                 let mut seed_set = ZSet::new();
                 let mut recipient_pubkeys = ZSet::new();
                 recipient_pubkeys.put(pubkey.clone());
                 
-                let seed = Seed {
+                let seed = Seed::V0(SeedV0 {
                     output_source: None,
                     recipient: Lock { m: 1, pubkeys: recipient_pubkeys },
                     timelock_intent: None,
@@ -250,18 +251,18 @@ mod tests {
                         0x8735_8c72_08cc_9c5d,
                         0xd048_23a9_eb56_7b2e,
                     ]},
-                };
-                seed_set.put(seed);
+                });
+                if let Seed::V0(s) = seed { seed_set.put(s); }
                 seed_set
             }
-        };
+        });
         
         // Create the input
-        let input = Input {
-            note,
-            spend: Spend {
+        let input = InputV0 {
+            note: match note { NNote::V0(v) => v, _ => unreachable!() },
+            spend: SpendV0 {
                 signature,
-                seeds,
+                seeds: match seeds { Seeds::V0(v) => v, _ => unreachable!() },
                 fee: Coins { value: 10 },
             },
         };
@@ -299,7 +300,7 @@ mod tests {
         // Also compute using compute_tx_id function for comparison
         let mut inputs_zmap = ZMap::new();
         inputs_zmap.put(input.note.name.clone(), input.clone());
-        let inputs = Inputs { p: inputs_zmap };
+        let inputs = Inputs::V0(InputsV0 { p: inputs_zmap });
         let timelock_range = calculate_timelock_range(&input_list);
         let total_fees = input.spend.fee;
         let computed_tx_id = compute_tx_id(&inputs, &timelock_range, total_fees);
@@ -378,7 +379,7 @@ mod tests {
             is_coinbase: true,
         };
         
-        let note = NNote {
+        let note = NNote::V0(NNoteV0 {
             meta: NNoteHead {
                 version: 0,
                 origin_page: PageNumber { value: 1 },
@@ -388,7 +389,7 @@ mod tests {
             lock,
             source,
             assets: Coins { value: 100 },
-        };
+        });
         
         let signature = Some(Signature {
             map: {
@@ -408,13 +409,13 @@ mod tests {
             }
         });
         
-        let seeds = Seeds {
+        let seeds = Seeds::V0(SeedsV0 {
             set: {
                 let mut seed_set = ZSet::new();
                 let mut recipient_pubkeys = ZSet::new();
                 recipient_pubkeys.put(pubkey.clone());
                 
-                let seed = Seed {
+                let seed = SeedV0 {
                     output_source: None,
                     recipient: Lock { m: 1, pubkeys: recipient_pubkeys },
                     timelock_intent: None,
@@ -430,13 +431,13 @@ mod tests {
                 seed_set.put(seed);
                 seed_set
             }
-        };
+        });
         
-        let input = Input {
-            note,
-            spend: Spend {
+        let input = InputV0 {
+            note: match note { NNote::V0(v) => v, _ => unreachable!() },
+            spend: SpendV0 {
                 signature,
-                seeds,
+                seeds: match seeds { Seeds::V0(v) => v, _ => unreachable!() },
                 fee: Coins { value: 10 },
             },
         };
@@ -795,7 +796,7 @@ mod tests {
             };
             
             // Note for input1
-            let note1 = NNote {
+            let note1 = NNote::V0(NNoteV0 {
                 meta: NNoteHead {
                     version: 0,
                     origin_page: PageNumber { value: 1 },
@@ -805,7 +806,7 @@ mod tests {
                 lock: lock1,
                 source: source1,
                 assets: Coins { value: 150 },
-            };
+            });
             
             // Signature for input1
             let signature1 = Some(Signature {
@@ -827,13 +828,13 @@ mod tests {
             });
             
             // Seeds for input1
-            let seeds1 = Seeds {
+            let seeds1 = SeedsV0 {
                 set: {
                     let mut seed_set = ZSet::new();
                     let mut recipient_pubkeys = ZSet::new();
                     recipient_pubkeys.put(common_pubkey.clone());
                     
-                    let seed = Seed {
+                    let seed = SeedV0 {
                         output_source: None,
                         recipient: Lock { m: 1, pubkeys: recipient_pubkeys },
                         timelock_intent: None,
@@ -851,9 +852,9 @@ mod tests {
                 }
             };
             
-            Input {
-                note: note1,
-                spend: Spend {
+            InputV0 {
+                note: match note1 { NNote::V0(v) => v, _ => unreachable!() },
+                spend: SpendV0 {
                     signature: signature1,
                     seeds: seeds1,
                     fee: Coins { value: 10 },
@@ -901,7 +902,7 @@ mod tests {
             };
             
             // Note for input2
-            let note2 = NNote {
+            let note2 = NNote::V0(NNoteV0 {
                 meta: NNoteHead {
                     version: 0,
                     origin_page: PageNumber { value: 2 },
@@ -911,7 +912,7 @@ mod tests {
                 lock: lock2,
                 source: source2,
                 assets: Coins { value: 200 },
-            };
+            });
             
             // Signature for input2
             let signature2 = Some(Signature {
@@ -933,13 +934,13 @@ mod tests {
             });
             
             // Seeds for input2
-            let seeds2 = Seeds {
+            let seeds2 = SeedsV0 {
                 set: {
                     let mut seed_set = ZSet::new();
                     let mut recipient_pubkeys = ZSet::new();
                     recipient_pubkeys.put(common_pubkey.clone());
                     
-                    let seed = Seed {
+                    let seed = SeedV0 {
                         output_source: None,
                         recipient: Lock { m: 1, pubkeys: recipient_pubkeys },
                         timelock_intent: None,
@@ -957,9 +958,9 @@ mod tests {
                 }
             };
             
-            Input {
-                note: note2,
-                spend: Spend {
+            InputV0 {
+                note: match note2 { NNote::V0(v) => v, _ => unreachable!() },
+                spend: SpendV0 {
                     signature: signature2,
                     seeds: seeds2,
                     fee: Coins { value: 15 },
@@ -1002,7 +1003,7 @@ mod tests {
         for input in &input_list {
             inputs_zmap.put(input.note.name.clone(), input.clone());
         }
-        let inputs = Inputs { p: inputs_zmap };
+        let inputs = Inputs::V0(InputsV0 { p: inputs_zmap });
         let timelock_range = calculate_timelock_range(&input_list);
         let total_fees = Coins {
             value: input_list.iter().map(|i| i.spend.fee.value).sum()
@@ -1121,8 +1122,8 @@ mod tests {
         pubkeys_set1.put(pubkey2.clone());
         pubkeys_set1.put(pubkey3.clone());
         
-        let input1 = Input {
-            note: NNote {
+        let input1 = InputV0 {
+            note: NNoteV0 {
                 meta: NNoteHead {
                     version: 0,
                     origin_page: PageNumber { value: 300 },
@@ -1145,7 +1146,7 @@ mod tests {
                 },
                 assets: Coins { value: 3000 },
             },
-            spend: Spend {
+            spend: SpendV0 {
                 signature: Some(Signature {
                     map: {
                         let mut sig_map = ZMap::new();
@@ -1178,10 +1179,10 @@ mod tests {
                         sig_map
                     },
                 }),
-                seeds: Seeds {
+                seeds: SeedsV0 {
                     set: {
                         let mut seeds_set = ZSet::new();
-                        seeds_set.put(Seed {
+                        seeds_set.put(SeedV0 {
                             output_source: None,
                             recipient: Lock {
                                 m: 2,
@@ -1227,8 +1228,8 @@ mod tests {
         let mut pubkeys_set2 = ZSet::new();
         pubkeys_set2.put(pubkey3.clone());
         
-        let input2 = Input {
-            note: NNote {
+        let input2 = InputV0 {
+            note: NNoteV0 {
                 meta: NNoteHead {
                     version: 0,
                     origin_page: PageNumber { value: 100 },
@@ -1251,7 +1252,7 @@ mod tests {
                 },
                 assets: Coins { value: 1000 },
             },
-            spend: Spend {
+            spend: SpendV0 {
                 signature: Some(Signature {
                     map: {
                         let mut sig_map = ZMap::new();
@@ -1284,10 +1285,10 @@ mod tests {
                         sig_map
                     },
                 }),
-                seeds: Seeds {
+                seeds: SeedsV0 {
                     set: {
                         let mut seeds_set = ZSet::new();
-                        seeds_set.put(Seed {
+                        seeds_set.put(SeedV0 {
                             output_source: None,
                             recipient: Lock {
                                 m: 1,
@@ -1334,8 +1335,8 @@ mod tests {
         pubkeys_set3.put(pubkey2.clone());
         pubkeys_set3.put(pubkey3.clone());
         
-        let input3 = Input {
-            note: NNote {
+        let input3 = InputV0 {
+            note: NNoteV0 {
                 meta: NNoteHead {
                     version: 0,
                     origin_page: PageNumber { value: 200 },
@@ -1369,7 +1370,7 @@ mod tests {
                 },
                 assets: Coins { value: 2000 },
             },
-            spend: Spend {
+            spend: SpendV0 {
                 signature: Some(Signature {
                     map: {
                         let mut sig_map = ZMap::new();
@@ -1402,14 +1403,14 @@ mod tests {
                         sig_map
                     },
                 }),
-                seeds: Seeds {
+                seeds: SeedsV0 {
                     set: {
                         let mut seeds_set = ZSet::new();
                         let mut recipient_pubkeys = ZSet::new();
                         recipient_pubkeys.put(pubkey2.clone());
                         recipient_pubkeys.put(pubkey3.clone());
                         
-                        seeds_set.put(Seed {
+                        seeds_set.put(SeedV0 {
                             output_source: None,
                             recipient: Lock {
                                 m: 1,

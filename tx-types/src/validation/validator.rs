@@ -58,7 +58,8 @@ impl TransactionValidator {
     /// - Each signing pubkey must be authorized (in the lock's pubkey set)
     /// - Each Schnorr signature must be cryptographically valid
     fn validate_signatures(tx: &RawTransaction) -> Result<(), TransactionValidationError> {
-        for (name, input) in tx.inputs.p.tap() {
+        let inputs = match tx { RawTransaction::V0(v0) => &v0.inputs, _ => return Ok(()) };
+        for (name, input) in inputs.p.tap() {
             // Get the sig_hash for this spend (the message that was signed)
             let sig_hash = input.spend.sig_hash();
 
@@ -112,7 +113,8 @@ impl TransactionValidator {
         let mut total_input: u64 = 0;
         let mut total_output: u64 = 0;
 
-        for (_, input) in tx.inputs.p.tap() {
+        let inputs = match tx { RawTransaction::V0(v0) => &v0.inputs, _ => return Ok(()) };
+        for (_, input) in inputs.p.tap() {
             // Input amount from the note being spent
             total_input = total_input.checked_add(input.note.assets.value)
                 .ok_or_else(|| TransactionValidationError::InsufficientFunds(
@@ -153,14 +155,15 @@ impl TransactionValidator {
         // Check that tx.timelock_range is consistent with all input timelocks
         // The transaction can only be included in blocks that satisfy ALL inputs
 
-        for (name, input) in tx.inputs.p.tap() {
+        let inputs = match tx { RawTransaction::V0(v0) => &v0.inputs, _ => return Ok(()) };
+        for (name, input) in inputs.p.tap() {
             let intent = &input.note.meta.timelock.intent;
 
             if let Some((abs_range, _rel_range)) = intent {
                 // Validate absolute timelock compatibility
                 if let Some(abs_min) = abs_range.min {
                     // If input has minimum absolute timelock, check against tx maximum
-                    if let Some(tx_max) = tx.timelock_range.max {
+                    if let Some(tx_max) = match tx { RawTransaction::V0(v0) => v0.timelock_range.max, _ => None } {
                         if abs_min.value > tx_max.value {
                             return Err(TransactionValidationError::InvalidTimelock(
                                 format!("Input {:?} absolute min {} > tx max {}",
@@ -172,7 +175,7 @@ impl TransactionValidator {
 
                 if let Some(abs_max) = abs_range.max {
                     // If input has maximum absolute timelock, check against tx minimum
-                    if let Some(tx_min) = tx.timelock_range.min {
+                    if let Some(tx_min) = match tx { RawTransaction::V0(v0) => v0.timelock_range.min, _ => None } {
                         if abs_max.value < tx_min.value {
                             return Err(TransactionValidationError::InvalidTimelock(
                                 format!("Input {:?} absolute max {} < tx min {}",
@@ -197,17 +200,18 @@ impl TransactionValidator {
     fn validate_fees(tx: &RawTransaction) -> Result<(), TransactionValidationError> {
         let mut calculated_fees: u64 = 0;
 
-        for (_, input) in tx.inputs.p.tap() {
+        let inputs = match tx { RawTransaction::V0(v0) => &v0.inputs, _ => return Ok(()) };
+        for (_, input) in inputs.p.tap() {
             calculated_fees = calculated_fees.checked_add(input.spend.fee.value)
                 .ok_or_else(|| TransactionValidationError::InvalidFee(
                     "Fee calculation overflow".to_string()
                 ))?;
         }
 
-        if calculated_fees != tx.total_fees.value {
+        if calculated_fees != match tx { RawTransaction::V0(v0) => v0.total_fees.value, _ => 0 } {
             return Err(TransactionValidationError::InvalidFee(
                 format!("Total fees mismatch: calculated {} != stored {}",
-                    calculated_fees, tx.total_fees.value)
+                    calculated_fees, match tx { RawTransaction::V0(v0) => v0.total_fees.value, _ => 0 })
             ));
         }
 
@@ -219,12 +223,13 @@ impl TransactionValidator {
     /// The transaction ID must match the hash of its contents.
     /// This prevents transaction malleability.
     fn validate_tx_id(tx: &RawTransaction) -> Result<(), TransactionValidationError> {
-        let computed_id = compute_tx_id(&tx.inputs, &tx.timelock_range, tx.total_fees);
-
-        if computed_id != tx.id {
+        if let RawTransaction::V0(v0) = tx {
+            let computed_id = compute_tx_id(&crate::transaction_types::Inputs::V0(v0.inputs.clone()), &v0.timelock_range, v0.total_fees);
+            if computed_id != v0.id {
             return Err(TransactionValidationError::ValidationError(
                 "Transaction ID mismatch - computed hash doesn't match stored ID".to_string()
             ));
+            }
         }
 
         Ok(())

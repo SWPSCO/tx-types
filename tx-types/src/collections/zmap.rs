@@ -919,8 +919,8 @@ mod tests {
                         Hash { values: [0x4801f961b2bb395, 0x80fc5b9c2fb4568f, 0x95957adb252eeed1, 0x7e6c6c7d9771fd36, 0x99b670147a2dee63] },
                     ]
                 },
-                Input {
-                    note: NNote {
+                InputV0 {
+                    note: NNoteV0 {
                         meta: NNoteHead {
                             version: 0,
                             origin_page: PageNumber { value: 500 },
@@ -948,7 +948,7 @@ mod tests {
                         },
                         assets: Coins { value: 501 },
                     },
-                    spend: Spend {
+                    spend: SpendV0 {
                         signature: Some(Signature {
                             map: {
                                 let mut sig_map = ZMap::new();
@@ -959,10 +959,10 @@ mod tests {
                                 sig_map
                             }
                         }),
-                        seeds: Seeds {
+                        seeds: SeedsV0 {
                             set: {
                                 let mut set = ZSet::new();
-                                set.put(Seed {
+                                set.put(SeedV0 {
                                     output_source: None,
                                     recipient: Lock {
                                         m: 1,
@@ -991,8 +991,8 @@ mod tests {
                         Hash { values: [0x6b258a46f0047ed6, 0x22316edb6b4a20a1, 0x5051566642022100, 0xa86114c1024e95e8, 0x38cbe0f64e5fdcf1] },
                     ]
                 },
-                Input {
-                    note: NNote {
+                InputV0 {
+                    note: NNoteV0 {
                         meta: NNoteHead {
                             version: 0,
                             origin_page: PageNumber { value: 501 },
@@ -1020,7 +1020,7 @@ mod tests {
                         },
                         assets: Coins { value: 502 },
                     },
-                    spend: Spend {
+                    spend: SpendV0 {
                         signature: Some(Signature {
                             map: {
                                 let mut sig_map = ZMap::new();
@@ -1031,10 +1031,10 @@ mod tests {
                                 sig_map
                             }
                         }),
-                        seeds: Seeds {
+                        seeds: SeedsV0 {
                             set: {
                                 let mut set = ZSet::new();
-                                set.put(Seed {
+                                set.put(SeedV0 {
                                     output_source: None,
                                     recipient: Lock {
                                         m: 1,
@@ -1063,8 +1063,8 @@ mod tests {
                         Hash { values: [0x4adbeef964f0c5f5, 0xe881a84ab91fc9a6, 0xc1c217614d0a5c46, 0x3071415515d1cb79, 0x7d09d853dcfaf513] },
                     ]
                 },
-                Input {
-                    note: NNote {
+                InputV0 {
+                    note: NNoteV0 {
                         meta: NNoteHead {
                             version: 0,
                             origin_page: PageNumber { value: 502 },
@@ -1092,7 +1092,7 @@ mod tests {
                         },
                         assets: Coins { value: 503 },
                     },
-                    spend: Spend {
+                    spend: SpendV0 {
                         signature: Some(Signature {
                             map: {
                                 let mut sig_map = ZMap::new();
@@ -1103,10 +1103,10 @@ mod tests {
                                 sig_map
                             }
                         }),
-                        seeds: Seeds {
+                        seeds: SeedsV0 {
                             set: {
                                 let mut set = ZSet::new();
-                                set.put(Seed {
+                                set.put(SeedV0 {
                                     output_source: None,
                                     recipient: Lock {
                                         m: 1,
@@ -1135,8 +1135,8 @@ mod tests {
                         Hash { values: [0xe6a4dff4848c8721, 0xa2aaa0593a1ce91, 0xdeb4aaad69afeeb9, 0x48f73836352e85a8, 0x8469a457f2ffbe66] },
                     ]
                 },
-                Input {
-                    note: NNote {
+                InputV0 {
+                    note: NNoteV0 {
                         meta: NNoteHead {
                             version: 0,
                             origin_page: PageNumber { value: 503 },
@@ -1164,7 +1164,7 @@ mod tests {
                         },
                         assets: Coins { value: 504 },
                     },
-                    spend: Spend {
+                    spend: SpendV0 {
                         signature: Some(Signature {
                             map: {
                                 let mut sig_map = ZMap::new();
@@ -1175,10 +1175,10 @@ mod tests {
                                 sig_map
                             }
                         }),
-                        seeds: Seeds {
+                        seeds: SeedsV0 {
                             set: {
                                 let mut set = ZSet::new();
-                                set.put(Seed {
+                                set.put(SeedV0 {
                                     output_source: None,
                                     recipient: Lock {
                                         m: 1,
@@ -1207,8 +1207,8 @@ mod tests {
                         Hash { values: [0xeb470846ed3d705b, 0xb58f2ec96b91e9dd, 0x2eba913d3eabcc63, 0x6ca34002e7d6c29e, 0x86dbdb6ac3f357bb] },
                     ]
                 },
-                Input {
-                    note: NNote {
+                InputV0 {
+                    note: NNoteV0 {
                         meta: NNoteHead {
                             version: 0,
                             origin_page: PageNumber { value: 504 },
@@ -1236,7 +1236,7 @@ mod tests {
                         },
                         assets: Coins { value: 505 },
                     },
-                    spend: Spend {
+                    spend: SpendV0 {
                         signature: Some(Signature {
                             map: {
                                 let mut sig_map = ZMap::new();
@@ -1247,10 +1247,10 @@ mod tests {
                                 sig_map
                             }
                         }),
-                        seeds: Seeds {
+                        seeds: SeedsV0 {
                             set: {
                                 let mut set = ZSet::new();
-                                set.put(Seed {
+                                set.put(SeedV0 {
                                     output_source: None,
                                     recipient: Lock {
                                         m: 1,

@@ -8,12 +8,13 @@
 /// - Transaction validation logic (validation/)
 
 // Core modules in root
+pub mod generic_noun;
 pub mod transaction_types;
+pub mod transaction_types_v0;
+pub mod transaction_types_v1;
 pub mod tx_to_noun;
 pub mod block_types;
 pub mod signer;
-pub mod generic_noun;
-pub mod transaction_types_v1;
 
 // Submodules
 pub mod hashing;
@@ -44,6 +45,7 @@ pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 
 // Re-export main transaction types
 pub use transaction_types::*;
+pub use transaction_types_v0::*;
 pub use transaction_types_v1::*;
 
 // Re-export tx-engine types

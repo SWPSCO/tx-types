@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc, TimeZone};
 use serde::{Deserialize, Serialize};
 use crate::transaction_types::*;
+use crate::{NNoteHead, NNoteV0};
 use crate::collections::zset::ZSet;
 use crate::collections::zmap::ZMap;
 use crate::hashing::hashable::Hashable;
@@ -386,13 +387,13 @@ impl Page {
                 timelock.clone()
             );
 
-            let note = NNote {
+            let note = NNote::V0(NNoteV0 {
                 meta,
                 name,
                 lock,
                 source,
                 assets
-            };
+            });
 
             notes.push(note);
         }

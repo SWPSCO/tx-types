@@ -3,7 +3,7 @@
 
 use super::hashable::Hashable;
 use super::hasher::{hash_hashable, digest_to_base58};
-use crate::transaction_types::{Hash, Inputs, Coins, TimelockRange, to_hashable_timelock_intent};
+use crate::transaction_types::{Hash, Inputs, Coins, TimelockRange};
 
 /// Compute the transaction ID from components
 /// Mirrors Hoon's compute-id function:
@@ -22,17 +22,11 @@ pub fn compute_tx_id(
     total_fees: Coins,
 ) -> Hash {
     // Build the hashable structure as a triple
-    let hashable = Hashable::triple(
-        // Convert inputs z-map to hashable
-        inputs.p.to_hashable(
-            |nname| nname.to_hashable(),
-            |input| input.to_hashable(),
-        ),
-        // Convert timelock-range to hashable
-        timelock_range.to_hashable(),
-        // Total fees as leaf
-        total_fees.to_hashable(),
-    );
+    let inputs_hashable = match inputs {
+        Inputs::V0(v0) => v0.p.to_hashable(|nname| nname.to_hashable(), |input| input.to_hashable()),
+        Inputs::V1(_) => Hashable::null(),
+    };
+    let hashable = Hashable::triple(inputs_hashable, timelock_range.to_hashable(), total_fees.to_hashable());
 
     // Hash the structure
     hash_hashable(&hashable)
@@ -55,7 +49,7 @@ mod tests {
     #[test]
     fn test_compute_tx_id() {
         // Create a simple z-map with one input
-        use crate::transaction_types::{NName, Input, NNote, NNoteHead, Source, Lock, Coins, Spend, PageNumber, Timelock, TimelockIntent, Seeds};
+        use crate::transaction_types::{NName, Input, InputV0, Inputs, InputsV0, NNote, NNoteV0, NNoteHead, Source, Lock, Coins, Spend, SpendV0, PageNumber, Timelock, Seeds, SeedsV0, SeedV0};
         use crate::collections::{ZSet, ZMap};
 
         let mut inputs_map = ZMap::new();
@@ -66,28 +60,26 @@ mod tests {
             ],
         };
         // Create a proper input for testing
-        let input = Input {
-            note: NNote {
+        let input_v0 = InputV0 {
+            note: NNoteV0 {
                 meta: NNoteHead {
                     version: 1,
                     origin_page: PageNumber { value: 100 },
-                    timelock: Timelock {
-                        intent: None,
-                    },
+                    timelock: Timelock { intent: None },
                 },
                 name: NName { p: vec![] },
                 lock: Lock { m: 1, pubkeys: ZSet::new() },
                 source: Source { p: Hash { values: [11, 12, 13, 14, 15] }, is_coinbase: false },
                 assets: Coins { value: 100 },
             },
-            spend: Spend {
+            spend: SpendV0 {
                 signature: None,
-                seeds: Seeds { set: ZSet::new() },
+                seeds: SeedsV0 { set: ZSet::new() },
                 fee: Coins { value: 10 },
             },
         };
-        inputs_map.put(nname, input);
-        let inputs = Inputs { p: inputs_map };
+        inputs_map.put(nname, input_v0);
+        let inputs = Inputs::V0(InputsV0 { p: inputs_map });
 
         let timelock_range = TimelockRange {
             min: None,

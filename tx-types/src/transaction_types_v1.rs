@@ -5,16 +5,18 @@ use crate::generic_noun::UntypedNoun;
 use crate::collections::{ZSet, ZMap};
 use crate::collections::zset::DorTip as ZSetDorTip;
 
+/*
 #[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NNameV1 {
     pub p: Vec<Hash>,
 }
+    */
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct NNoteV1 {
     pub version: u64,
     pub origin_page: PageNumber,
-    pub name: NNameV1,
+    pub name: NName,
     pub note_data: NoteData,
     pub assets: Coins,
 }
@@ -67,7 +69,7 @@ pub struct RawTransactionV1 {
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct InputsV1 {
-    pub map: ZMap<NNameV1, InputV1>,
+    pub map: ZMap<NName, InputV1>,
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -82,6 +84,11 @@ pub struct SpendV1 {
     pub seeds: SeedsV1,
     pub fee: Coins,
 }
+#[derive(Debug, Clone, NounDecode)]
+pub struct NNameV1 {
+    pub p: Vec<Hash>,
+}
+
 impl NounEncode for NNameV1 {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
         use nockvm::noun::T;
