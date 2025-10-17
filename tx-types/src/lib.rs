@@ -13,6 +13,7 @@ pub mod tx_to_noun;
 pub mod block_types;
 pub mod signer;
 pub mod generic_noun;
+pub mod transaction_types_v1;
 
 // Submodules
 pub mod hashing;
@@ -43,6 +44,7 @@ pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 
 // Re-export main transaction types
 pub use transaction_types::*;
+pub use transaction_types_v1::*;
 
 // Re-export tx-engine types
 pub use transaction_types::{Tx, Outputs, Output};
