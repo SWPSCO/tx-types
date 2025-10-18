@@ -325,6 +325,7 @@ pub struct RawTransactionV0 {
 
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct TxV0 {
+    pub version: u64,
     pub raw_tx: RawTransactionV0,
     pub total_size: u64,
     pub outputs: OutputsV0,

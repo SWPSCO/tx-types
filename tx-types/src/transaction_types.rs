@@ -747,9 +747,22 @@ impl Source {
 }
 
 // Note structure
+#[derive(Debug, Clone)]
 pub enum NNote {
     V0(NNoteV0),
     V1(NNoteV1),
+}
+
+impl NounDecode for NNote {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = NNoteV0::from_noun(noun) {
+            return Ok(NNote::V0(v0));
+        }
+        if let Ok(v1) = NNoteV1::from_noun(noun) {
+            return Ok(NNote::V1(v1));
+        }
+        Err(NounDecodeError::Custom("NNote enum decode: unsupported format".into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -934,18 +947,15 @@ pub enum Tx {
     V1(TxV1),
 }
 
-impl NounEncode for Tx {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            Tx::V0(v) => v.to_noun(allocator),
-            Tx::V1(_) => D(0),
-        }
-    }
-}
-
 impl NounDecode for Tx {
-    fn from_noun(_noun: &Noun) -> Result<Self, NounDecodeError> {
-        Err(NounDecodeError::Custom("Tx enum decode placeholder".into()))
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = TxV0::from_noun(noun) {
+            return Ok(Tx::V0(v0));
+        }
+        if let Ok(v1) = TxV1::from_noun(noun) {
+            return Ok(Tx::V1(v1));
+        }
+        Err(NounDecodeError::Custom("Tx enum decode: unsupported format".into()))
     }
 }
 
@@ -1008,15 +1018,6 @@ impl NounDecode for Output {
 pub enum RawTransaction {
     V0(RawTransactionV0),
     V1(RawTransactionV1),
-}
-
-impl NounEncode for RawTransaction {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            RawTransaction::V0(v) => v.to_noun(allocator),
-            RawTransaction::V1(_) => D(0),
-        }
-    }
 }
 
 impl NounDecode for RawTransaction {
