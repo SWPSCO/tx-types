@@ -118,59 +118,9 @@ impl PageMsg {
     }
 }
 
-// ============================================================================
-// Simple RPC Types (from main branch)
-// Used for high-level RPC responses and API
-// ============================================================================
-
-/// High-level block representation for RPC responses
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockPage {
-    pub height: u64,
-    pub hash: String,
-    pub parent_hash: String,
-    pub timestamp: DateTime<Utc>,
-    pub transactions: Vec<SimpleTransaction>,
-    pub target: String,
-    pub coinbase: Vec<CoinbaseRecipient>,
-}
-
-/// Simplified transaction for RPC responses
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransaction {
-    pub id: String,
-    pub inputs: Vec<SimpleTransactionInput>,
-    pub outputs: Vec<SimpleTransactionOutput>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransactionInput {
-    pub tx_id: String,
-    pub index: u32,
-    pub signature: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransactionOutput {
-    pub index: u32,
-    pub amount: u64,
-    pub address: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoinbaseRecipient {
-    pub address: String,
-    pub amount: u64,
-}
-
-// ============================================================================
-// Full Noun-Based Types (from nallux/rpc branch)
-// Used for direct noun decoding from blockchain data
-// ============================================================================
-
 /// Full page structure with noun decoding
 #[derive(Debug, Clone, NounDecode)]
-pub struct Page {
+pub struct PageV0 {
     pub digest: Hash,
     // everything below this is what is hashed for the digest: +.page
     pub pow: Pow,
@@ -209,6 +159,24 @@ pub struct PageV1 {
     pub height: PageNumber,
     pub msg: PageMsg,
 }
+
+#[derive(Debug, Clone)]
+pub enum Page {
+    V0(PageV0),
+    V1(PageV1),
+}
+
+impl NounDecode for Page {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = PageV0::from_noun(noun) {
+            return Ok(Page::V0(v0));
+        }
+        if let Ok(v1) = PageV1::from_noun(noun) {
+            return Ok(Page::V1(v1));
+        }
+        Err(NounDecodeError::Custom("Page enum decode: unsupported format".to_string()))
+    }
+}
 /// Summarized page information
 #[derive(NounDecode, Debug, Clone)]
 pub struct PageSummary {
@@ -224,15 +192,18 @@ pub struct PageSummary {
 /// Proof-of-work stored as pre-jammed bytes
 #[derive(Debug, Clone)]
 pub struct Pow {
-    pub p: Bytes,
+    pub p: Option<Bytes>,
 }
 
 impl NounDecode for Pow {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        /*
         let mut slab: NounSlab = NounSlab::new();
         slab.copy_into(*noun);
         let noun_bytes: Bytes = slab.jam();
-        Ok(Pow { p: noun_bytes })
+        Ok(Pow { p: Some(noun_bytes) })
+        */
+        Ok(Pow { p: None })
     }
 }
 
@@ -284,6 +255,7 @@ impl Timestamp {
 impl NounDecode for Timestamp {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let base_urbit_epoch = 0x8000000cce9e0d80u64;
+        println!("Timestamp noun: {:?}", noun.as_atom());
         let raw_value = u64::from_noun(noun)?;
         let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
         let datetime_utc = Utc.timestamp_opt(unix_timestamp, 0)
@@ -293,66 +265,8 @@ impl NounDecode for Timestamp {
     }
 }
 
-// ============================================================================
-// Conversions and Utility Implementations
-// ============================================================================
-
-impl BlockPage {
-    /// Create a mock BlockPage for testing
-    pub fn mock(height: u64) -> Self {
-        BlockPage {
-            height,
-            hash: format!("hash_{}", height),
-            parent_hash: if height > 0 {
-                format!("hash_{}", height - 1)
-            } else {
-                "genesis".to_string()
-            },
-            timestamp: Utc::now(),
-            transactions: vec![],
-            target: "00000000ffff0000000000000000000000000000000000000000000000000000".to_string(),
-            coinbase: vec![
-                CoinbaseRecipient {
-                    address: "mock_miner".to_string(),
-                    amount: 5000000000,
-                }
-            ],
-        }
-    }
-}
-
-impl TryFrom<nockapp::Noun> for BlockPage {
-    type Error = String;
-
-    fn try_from(_noun: nockapp::Noun) -> Result<Self, Self::Error> {
-        // For now, return a simple mock-like structure
-        // TODO: Implement actual Noun parsing based on kernel's data format
-        Ok(BlockPage {
-            height: 0,
-            hash: "from_noun".to_string(),
-            parent_hash: "parent".to_string(),
-            timestamp: Utc::now(),
-            transactions: vec![],
-            target: "target".to_string(),
-            coinbase: vec![],
-        })
-    }
-}
-
-// Conversion utilities between low-level and high-level types
-impl From<Transaction> for SimpleTransaction {
-    fn from(tx: Transaction) -> Self {
-        // TODO: Implement proper conversion from Transaction to SimpleTransaction
-        SimpleTransaction {
-            id: tx.name,
-            inputs: vec![],
-            outputs: vec![],
-        }
-    }
-}
-
-// Page coinbase functionality
-impl Page {
+// PageV0 coinbase functionality
+impl PageV0 {
     /// Generate coinbase reward notes for this page
     ///
     /// Converts the coinbase Coinbase wrapper into actual NNote instances
@@ -461,12 +375,33 @@ impl Page {
         )
     }
 
-    /// Hash the block commitment to produce the commitment hash
+  /// Hash the block commitment to produce the commitment hash
     ///
     /// Corresponds to ++ block-commitment on line 502 of tx-engine.hoon
     /// This is the hash of the block commitment structure (everything after PoW)
     pub fn hash_block_commitment(&self) -> Hash {
         hash_hashable(&self.to_hashable_block_commitment())
+    }
+}
+
+impl PageV1 {
+    pub fn coinbase_notes(&self) -> Vec<NNote> {
+        let mut notes: Vec<NNote> = Vec::new();
+        /*
+        %+  turn  ~(tap z-in ~(key z-by +.cb))
+        |=  h=hash:t
+        (new:coinbase:t pag (~(put z-in *(z-set hash:t)) h))
+        */
+        /*
+        notes.push(NNote::V1(NNoteV1 {
+            version: 1,
+            origin_page: self.height,
+            name: NName::new,
+            note_data: NoteData { map: ZMap::new() },
+            assets: Coins { value: 0 },
+        }));
+        */
+        notes
     }
 }
 
