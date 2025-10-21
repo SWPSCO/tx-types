@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc, TimeZone};
 use serde::{Deserialize, Serialize};
 use crate::transaction_types::*;
-use crate::{NNoteHead, NNoteV0};
+use crate::transaction_types_v0::*;
+use crate::transaction_types_v1::*;
 use crate::collections::zset::ZSet;
 use crate::collections::zmap::ZMap;
 use crate::hashing::hashable::Hashable;
@@ -177,6 +178,16 @@ impl NounDecode for Page {
         Err(NounDecodeError::Custom("Page enum decode: unsupported format".to_string()))
     }
 }
+
+impl Page {
+    pub fn coinbase_notes(&self) -> Vec<NNote> {
+        match self {
+            Page::V0(v) => v.coinbase_notes(),
+            Page::V1(v) => v.coinbase_notes(),
+        }
+    }
+}
+
 /// Summarized page information
 #[derive(NounDecode, Debug, Clone)]
 pub struct PageSummary {
@@ -255,7 +266,6 @@ impl Timestamp {
 impl NounDecode for Timestamp {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let base_urbit_epoch = 0x8000000cce9e0d80u64;
-        println!("Timestamp noun: {:?}", noun.as_atom());
         let raw_value = u64::from_noun(noun)?;
         let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
         let datetime_utc = Utc.timestamp_opt(unix_timestamp, 0)
@@ -295,7 +305,7 @@ impl PageV0 {
                 is_coinbase: true
             };
 
-            let name = NName::new_default(
+            let name = NName::new_default_v0(
                 lock.clone(),
                 source.clone(),
                 timelock.clone()
@@ -387,20 +397,82 @@ impl PageV0 {
 impl PageV1 {
     pub fn coinbase_notes(&self) -> Vec<NNote> {
         let mut notes: Vec<NNote> = Vec::new();
+        // =/  cb-split=coinbase-split  ~(coinbase get:^page page)
+        let cb = self.coinbase.map.tap().into_iter();
         /*
         %+  turn  ~(tap z-in ~(key z-by +.cb))
         |=  h=hash:t
         (new:coinbase:t pag (~(put z-in *(z-set hash:t)) h))
         */
+        let pkh_hashes: Vec<Hash> = cb.clone().map(|(hash, _)| hash).collect();
+        for h in pkh_hashes.clone() {
+            let vec_wrapped_hash = vec![h];
+            // sum rewards for all provided hashes
+            /*
+            =/  reward=coins
+            %+  roll  ~(tap z-in pkh-hashes)
+            |=  [h=hash acc=coins]
+            (add acc (~(got z-by +.cb-split) h))
+            */
+
+            let mut reward_sum: u64 = 0;
+
+            for hash in vec_wrapped_hash {
+                for (key, value) in cb.clone() {
+                    if key == hash {
+                        reward_sum += value.value;
+                    }
+                }
+            }
+
+            let assets = Coins { value: reward_sum };
+
+            let parent_hash = self.parent.clone();
+            let pkh_hashes_clone = pkh_hashes.clone();
+
+            let m = pkh_hashes_clone.len() as u64;
+            let mut pkh_set = ZSet::new();
+            for hash in pkh_hashes_clone {
+                pkh_set.put(hash)
+            }
+            let spend_condition = SpendCondition {
+                p: vec![
+                    LockPrimitive {
+                        header: "pkh".to_string(),
+                        body: LockPrimitiveBody::Pkh(Pkh {
+                            m,
+                            h: pkh_set,
+                        }),
+                    },
+                    LockPrimitive {
+                        header: "tim".to_string(),   
+                        body: LockPrimitiveBody::Tim(Tim {
+                            rel: TimelockRange { min: Some(PageNumber { value: 100 }), max: None },
+                            abs: TimelockRange { min: None, max: None },
+                        }),
+                    }
+                ]
+            };
+
+            notes.push(NNote::V1(NNoteV1 {
+                version: 1,
+                origin_page: self.height,
+                name: NName::new_v1(),
+                note_data: NoteData { map: ZMap::new() },
+                assets,
+            }));
+        }
         /*
-        notes.push(NNote::V1(NNoteV1 {
-            version: 1,
-            origin_page: self.height,
-            name: NName::new,
-            note_data: NoteData { map: ZMap::new() },
-            assets: Coins { value: 0 },
-        }));
+        %*  .  *nnote-1:v1
+        version      %1
+        origin-page  ~(height get:^page page)
+        name         (make-name pkh-hashes ~(parent get:^page page))
+        note-data    *(z-map @tas *)
+        assets       reward
+        ==
+
         */
+
         notes
     }
 }

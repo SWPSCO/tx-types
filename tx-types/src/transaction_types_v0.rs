@@ -5,6 +5,14 @@ use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::transaction_types::*;
 
+// Note structure
+#[derive(Debug, Clone, NounEncode, NounDecode)]
+pub struct NNoteHead {
+    pub version: u64,
+    pub origin_page: PageNumber,
+    pub timelock: Timelock,
+}
+
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct NNoteV0 {
     pub meta: NNoteHead,
@@ -48,14 +56,6 @@ impl NNoteV0 {
             ),
         )
     }
-}
-
-// Note structure
-#[derive(Debug, Clone, NounEncode, NounDecode)]
-pub struct NNoteHead {
-    pub version: u64,
-    pub origin_page: PageNumber,
-    pub timelock: Timelock,
 }
 
 // Seed structure

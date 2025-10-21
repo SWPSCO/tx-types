@@ -203,11 +203,11 @@ impl NName {
 
     /// Create a default NName from components
     /// Used for generating note names from lock, source, and timelock
-    pub fn new_default(owners: Lock, source: Source, timelock: Timelock) -> Self {
+    pub fn new_default_v0(owners: Lock, source: Source, timelock: Timelock) -> Self {
         Self {
             p: vec![
-                Self::first(owners, timelock.intent.is_some()),
-                Self::last(source, timelock),
+                Self::first_v0(owners, timelock.intent.is_some()),
+                Self::last_v0(source, timelock),
             ],
         }
     }
@@ -221,7 +221,7 @@ impl NName {
     ///     hash+(hash:lock owners)  :: owners of note
     ///     leaf+~                   :: first pact
     /// ==
-    pub fn first(owners: Lock, has_timelock: bool) -> Hash {
+    pub fn first_v0(owners: Lock, has_timelock: bool) -> Hash {
         let value = if has_timelock { 0u64 } else { 1u64 };
         let hashable = Hashable::cell(
             Hashable::null(),
@@ -245,7 +245,7 @@ impl NName {
     ///     hash+(hash:^timelock timelock)  :: timelock of note
     ///     leaf+~                          :: second pact
     /// ==
-    pub fn last(source: Source, timelock: Timelock) -> Hash {
+    pub fn last_v0(source: Source, timelock: Timelock) -> Hash {
         let hashable = Hashable::cell(
             Hashable::null(),
             Hashable::cell(
@@ -257,6 +257,12 @@ impl NName {
             )
         );
         hash_hashable(&hashable)
+    }
+
+    pub fn new_v1() -> Self {
+        Self {
+            p: vec![],
+        }
     }
 }
 
