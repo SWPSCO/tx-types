@@ -1,17 +1,17 @@
-use chrono::{DateTime, Utc, TimeZone};
-use serde::{Deserialize, Serialize};
+use crate::collections::zmap::ZMap;
+use crate::collections::zset::ZSet;
+use crate::hashing::hashable::Hashable;
+use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
 use crate::transaction_types::*;
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
-use crate::collections::zset::ZSet;
-use crate::collections::zmap::ZMap;
-use crate::hashing::hashable::Hashable;
-use crate::hashing::hasher::hash_hashable;
-use num_bigint::BigUint;
-use nockvm::noun::Noun;
-use nockapp::noun::slab::NounSlab;
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use bytes::Bytes;
+use chrono::{DateTime, TimeZone, Utc};
+use nockapp::noun::slab::NounSlab;
+use nockvm::noun::Noun;
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use num_bigint::BigUint;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Block Type Wrapper Types
@@ -24,15 +24,15 @@ pub struct Coinbase {
 }
 
 impl Coinbase {
-    pub fn new() -> Self { Coinbase { map: ZMap::new() } }
+    pub fn new() -> Self {
+        Coinbase { map: ZMap::new() }
+    }
 
     pub fn to_hashable(&self) -> Hashable {
         // Coinbase is a ZMap<Lock, Coins>
         // Delegate to ZMap's to_hashable which handles the tree structure
-        self.map.to_hashable(
-            |lock| lock.to_hashable(),
-            |coins| coins.to_hashable(),
-        )
+        self.map
+            .to_hashable(|lock| lock.to_hashable(), |coins| coins.to_hashable())
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -50,28 +50,35 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 
     let pkh = LockPrimitive {
         header: "pkh".to_string(),
-        body: LockPrimitiveBody::Pkh(Pkh {
-            m,
-            h: pkh_hashes,
-        }),
+        body: LockPrimitiveBody::Pkh(Pkh { m, h: pkh_hashes }),
     };
-    
+
     let tim = LockPrimitive {
-        header: "tim".to_string(),   
+        header: "tim".to_string(),
         body: LockPrimitiveBody::Tim(Tim {
-            rel: TimelockRange { min: Some(PageNumber { value: 100 }), max: None },
-            abs: TimelockRange { min: None, max: None },
+            rel: TimelockRange {
+                min: Some(PageNumber { value: 100 }),
+                max: None,
+            },
+            abs: TimelockRange {
+                min: None,
+                max: None,
+            },
         }),
     };
 
-    let lk: SpendCondition = SpendCondition {
-        p: vec![pkh, tim],
-    };
+    let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
 
     let lmp = build_lock_merkle_proof(lk, 0);
     let root = lmp.merkle_proof.root;
 
-    NName::new_v1(root, Source { p: parent_hash, is_coinbase: true })
+    NName::new_v1(
+        root,
+        Source {
+            p: parent_hash,
+            is_coinbase: true,
+        },
+    )
 }
 
 pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
@@ -79,51 +86,120 @@ pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMe
     let hashable_index = leaf_number;
     let (axis, merkle_proof) = prove_hashable_by_index(form.to_hashable(), hashable_index);
     let spend_condition = traverse_lock(form);
-    LockMerkleProof { spend_condition, axis, merkle_proof }
+    LockMerkleProof {
+        spend_condition,
+        axis,
+        merkle_proof,
+    }
 }
 
-/*
-  ::  +prove-hashable-by-index: build proof directly over a hashable
-  ++  prove-hashable-by-index
-    |=  [h=hashable:tip5 idx=@]
-    ^-  [axis=@ proof=merk-proof]
-    ?<  =(idx 0)
-    =/  res
-      =+  |%
-          ++  node-digest  hash-hashable:tip5
-          ++  leaf-count
-            |=  n=hashable:tip5
-            ^-  @
-            ?.  ?=(^ -.n)  1
-            (add (leaf-count p.n) (leaf-count q.n))
-          ++  go
-            |=  [n=hashable:tip5 i=@]
-            ^-  [root=noun-digest:tip5 path=(list noun-digest:tip5) axis=@]
-            ?.  ?=(^ -.n)
-              [(node-digest n) ~ 1]
-            =/  lc=@  (leaf-count p.n)
-            ?:  (lte i lc)
-              =/  rec  (go [p.n i])
-              =/  sib  (node-digest q.n)
-              :+  (hash-ten-cell:tip5 root.rec sib)
-                (weld path.rec ~[sib])
-              (peg 2 axis.rec)
-            =/  rec  (go [q.n (sub i lc)])
-            =/  sib  (node-digest p.n)
-            :+  (hash-ten-cell:tip5 sib root.rec)
-              (weld path.rec ~[sib])
-            (peg 3 axis.rec)
-          --
-      (go [h idx])
-    [axis.res [root.res path.res]]
-*/
-pub fn prove_hashable_by_index(hashable: Hashable, index: u64) -> (u64, MerkleProof) {
-    // placeholder
-    (0, MerkleProof {
-        root: Hash { values: [0; 5] },
-        path: vec![],
-    })
+/// Tree address composition (peg) - combines two axes into a single address
+///
+/// This function computes the composition of tree addresses in Nock.
+/// For example, peg(2, 3) = 5 (go left, then right)
+///
+/// The algorithm works by bit manipulation:
+/// - Take all bits of `a`
+/// - Take all bits of `b` except the leading 1
+/// - Concatenate them: [b without leading 1][a]
+fn peg(a: u64, b: u64) -> u64 {
+    assert!(a != 0, "peg: a must be non-zero");
+    assert!(b != 0, "peg: b must be non-zero");
 
+    // Find the number of bits in b
+    let b_bits = 64 - b.leading_zeros();
+
+    // The output has (a_bits + b_bits - 1) bits
+    // We remove the leading 1 from b and concatenate with all of a
+
+    // Mask to get b without its leading bit
+    let b_mask = (1u64 << (b_bits - 1)) - 1;
+    let b_without_leading = b & b_mask;
+
+    // Shift a left by (b_bits - 1) and OR with b_without_leading
+    (a << (b_bits - 1)) | b_without_leading
+}
+
+/// Count the number of leaves in a Hashable tree
+fn leaf_count(h: &Hashable) -> u64 {
+    match h {
+        // Non-cell cases: Leaf, Hash, and List all count as 1 leaf
+        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => 1,
+        // Cell case: sum of left and right subtrees
+        Hashable::Cell(left, right) => leaf_count(left) + leaf_count(right),
+    }
+}
+
+/// Build a merkle proof for the leaf at the given index in a Hashable tree
+///
+/// This is the core recursive function that:
+/// - Returns the root hash, path (list of sibling hashes), and tree axis
+/// - Navigates left or right based on leaf counts
+/// - Builds the proof path as it recurses back up
+fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
+    match node {
+        // Base case: non-cell node (Leaf, Hash, or List)
+        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => {
+            let root = hash_hashable(node);
+            (root, Vec::new(), 1)
+        }
+
+        // Recursive case: Cell
+        Hashable::Cell(left, right) => {
+            let lc = leaf_count(left);
+
+            if index <= lc {
+                // The target leaf is in the left subtree
+                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(left, index);
+                let sibling = hash_hashable(right);
+
+                // Combine the recursive root with the sibling
+                let root = hash_ten_cell(rec_root, sibling.clone());
+
+                // Add sibling to the path
+                rec_path.push(sibling);
+
+                // Compute new axis: go left (2) then follow rec_axis
+                let axis = peg(2, rec_axis);
+
+                (root, rec_path, axis)
+            } else {
+                // The target leaf is in the right subtree
+                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(right, index - lc);
+                let sibling = hash_hashable(left);
+
+                // Combine sibling with the recursive root
+                let root = hash_ten_cell(sibling.clone(), rec_root);
+
+                // Add sibling to the path
+                rec_path.push(sibling);
+
+                // Compute new axis: go right (3) then follow rec_axis
+                let axis = peg(3, rec_axis);
+
+                (root, rec_path, axis)
+            }
+        }
+    }
+}
+
+/// Build a merkle proof for a hashable at a given index
+///
+/// Given a Hashable tree structure and a 1-based index, this returns:
+/// - The axis (tree address) of the leaf
+/// - A MerkleProof containing the root hash and sibling path
+///
+/// # Panics
+/// Panics if index is 0 (indices are 1-based)
+pub fn prove_hashable_by_index(hashable: Hashable, index: u64) -> (u64, MerkleProof) {
+    assert!(
+        index != 0,
+        "prove_hashable_by_index: index must be non-zero (1-based indexing)"
+    );
+
+    let (root, path, axis) = prove_hashable_go(&hashable, index);
+
+    (axis, MerkleProof { root, path })
 }
 
 pub fn traverse_lock(spend_condition: SpendCondition) -> SpendCondition {
@@ -139,9 +215,7 @@ pub struct TransactionIds {
 
 impl TransactionIds {
     pub fn new() -> Self {
-        TransactionIds {
-            set: ZSet::new(),
-        }
+        TransactionIds { set: ZSet::new() }
     }
 
     pub fn to_hashable(&self) -> Hashable {
@@ -261,7 +335,9 @@ impl NounDecode for Page {
         if let Ok(v1) = PageV1::from_noun(noun) {
             return Ok(Page::V1(v1));
         }
-        Err(NounDecodeError::Custom("Page enum decode: unsupported format".to_string()))
+        Err(NounDecodeError::Custom(
+            "Page enum decode: unsupported format".to_string(),
+        ))
     }
 }
 
@@ -314,7 +390,9 @@ pub struct BigNum {
 impl BigNum {
     pub fn to_decimal_string(&self) -> String {
         let le_u32 = self.body.clone();
-        if le_u32.is_empty() { return "0".into(); }
+        if le_u32.is_empty() {
+            return "0".into();
+        }
         let bytes: Vec<u8> = le_u32.iter().flat_map(|w| w.to_le_bytes()).collect();
         BigUint::from_bytes_le(&bytes).to_str_radix(10)
     }
@@ -354,10 +432,13 @@ impl NounDecode for Timestamp {
         let base_urbit_epoch = 0x8000000cce9e0d80u64;
         let raw_value = u64::from_noun(noun)?;
         let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
-        let datetime_utc = Utc.timestamp_opt(unix_timestamp, 0)
+        let datetime_utc = Utc
+            .timestamp_opt(unix_timestamp, 0)
             .single()
             .ok_or_else(|| NounDecodeError::Custom("Invalid timestamp".to_string()))?;
-        Ok(Timestamp { value: datetime_utc })
+        Ok(Timestamp {
+            value: datetime_utc,
+        })
     }
 }
 
@@ -372,7 +453,10 @@ impl PageV0 {
         let mut notes: Vec<NNote> = Vec::new();
 
         // Get the locks and their coinbase rewards
-        let locks: Vec<(Lock, Coins)> = self.coinbase.map.tap()
+        let locks: Vec<(Lock, Coins)> = self
+            .coinbase
+            .map
+            .tap()
             .into_iter()
             .map(|(lock, coins)| (lock, coins))
             .collect();
@@ -388,21 +472,17 @@ impl PageV0 {
 
             let source = Source {
                 p: self.parent.clone(),
-                is_coinbase: true
+                is_coinbase: true,
             };
 
-            let name = NName::new_default_v0(
-                lock.clone(),
-                source.clone(),
-                timelock.clone()
-            );
+            let name = NName::new_default_v0(lock.clone(), source.clone(), timelock.clone());
 
             let note = NNote::V0(NNoteV0 {
                 meta,
                 name,
                 lock,
                 source,
-                assets
+                assets,
             });
 
             notes.push(note);
@@ -417,14 +497,24 @@ impl PageV0 {
         const COINBASE_TIMELOCK_MIN: u64 = 100;
 
         let val = if height.value < FIRST_MONTH_COINBASE_MIN {
-            Some(PageNumber { value: FIRST_MONTH_COINBASE_MIN })
+            Some(PageNumber {
+                value: FIRST_MONTH_COINBASE_MIN,
+            })
         } else {
-            Some(PageNumber { value: COINBASE_TIMELOCK_MIN })
+            Some(PageNumber {
+                value: COINBASE_TIMELOCK_MIN,
+            })
         };
 
         Timelock::new_unchecked(Some((
-            TimelockRange { min: None, max: None },
-            TimelockRange { min: val, max: None },
+            TimelockRange {
+                min: None,
+                max: None,
+            },
+            TimelockRange {
+                min: val,
+                max: None,
+            },
         )))
     }
 
@@ -460,18 +550,18 @@ impl PageV0 {
                                     self.accumulated_work.to_hashable(),
                                     Hashable::cell(
                                         self.height.to_hashable(),
-                                        self.msg.to_hashable()
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            )
+                                        self.msg.to_hashable(),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         )
     }
 
-  /// Hash the block commitment to produce the commitment hash
+    /// Hash the block commitment to produce the commitment hash
     ///
     /// Corresponds to ++ block-commitment on line 502 of tx-engine.hoon
     /// This is the hash of the block commitment structure (everything after PoW)
@@ -515,7 +605,10 @@ impl PageV1 {
 
             // placeholder
             let root = Hash { values: [0; 5] };
-            let source = Source { p: self.parent.clone(), is_coinbase: true };
+            let source = Source {
+                p: self.parent.clone(),
+                is_coinbase: true,
+            };
 
             notes.push(NNote::V1(NNoteV1 {
                 version: 1,
@@ -588,12 +681,14 @@ mod tests {
         let coinbase = Coinbase { map: coinbase_map };
 
         // Create other page fields matching Hoon output
-        let parent = Hash { values: [0x1, 0x2, 0x3, 0x4, 0x5] };
+        let parent = Hash {
+            values: [0x1, 0x2, 0x3, 0x4, 0x5],
+        };
         let tx_ids = TransactionIds::new();
 
         // Timestamp: 1704067200 is Jan 1, 2024 00:00:00 UTC
         let timestamp = Timestamp {
-            value: chrono::Utc.timestamp_opt(1704067200, 0).unwrap()
+            value: chrono::Utc.timestamp_opt(1704067200, 0).unwrap(),
         };
 
         let epoch_counter = EpochCounter::new(42);
@@ -602,8 +697,8 @@ mod tests {
         let target = BigNum {
             header: "bn".to_string(),
             body: vec![
-                4293656576, 3932159, 4287102976, 11796479, 4281597952,
-                11796479, 4287102976, 3932159, 4293656576, 262143
+                4293656576, 3932159, 4287102976, 11796479, 4281597952, 11796479, 4287102976,
+                3932159, 4293656576, 262143,
             ],
         };
 
@@ -611,8 +706,8 @@ mod tests {
         let accumulated_work = BigNum {
             header: "bn".to_string(),
             body: vec![
-                4293656576, 3932159, 4287102976, 11796479, 4281597952,
-                11796479, 4287102976, 3932159, 4293656576, 262143
+                4293656576, 3932159, 4287102976, 11796479, 4281597952, 11796479, 4287102976,
+                3932159, 4293656576, 262143,
             ],
         };
 
@@ -621,8 +716,12 @@ mod tests {
 
         // Create the page with all fields
         let page = Page {
-            digest: Hash { values: [0xa, 0xb, 0xc, 0xd, 0xe] },
-            pow: Pow { p: bytes::Bytes::new() },
+            digest: Hash {
+                values: [0xa, 0xb, 0xc, 0xd, 0xe],
+            },
+            pow: Pow {
+                p: bytes::Bytes::new(),
+            },
             parent,
             tx_ids,
             coinbase,
@@ -645,7 +744,7 @@ mod tests {
                 0xeeaafb68d3749196,
                 0x3dc939cfc714f6f6,
                 0x58c1fef56a1656f0,
-            ]
+            ],
         };
 
         assert_eq!(
