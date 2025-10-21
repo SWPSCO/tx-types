@@ -45,6 +45,92 @@ pub struct CoinbaseV1 {
     pub map: ZMap<Hash, Coins>,
 }
 
+pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
+    let m = pkh_hashes.len() as u64;
+
+    let pkh = LockPrimitive {
+        header: "pkh".to_string(),
+        body: LockPrimitiveBody::Pkh(Pkh {
+            m,
+            h: pkh_hashes,
+        }),
+    };
+    
+    let tim = LockPrimitive {
+        header: "tim".to_string(),   
+        body: LockPrimitiveBody::Tim(Tim {
+            rel: TimelockRange { min: Some(PageNumber { value: 100 }), max: None },
+            abs: TimelockRange { min: None, max: None },
+        }),
+    };
+
+    let lk: SpendCondition = SpendCondition {
+        p: vec![pkh, tim],
+    };
+
+    let lmp = build_lock_merkle_proof(lk, 0);
+    let root = lmp.merkle_proof.root;
+
+    NName::new_v1(root, Source { p: parent_hash, is_coinbase: true })
+}
+
+pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
+    // alias
+    let hashable_index = leaf_number;
+    let (axis, merkle_proof) = prove_hashable_by_index(form.to_hashable(), hashable_index);
+    let spend_condition = traverse_lock(form);
+    LockMerkleProof { spend_condition, axis, merkle_proof }
+}
+
+/*
+  ::  +prove-hashable-by-index: build proof directly over a hashable
+  ++  prove-hashable-by-index
+    |=  [h=hashable:tip5 idx=@]
+    ^-  [axis=@ proof=merk-proof]
+    ?<  =(idx 0)
+    =/  res
+      =+  |%
+          ++  node-digest  hash-hashable:tip5
+          ++  leaf-count
+            |=  n=hashable:tip5
+            ^-  @
+            ?.  ?=(^ -.n)  1
+            (add (leaf-count p.n) (leaf-count q.n))
+          ++  go
+            |=  [n=hashable:tip5 i=@]
+            ^-  [root=noun-digest:tip5 path=(list noun-digest:tip5) axis=@]
+            ?.  ?=(^ -.n)
+              [(node-digest n) ~ 1]
+            =/  lc=@  (leaf-count p.n)
+            ?:  (lte i lc)
+              =/  rec  (go [p.n i])
+              =/  sib  (node-digest q.n)
+              :+  (hash-ten-cell:tip5 root.rec sib)
+                (weld path.rec ~[sib])
+              (peg 2 axis.rec)
+            =/  rec  (go [q.n (sub i lc)])
+            =/  sib  (node-digest p.n)
+            :+  (hash-ten-cell:tip5 sib root.rec)
+              (weld path.rec ~[sib])
+            (peg 3 axis.rec)
+          --
+      (go [h idx])
+    [axis.res [root.res path.res]]
+*/
+pub fn prove_hashable_by_index(hashable: Hashable, index: u64) -> (u64, MerkleProof) {
+    // placeholder
+    (0, MerkleProof {
+        root: Hash { values: [0; 5] },
+        path: vec![],
+    })
+
+}
+
+pub fn traverse_lock(spend_condition: SpendCondition) -> SpendCondition {
+    // for coinbase we don't need to implement this
+    spend_condition
+}
+
 /// Wrapper for transaction ID set
 #[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct TransactionIds {
@@ -427,37 +513,14 @@ impl PageV1 {
 
             let assets = Coins { value: reward_sum };
 
-            let parent_hash = self.parent.clone();
-            let pkh_hashes_clone = pkh_hashes.clone();
-
-            let m = pkh_hashes_clone.len() as u64;
-            let mut pkh_set = ZSet::new();
-            for hash in pkh_hashes_clone {
-                pkh_set.put(hash)
-            }
-            let spend_condition = SpendCondition {
-                p: vec![
-                    LockPrimitive {
-                        header: "pkh".to_string(),
-                        body: LockPrimitiveBody::Pkh(Pkh {
-                            m,
-                            h: pkh_set,
-                        }),
-                    },
-                    LockPrimitive {
-                        header: "tim".to_string(),   
-                        body: LockPrimitiveBody::Tim(Tim {
-                            rel: TimelockRange { min: Some(PageNumber { value: 100 }), max: None },
-                            abs: TimelockRange { min: None, max: None },
-                        }),
-                    }
-                ]
-            };
+            // placeholder
+            let root = Hash { values: [0; 5] };
+            let source = Source { p: self.parent.clone(), is_coinbase: true };
 
             notes.push(NNote::V1(NNoteV1 {
                 version: 1,
                 origin_page: self.height,
-                name: NName::new_v1(),
+                name: NName::new_v1(root, source),
                 note_data: NoteData { map: ZMap::new() },
                 assets,
             }));

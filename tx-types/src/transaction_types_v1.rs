@@ -162,7 +162,6 @@ pub struct SpendCondition {
     pub p: Vec<LockPrimitive>,
 }
 
-/*
 impl SpendCondition {
     pub fn to_hashable(&self) -> Hashable {
         // Start with the required terminator
@@ -174,7 +173,6 @@ impl SpendCondition {
             .fold(base, |acc, lp| Hashable::cell(lp.to_hashable(), acc))
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub enum LockPrimitiveBody {
@@ -190,19 +188,18 @@ pub struct Pkh {
     pub h: ZSet<Hash>,
 }
 
-/*
 impl Pkh {
     pub fn to_hashable(&self) -> Hashable {
+        let hash_hashable = self.h.to_hashable(|h| Hashable::Hash(h.clone()));
         Hashable::cell(
-            Hashable::leaf_from_atom(b"pkh".to_le_bytes()),
+            Hashable::leaf_from_atom(b"pkh"),
             Hashable::cell(
                 Hashable::leaf_from_atom(&self.m.to_le_bytes()),
+                hash_hashable
             )
-            Hashable::leaf_from_atom(&self.value.to_le_bytes()),
         )
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Tim { // lockscript timelock
@@ -210,48 +207,46 @@ pub struct Tim { // lockscript timelock
     pub abs: TimelockRange,
 }
 
-/*
 impl Tim {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"tim".to_le_bytes()),
-            Hashable::leaf_from_atom(&self.value.to_le_bytes()),
+            Hashable::leaf_from_atom(b"tim"),
+            Hashable::cell(
+                self.rel.to_hashable(),
+                self.abs.to_hashable(),
+            )
         )
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Hax {
     pub set: ZSet<Hash>,
 }
 
-/*
 impl Hax {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"brn".to_le_bytes()),
-            Hashable::leaf_from_atom(&self.value.to_le_bytes()),
+            Hashable::leaf_from_atom(b"hax"),
+            Hashable::leaf_from_atom(b"fake"), // TODO
         )
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Brn {
     pub value: u64, // this will always be 0
 }
 
-/*
+
 impl Brn {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"brn".to_le_bytes()),
-            Hashable::leaf_from_atom(&self.value.to_le_bytes()),
+            Hashable::leaf_from_atom(b"brn"),
+            Hashable::null(),
         )
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct LockPrimitive {
@@ -259,7 +254,6 @@ pub struct LockPrimitive {
     pub body: LockPrimitiveBody,
 }
 
-/*
 impl LockPrimitive {
     pub fn to_hashable(&self) -> Hashable {
         match &self.body {
@@ -270,7 +264,6 @@ impl LockPrimitive {
         }
     }
 }
-*/
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct MerkleProof {

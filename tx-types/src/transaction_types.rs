@@ -259,7 +259,7 @@ impl NName {
         hash_hashable(&hashable)
     }
 
-    pub fn new_v1() -> Self {
+    pub fn new_v1(_lock: Hash, _source: Source) -> Self {
         Self {
             p: vec![],
         }
