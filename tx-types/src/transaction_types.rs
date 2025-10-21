@@ -259,10 +259,29 @@ impl NName {
         hash_hashable(&hashable)
     }
 
-    pub fn new_v1(_lock: Hash, _source: Source) -> Self {
-        Self {
-            p: vec![],
-        }
+    pub fn new_v1(lock: Hash, source: Source) -> Self {
+        Self { p: vec![
+            Self::first_v1(lock),
+            Self::last_v1(source)
+        ],}
+    }
+
+    pub fn first_v1(lock: Hash) -> Hash {
+        hash_hashable(&Hashable::cell(
+            Hashable::null(),
+            Hashable::Hash(lock),
+        ))
+    }
+
+    pub fn last_v1(source: Source) -> Hash {
+        hash_hashable(&Hashable::cell(
+            Hashable::null(),
+            Hashable::cell(
+                source.to_hashable(),
+                Hashable::null()
+            )
+        ))
+
     }
 }
 
