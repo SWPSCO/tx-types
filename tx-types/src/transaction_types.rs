@@ -841,42 +841,51 @@ pub enum Seeds {
 }
 
 // Spend structure
+#[derive(Debug, Clone, NounDecode)]
+pub struct Spend {
+    pub version: u64,
+    pub body: SpendBody,
+}
+
 #[derive(Debug, Clone)]
-pub enum Spend {
+pub enum SpendBody {
     V0(SpendV0),
     V1(SpendV1),
 }
 
-impl NounEncode for Spend {
+impl NounEncode for SpendBody {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
         match self {
-            Spend::V0(v) => v.to_noun(allocator),
-            Spend::V1(_) => D(0), // placeholder
+            SpendBody::V0(v) => v.to_noun(allocator),
+            SpendBody::V1(_) => D(0), // placeholder
         }
     }
 }
 
-impl NounDecode for Spend {
+impl NounDecode for SpendBody {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         if let Ok(v0) = SpendV0::from_noun(noun) {
-            return Ok(Spend::V0(v0));
+            return Ok(SpendBody::V0(v0));
         }
-        Err(NounDecodeError::Custom("Spend enum decode: unsupported format".into()))
+        if let Ok(v1) = SpendV1::from_noun(noun) {
+            return Ok(SpendBody::V1(v1));
+        }
+        Err(NounDecodeError::Custom("SpendBody enum decode: unsupported format".into()))
     }
 }
 
-impl Spend {
+impl SpendBody {
     pub fn to_hashable(&self) -> Hashable {
         match self {
-            Spend::V0(v) => v.to_hashable(),
-            Spend::V1(_) => Hashable::null(), // placeholder
+            SpendBody::V0(v) => v.to_hashable(),
+            SpendBody::V1(_) => Hashable::null(), // placeholder
         }
     }
     pub fn to_hash(&self) -> Hash { hash_hashable(&self.to_hashable()) }
     pub fn sig_hash(&self) -> Hash {
         match self {
-            Spend::V0(v) => v.sig_hash(),
-            Spend::V1(_) => Hash { values: [0; 5] },
+            SpendBody::V0(v) => v.sig_hash(),
+            SpendBody::V1(_) => Hash { values: [0; 5] },
         }
     }
 }

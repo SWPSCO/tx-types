@@ -63,10 +63,9 @@ pub struct OutputV1 {
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct RawTransactionV1 {
-    pub id: Hash,                       // tx-id: hash of the transaction
-    pub inputs: InputsV1,                 // inputs map
-    pub timelock_range: TimelockRange,  // union of valid page-number ranges
-    pub total_fees: Coins,              // sum of all fees paid by all inputs
+    pub version: u64,
+    pub id: Hash, 
+    pub spends: ZMap<NName, Spend>,
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -148,6 +147,7 @@ pub struct Witness {
     pub lmp: LockMerkleProof,
     pub pkh: PkhSignature,
     pub hax: ZMap<Hash, UntypedNoun>,
+    pub tim: u64,
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -248,10 +248,55 @@ impl Brn {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct LockPrimitive {
     pub header: String,
     pub body: LockPrimitiveBody,
+}
+
+use nockapp::AtomExt;
+
+impl NounDecode for LockPrimitive {
+    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        let head = noun.as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
+            .head()
+            .as_atom()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?
+            .into_string()?;
+        let body = noun.as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
+            .tail();
+        match head.as_str() {
+            "pkh" => {
+                Ok(LockPrimitive {
+                    header: head,
+                    body: LockPrimitiveBody::Pkh(Pkh::from_noun(&body)?),
+                })
+            }
+            "tim" => {
+                Ok(LockPrimitive {
+                    header: head,
+                    body: LockPrimitiveBody::Tim(Tim::from_noun(&body)?),
+                })
+            }
+            "hax" => {
+                Ok(LockPrimitive {
+                    header: head,
+                    body: LockPrimitiveBody::Hax(Hax::from_noun(&body)?),
+                })
+            }
+            "brn" => {
+                Ok(LockPrimitive {
+                    header: head,
+                    body: LockPrimitiveBody::Brn(Brn::from_noun(&body)?),
+                })
+            }
+            _ => {
+                Err(noun_serde::NounDecodeError::InvalidEnumVariant)
+            }
+        }
+    }
 }
 
 impl LockPrimitive {
@@ -273,5 +318,11 @@ pub struct MerkleProof {
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct PkhSignature {
-    pub map: ZMap<SchnorrPubkey, SchnorrSignature>,
+    pub map: ZMap<Hash, PkhSignatureValue>,
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct PkhSignatureValue {
+    pub pk: SchnorrPubkey,
+    pub sig: SchnorrSignature,
 }

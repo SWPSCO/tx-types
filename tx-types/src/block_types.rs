@@ -69,7 +69,7 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 
     let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
 
-    let lmp = build_lock_merkle_proof(lk, 0);
+    let lmp = build_lock_merkle_proof(lk, 1);
     let root = lmp.merkle_proof.root;
 
     NName::new_v1(
