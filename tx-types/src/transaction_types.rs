@@ -1004,13 +1004,15 @@ pub enum Tx {
 
 impl NounDecode for Tx {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = TxV0::from_noun(noun) {
-            return Ok(Tx::V0(v0));
+        // Peek at the version field (first element of the cell)
+        let cell = noun.as_cell()?;
+        let version = cell.head().as_atom()?.as_u64()?;
+        
+        match version {
+            0 => Ok(Tx::V0(TxV0::from_noun(noun)?)),
+            1 => Ok(Tx::V1(TxV1::from_noun(noun)?)),
+            _ => Err(NounDecodeError::Custom(format!("Tx enum decode: unsupported version {}", version))),
         }
-        if let Ok(v1) = TxV1::from_noun(noun) {
-            return Ok(Tx::V1(v1));
-        }
-        Err(NounDecodeError::Custom("Tx enum decode: unsupported format".into()))
     }
 }
 
