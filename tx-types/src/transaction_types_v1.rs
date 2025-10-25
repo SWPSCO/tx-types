@@ -65,7 +65,7 @@ pub struct OutputV1 {
 pub struct RawTransactionV1 {
     pub version: u64,
     pub id: Hash, 
-    pub spends: ZMap<NName, SpendV1>,
+    pub spends: ZMap<NName, Spend>,
 }
 
 #[derive(Debug, Clone, NounDecode)]

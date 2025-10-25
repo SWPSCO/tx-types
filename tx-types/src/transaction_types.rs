@@ -841,10 +841,31 @@ pub enum Seeds {
 }
 
 // Spend structure
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Spend {
     pub version: u64,
     pub body: SpendBody,
+}
+
+impl NounDecode for Spend {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let cell = noun.as_cell()?;
+        let version = cell.head().as_atom()?.as_u64()?;
+        let body = match version {
+            0 => SpendBody::V0(SpendV0::from_noun(&cell.tail())?),
+            1 => SpendBody::V1(SpendV1::from_noun(&cell.tail())?),
+            _ => return Err(NounDecodeError::InvalidEnumVariant),
+        };
+        Ok(Spend { version, body })
+    }
+}
+
+impl NounEncode for Spend {
+    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
+        let tag = Atom::new(allocator, self.version).as_noun();
+        let body = self.body.to_noun(allocator);
+        T(allocator, &[tag, body])
+    }
 }
 
 #[derive(Debug, Clone)]
