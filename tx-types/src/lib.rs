@@ -46,7 +46,12 @@ pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 // Re-export main transaction types
 pub use transaction_types::*;
 pub use transaction_types_v0::*;
-pub use transaction_types_v1::*;
+pub use transaction_types_v1::{
+    SpendV1, NNoteV1, SeedV1, SeedsV1, TxV1, OutputV1, OutputsV1,
+    RawTransactionV1, InputV1, InputsV1, Witness, LockMerkleProof,
+    SpendCondition, LockPrimitive, LockPrimitiveBody, Pkh, Tim, Hax, Brn,
+    MerkleProof, PkhSignature, PkhSignatureValue, NoteData
+};
 
 // Re-export tx-engine types
 pub use transaction_types::{Tx, Outputs, Output};

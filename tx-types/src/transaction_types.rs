@@ -842,80 +842,39 @@ pub enum Seeds {
 
 // Spend structure
 #[derive(Debug, Clone)]
-pub struct Spend {
-    pub version: u64,
-    pub body: SpendBody,
+pub enum Spend {
+    V0(SpendV0),
+    V1(SpendV1),
 }
 
 impl NounEncode for Spend {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        T(allocator, &[
-            Atom::new(allocator, self.version).as_noun(),
-            self.body.to_noun(allocator)
-        ])
+        match self {
+            Spend::V0(spend) => {
+                let tag = D(0);
+                let value = spend.to_noun(allocator);
+                nockvm::noun::T(allocator, &[tag, value])
+            }
+            Spend::V1(spend) => {
+                let tag = D(1);
+                let value = spend.to_noun(allocator);
+                nockvm::noun::T(allocator, &[tag, value])
+            }
+        }
     }
 }
 
 impl NounDecode for Spend {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        let cell = noun
-            .as_cell()
-            .map_err(|_| NounDecodeError::Custom("Spend must be a cell".into()))?;
-
-        let version_atom = cell
-            .head()
-            .as_atom()
-            .map_err(|_| NounDecodeError::Custom("Spend version must be an atom".into()))?;
-
-        let version = version_atom
-            .as_u64()
-            .map_err(|_| NounDecodeError::Custom("Spend version must be a u64".into()))?;
-
-        let body_noun = cell.tail();
-        
-        let body = match version {
-            0 => SpendBody::V0(SpendV0::from_noun(&body_noun)?),
-            1 => SpendBody::V1(SpendV1::from_noun(&body_noun)?),
-            _ => return Err(NounDecodeError::Custom(format!(
-                "Spend version {} unsupported", version
-            ))),
-        };
-
-        Ok(Spend { version, body })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SpendBody {
-    V0(SpendV0),
-    V1(SpendV1),
-}
-
-impl NounEncode for SpendBody {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            SpendBody::V0(v) => v.to_noun(allocator),
-            SpendBody::V1(v) => v.to_noun(allocator),
+        let cell = noun.as_cell()?;
+        let tag = cell.head().as_atom()?.as_u64()?;
+        match tag {
+            0 => Ok(Spend::V0(SpendV0::from_noun(&cell.tail())?)),
+            1 => Ok(Spend::V1(SpendV1::from_noun(&cell.tail())?)),
+            _ => Err(NounDecodeError::InvalidEnumVariant),
         }
     }
 }
-
-impl SpendBody {
-    pub fn to_hashable(&self) -> Hashable {
-        match self {
-            SpendBody::V0(v) => v.to_hashable(),
-            SpendBody::V1(_) => Hashable::null(), // placeholder
-        }
-    }
-    pub fn to_hash(&self) -> Hash { hash_hashable(&self.to_hashable()) }
-    pub fn sig_hash(&self) -> Hash {
-        match self {
-            SpendBody::V0(v) => v.sig_hash(),
-            SpendBody::V1(_) => Hash { values: [0; 5] },
-        }
-    }
-}
-
 // Input structure  
 #[derive(Debug, Clone)]
 pub enum Input {
