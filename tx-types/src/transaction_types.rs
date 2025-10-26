@@ -841,10 +841,48 @@ pub enum Seeds {
 }
 
 // Spend structure
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Spend {
     pub version: u64,
     pub body: SpendBody,
+}
+
+impl NounEncode for Spend {
+    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
+        T(allocator, &[
+            Atom::new(allocator, self.version).as_noun(),
+            self.body.to_noun(allocator)
+        ])
+    }
+}
+
+impl NounDecode for Spend {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let cell = noun
+            .as_cell()
+            .map_err(|_| NounDecodeError::Custom("Spend must be a cell".into()))?;
+
+        let version_atom = cell
+            .head()
+            .as_atom()
+            .map_err(|_| NounDecodeError::Custom("Spend version must be an atom".into()))?;
+
+        let version = version_atom
+            .as_u64()
+            .map_err(|_| NounDecodeError::Custom("Spend version must be a u64".into()))?;
+
+        let body_noun = cell.tail();
+        
+        let body = match version {
+            0 => SpendBody::V0(SpendV0::from_noun(&body_noun)?),
+            1 => SpendBody::V1(SpendV1::from_noun(&body_noun)?),
+            _ => return Err(NounDecodeError::Custom(format!(
+                "Spend version {} unsupported", version
+            ))),
+        };
+
+        Ok(Spend { version, body })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -857,20 +895,8 @@ impl NounEncode for SpendBody {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
         match self {
             SpendBody::V0(v) => v.to_noun(allocator),
-            SpendBody::V1(_) => D(0), // placeholder
+            SpendBody::V1(v) => v.to_noun(allocator),
         }
-    }
-}
-
-impl NounDecode for SpendBody {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = SpendV0::from_noun(noun) {
-            return Ok(SpendBody::V0(v0));
-        }
-        if let Ok(v1) = SpendV1::from_noun(noun) {
-            return Ok(SpendBody::V1(v1));
-        }
-        Err(NounDecodeError::Custom("SpendBody enum decode: unsupported format".into()))
     }
 }
 
