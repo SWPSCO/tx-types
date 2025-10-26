@@ -983,13 +983,29 @@ pub enum Tx {
 
 impl NounDecode for Tx {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = TxV0::from_noun(noun) {
-            return Ok(Tx::V0(v0));
+        // First, peek at the version field (first field of the struct)
+        let cell = noun
+            .as_cell()
+            .map_err(|_| NounDecodeError::Custom("Tx must be a cell".into()))?;
+
+        let version_atom = cell
+            .head()
+            .as_atom()
+            .map_err(|_| NounDecodeError::Custom("Tx version must be an atom".into()))?;
+
+        let version = version_atom
+            .as_u64()
+            .map_err(|_| NounDecodeError::Custom("Tx version must be a u64".into()))?;
+
+        // Dispatch based on version
+        match version {
+            0 => TxV0::from_noun(noun).map(Tx::V0),
+            1 => TxV1::from_noun(noun).map(Tx::V1),
+            _ => Err(NounDecodeError::Custom(format!(
+                "Tx enum decode: unsupported version {}",
+                version
+            ))),
         }
-        if let Ok(v1) = TxV1::from_noun(noun) {
-            return Ok(Tx::V1(v1));
-        }
-        Err(NounDecodeError::Custom("Tx enum decode: unsupported format".into()))
     }
 }
 
