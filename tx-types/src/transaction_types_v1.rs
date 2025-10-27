@@ -154,7 +154,21 @@ pub struct OutputV1 {
 pub struct RawTransactionV1 {
     pub version: u64,
     pub id: Hash,
-    pub spends: ZMap<NName, Spend>,
+    pub spends: SpendsV1,
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct SpendsV1 {
+    pub map: ZMap<NName, Spend>,
+}
+
+impl SpendsV1 {
+    pub fn to_hash(&self) -> Hash {
+        // placeholder for now
+        Hash {
+            values: [0; 5],
+        }
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]

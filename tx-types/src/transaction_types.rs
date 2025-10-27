@@ -270,6 +270,10 @@ impl NName {
             Hashable::cell(source.to_hashable(), Hashable::null()),
         ))
     }
+
+    pub fn display(&self) -> Vec<String> {
+        self.p.iter().map(|h| h.to_b58()).collect()
+    }
 }
 
 // TimelockIntent: Option<(absolute, relative)> where both are TimelockRange

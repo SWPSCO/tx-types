@@ -492,3 +492,203 @@ fn note_hash_v0(note: &NNoteV0) -> Hash {
 fn note_hash_v1(note: &NNoteV1) -> Hash {
     note.name.to_hash()
 }
+
+pub fn build_simple_batch_spends(
+    mut notes: Vec<NNoteV1>,
+    orders: Vec<BatchOrder>,
+    fee: Coins,
+    refund_pkh: Hash,
+) -> Result<ZMap<NName, Spend>, String> {
+    // Validate orders
+    if orders.is_empty() {
+        return Err("Must have at least one order".to_string());
+    }
+
+    for order in &orders {
+        if order.amount.value == 0 {
+            return Err("Cannot create an order with zero amount".to_string());
+        }
+    }
+
+    // Sort by assets descending
+    notes.sort_by(|a, b| b.assets.value.cmp(&a.assets.value));
+    create_unsigned_batch_spends_1(notes, orders, fee, refund_pkh)
+}
+
+/// Create batch spends for V1 notes
+fn create_unsigned_batch_spends_1(
+    notes: Vec<NNoteV1>,
+    orders: Vec<BatchOrder>,
+    fee: Coins,
+    refund_pkh: Hash,
+) -> Result<ZMap<NName, Spend>, String> {
+    // Calculate total needed
+    let total_orders: u64 = orders.iter().map(|o| o.amount.value).sum();
+    let _total_needed = total_orders + fee.value;
+
+    // Track remaining amounts
+    let mut remaining_orders: Vec<(Hash, u64)> = orders
+        .iter()
+        .map(|o| (o.recipient.clone(), o.amount.value))
+        .collect();
+    let mut remaining_fee = fee.value;
+    let mut spends = ZMap::new();
+
+    // Process notes sequentially
+    for note in notes {
+        // Check if we still need funds
+        let still_need_orders: u64 = remaining_orders.iter().map(|(_, amt)| *amt).sum();
+        if still_need_orders == 0 && remaining_fee == 0 {
+            // All orders and fee satisfied, stop processing notes
+            break;
+        }
+
+        let available = note.assets.value;
+        let mut consumed = 0u64;
+
+        // Build seeds for this note
+        let mut seeds_list = Vec::new();
+
+        // Fill orders sequentially
+        let mut updated_orders = Vec::new();
+        for (recipient, remaining) in remaining_orders {
+            if remaining == 0 {
+                continue; // Order already filled
+            }
+
+            let to_allocate = core::cmp::min(remaining, available - consumed);
+            if to_allocate > 0 {
+                // Create output lock for recipient
+                let mut recipient_set = ZSet::new();
+                recipient_set.put(recipient.clone());
+                let output_lock = SpendCondition {
+                    p: vec![LockPrimitive {
+                        header: "pkh".to_string(),
+                        body: LockPrimitiveBody::Pkh(Pkh {
+                            m: 1,
+                            h: recipient_set,
+                        }),
+                    }],
+                };
+
+                // Build note-data
+                let lock_data = LockData::V0(output_lock.clone());
+                let mut note_data_map = ZMap::new();
+                let lock_data_noun = lock_data_to_untyped_noun(&lock_data);
+                note_data_map.put("lock".to_string(), lock_data_noun);
+                let note_data = NoteData { map: note_data_map };
+
+                // Create seed
+                let seed = SeedV1 {
+                    output_source: None,
+                    lock_root: lock_hash(&output_lock),
+                    note_data,
+                    gift: Coins { value: to_allocate },
+                    parent_hash: note_hash_v1(&note),
+                };
+
+                seeds_list.push(seed);
+                consumed += to_allocate;
+                updated_orders.push((recipient, remaining - to_allocate));
+            } else {
+                updated_orders.push((recipient, remaining));
+            }
+        }
+        remaining_orders = updated_orders;
+
+        // Handle fee
+        if remaining_fee > 0 {
+            let to_fee = core::cmp::min(remaining_fee, available - consumed);
+            consumed += to_fee;
+            remaining_fee -= to_fee;
+        }
+
+        // Handle refund if any leftover
+        if consumed < available {
+            let refund_amount = available - consumed;
+
+            // Create refund seed
+            let mut refund_set = ZSet::new();
+            refund_set.put(refund_pkh.clone());
+            let refund_lock = SpendCondition {
+                p: vec![LockPrimitive {
+                    header: "pkh".to_string(),
+                    body: LockPrimitiveBody::Pkh(Pkh {
+                        m: 1,
+                        h: refund_set,
+                    }),
+                }],
+            };
+
+            let lock_data = LockData::V0(refund_lock.clone());
+            let mut note_data_map = ZMap::new();
+            let lock_data_noun = lock_data_to_untyped_noun(&lock_data);
+            note_data_map.put("lock".to_string(), lock_data_noun);
+            let note_data = NoteData { map: note_data_map };
+
+            let refund_seed = SeedV1 {
+                output_source: None,
+                lock_root: lock_hash(&refund_lock),
+                note_data,
+                gift: Coins {
+                    value: refund_amount,
+                },
+                parent_hash: note_hash_v1(&note),
+            };
+
+            seeds_list.push(refund_seed);
+        }
+
+        // Only create spend if we actually consumed from this note
+        if consumed > 0 {
+            // TODO: Extract and validate lock from note-data (similar to create_spends_1)
+            // For now, use simplified approach
+
+            // Create seeds set
+            let mut seeds_set = ZSet::new();
+            for seed in seeds_list {
+                seeds_set.put(seed);
+            }
+            let seeds = SeedsV1 { set: seeds_set };
+
+            // Calculate fee portion for this note
+            let fee_portion = fee.value - remaining_fee;
+
+            // TODO: Build proper lock merkle proof
+            // For now, create empty witness
+            let witness = Witness {
+                lmp: LockMerkleProof {
+                    spend_condition: SpendCondition { p: Vec::new() },
+                    axis: 1,
+                    merkle_proof: MerkleProof {
+                        root: Hash { values: [0; 5] },
+                        path: Vec::new(),
+                    },
+                },
+                pkh: PkhSignature { map: ZMap::new() },
+                hax: ZMap::new(),
+                tim: 0,
+            };
+
+            // Create V1 spend
+            let spend_body = SpendV1 {
+                seeds,
+                fee: Coins { value: fee_portion },
+                witness,
+            };
+
+            spends.put(note.name.clone(), Spend { version: 1, body: SpendBody::V1(spend_body) });
+        }
+    }
+
+    // Check if we satisfied all requirements
+    let still_need_orders: u64 = remaining_orders.iter().map(|(_, amt)| *amt).sum();
+    if still_need_orders > 0 || remaining_fee > 0 {
+        return Err(format!(
+            "Insufficient funds. Still need: {} for orders, {} for fee",
+            still_need_orders, remaining_fee
+        ));
+    }
+
+    Ok(spends)
+}
