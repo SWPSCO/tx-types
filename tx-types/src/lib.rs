@@ -8,6 +8,7 @@ pub mod block_types;
 /// - Data structures like Z-maps (collections/)
 /// - Transaction validation logic (validation/)
 // Core modules in root
+pub mod fee_calculator;
 pub mod generic_noun;
 pub mod signer;
 pub mod transaction_types;
@@ -48,6 +49,8 @@ pub use tx_builder_v1::{
 };
 
 pub use tx_builder_batch::{build_batch_spends, BatchOrder};
+
+pub use fee_calculator::{calculate_min_fee, BASE_FEE, MIN_FEE};
 
 // Re-export main transaction types
 pub use transaction_types::*;
