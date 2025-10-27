@@ -855,6 +855,32 @@ pub struct Spend {
     pub body: SpendBody,
 }
 
+impl Spend {
+    /// Compute hashable for spend
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~411-417):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   ?-  -.form
+    ///     %0  [leaf+%0 (hashable:spend-0 +.form)]
+    ///     %1  [leaf+%1 (hashable:spend-1 +.form)]
+    ///   ==
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        // In Hoon, leaf+%0 means a leaf containing the atom 0
+        // [leaf+%0 body] is a cell of [Leaf(0), body-hashable]
+        let version_leaf = Hashable::leaf_from_atom(&self.version.to_le_bytes());
+
+        // Pair with the body's hashable: [version-leaf body-hashable]
+        Hashable::cell(version_leaf, self.body.to_hashable())
+    }
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SpendBody {
     V0(SpendV0),
@@ -901,7 +927,7 @@ impl SpendBody {
         match self {
             SpendBody::V0(v) => v.to_hashable(),
             SpendBody::V0ToV1(v) => v.to_hashable(),
-            SpendBody::V1(_) => Hashable::null(), // placeholder
+            SpendBody::V1(v) => v.to_hashable(),
         }
     }
     pub fn to_hash(&self) -> Hash {
@@ -911,7 +937,7 @@ impl SpendBody {
         match self {
             SpendBody::V0(v) => v.sig_hash(),
             SpendBody::V0ToV1(v) => v.compute_sig_hash(),
-            SpendBody::V1(_) => Hash { values: [0; 5] },
+            SpendBody::V1(v) => v.compute_sig_hash(),
         }
     }
 }

@@ -105,6 +105,38 @@ impl SeedV1 {
             ),
         )
     }
+
+    /// Compute the regular hashable for a V1 seed (used in spend hashable, not signatures)
+    ///
+    /// From Hoon (tx-engine-1.hoon lines 344-348):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  sed=form
+    ///   ^-  hashable:tip5
+    ///   :^    hash+lock-root.sed
+    ///       hash+(hash:note-data note-data.sed)
+    ///     leaf+gift.sed
+    ///   hash+parent-hash.sed
+    /// ```
+    pub fn to_regular_hashable(&self) -> Hashable {
+        use crate::hashing::hasher::hash_hashable;
+
+        // Hash the note_data
+        let note_data_hash = hash_hashable(&self.note_data.to_hashable());
+
+        // Build the 4-element structure (quad): [a b c d]
+        // In Hoon, :^ creates a quad which is [a [b [c d]]]
+        Hashable::cell(
+            Hashable::Hash(self.lock_root.clone()),
+            Hashable::cell(
+                Hashable::Hash(note_data_hash),
+                Hashable::cell(
+                    self.gift.to_hashable(),
+                    Hashable::Hash(self.parent_hash.clone()),
+                ),
+            ),
+        )
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -128,6 +160,23 @@ impl SeedsV1 {
     pub fn to_sig_hashable(&self) -> Hashable {
         // Use ZSet's to_hashable method with sig_hashable for each seed
         self.set.to_hashable(|seed| seed.to_sig_hashable())
+    }
+
+    /// Compute the regular hashable for V1 seeds (used in spend hashable, not signatures)
+    ///
+    /// From Hoon (tx-engine-1.hoon lines 384-390):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   ?~  form  leaf+form
+    ///   :+  (hashable:seed n.form)
+    ///     $(form l.form)
+    ///   $(form r.form)
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        // Use ZSet's to_hashable method with regular hashable for each seed
+        self.set.to_hashable(|seed| seed.to_regular_hashable())
     }
 }
 
@@ -163,11 +212,36 @@ pub struct SpendsV1 {
 }
 
 impl SpendsV1 {
+    /// Compute hashable for spends
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~800-806):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   |-
+    ///   ?~  form  leaf+form
+    ///   :+  [(hashable:nname p.n.form) (hashable:spend q.n.form)]
+    ///     $(form l.form)
+    ///   $(form r.form)
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        self.map
+            .to_hashable(|nname| nname.to_hashable(), |spend| spend.to_hashable())
+    }
+
+    /// Compute hash of spends
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~808-811):
+    /// ```hoon
+    /// ++  hash
+    ///   |=  =form
+    ///   %-  hash-hashable:tip5
+    ///   (hashable form)
+    /// ```
     pub fn to_hash(&self) -> Hash {
-        // placeholder for now
-        Hash {
-            values: [0; 5],
-        }
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
     }
 }
 
@@ -187,6 +261,50 @@ pub struct SpendV1 {
     pub witness: Witness,
     pub seeds: SeedsV1,
     pub fee: Coins,
+}
+
+impl SpendV1 {
+    /// Compute the signature hash for a V1 spend
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~738-742):
+    /// ```hoon
+    /// ++  sig-hash
+    ///   |=  sen=form
+    ///   ^-  ^hash
+    ///   %-  hash-hashable:tip5
+    ///   [(sig-hashable:seeds seeds.sen) leaf+fee.sen]
+    /// ```
+    pub fn compute_sig_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+
+        let hashable = Hashable::cell(self.seeds.to_sig_hashable(), self.fee.to_hashable());
+
+        hash_hashable(&hashable)
+    }
+
+    /// Convert to hashable representation
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~756-759):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  sen=form
+    ///   ^-  hashable:tip5
+    ///   [(hashable:witness witness.sen) (hashable:seeds seeds.sen) leaf+fee.sen]
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        // Build the triple: [witness-hashable seeds-hashable fee-leaf]
+        // Note: seeds hashable uses regular hashable, not sig-hashable
+        Hashable::triple(
+            self.witness.to_hashable(),
+            self.seeds.to_hashable(),
+            self.fee.to_hashable(),
+        )
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
 }
 
 /// SpendV0ToV1: Spend a V0 note into V1 notes
@@ -327,11 +445,130 @@ pub struct Witness {
     pub tim: u64,
 }
 
+impl Witness {
+    /// Compute hashable for witness
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1184-1191):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   :*  hash+(hash:lock-merkle-proof lmp.form)
+    ///       hash+(hash:pkh-signature pkh.form)
+    ///       hash+(hash-hashable:tip5 (hashable-hax hax.form))
+    ///       leaf+tim.form
+    ///   ==
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        use crate::hashing::hasher::hash_hashable;
+
+        // Hash the lock merkle proof
+        let lmp_hash = self.lmp.to_hash();
+
+        // Hash the pkh signature
+        let pkh_hash = self.pkh.to_hash();
+
+        // Hash the hax map
+        let hax_hashable = self.hashable_hax();
+        let hax_hash = hash_hashable(&hax_hashable);
+
+        // Build the 4-element structure (quad)
+        // Using nested cells: [a [b [c d]]]
+        Hashable::cell(
+            Hashable::Hash(lmp_hash),
+            Hashable::cell(
+                Hashable::Hash(pkh_hash),
+                Hashable::cell(
+                    Hashable::Hash(hax_hash),
+                    Hashable::leaf_from_atom(&self.tim.to_le_bytes()),
+                ),
+            ),
+        )
+    }
+
+    /// Compute hashable for hax map
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1193-1198):
+    /// ```hoon
+    /// ++  hashable-hax
+    ///   |=  m=(z-map ^hash *)
+    ///   ^-  hashable:tip5
+    ///   ?~  m  leaf+m
+    ///   :+  [hash+p.n.m (hashable-noun q.n.m)]
+    ///       $(m l.m)
+    ///   $(m r.m)
+    /// ```
+    fn hashable_hax(&self) -> Hashable {
+        self.hax.to_hashable(
+            |hash| Hashable::Hash(hash.clone()),
+            |untyped_noun| {
+                // hashable-noun recursively builds cells for cells, leaves for atoms
+                // But since UntypedNoun is just jammed bytes, we treat it as a leaf
+                self.hashable_noun_from_untyped(untyped_noun)
+            },
+        )
+    }
+
+    /// Compute hashable for a noun (represented as UntypedNoun)
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1200-1203):
+    /// ```hoon
+    /// ++  hashable-noun
+    ///   |=  n=*
+    ///   ^-  hashable:tip5
+    ///   ?^  n  [$(n -.n) $(n +.n)]
+    ///   leaf+n
+    /// ```
+    fn hashable_noun_from_untyped(&self, untyped: &UntypedNoun) -> Hashable {
+        // The UntypedNoun contains jammed bytes, which we need to unjam and traverse
+        // For now, we'll just use it as a leaf since we don't have easy access to the noun structure
+        Hashable::Leaf(untyped.p.to_vec())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
+}
+
 #[derive(Debug, Clone, NounDecode)]
 pub struct LockMerkleProof {
     pub spend_condition: SpendCondition,
     pub axis: u64,
     pub merkle_proof: MerkleProof,
+}
+
+impl LockMerkleProof {
+    /// Compute hashable for lock-merkle-proof
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1392-1403):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   |^
+    ///   :+  hash+(hash:spend-condition spend-condition.form)
+    ///     leaf+axis
+    ///   (hashable-merk-proof merk-proof.form)
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        use crate::hashing::hasher::hash_hashable;
+
+        // Hash the spend condition
+        let spend_condition_hash = hash_hashable(&self.spend_condition.to_hashable());
+
+        // Build the triple: [hash+(spend-condition) leaf+axis merkle-proof-hashable]
+        Hashable::triple(
+            Hashable::Hash(spend_condition_hash),
+            Hashable::leaf_from_atom(&self.axis.to_le_bytes()),
+            self.merkle_proof.to_hashable(),
+        )
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -479,13 +716,100 @@ pub struct MerkleProof {
     pub path: Vec<Hash>,
 }
 
+impl MerkleProof {
+    /// Compute hashable for merkle proof
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1405-1411):
+    /// ```hoon
+    /// ++  hashable-merk-proof
+    ///   |=  =merk-proof:merkle
+    ///   ^-  hashable:tip5
+    ///   :-  hash+root.merk-proof
+    ///   |-  ^-  hashable:tip5
+    ///   ?~  path.merk-proof
+    ///     leaf+~
+    ///   :-  hash+i.path.merk-proof
+    ///   $(path.merk-proof t.path.merk-proof)
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        // Start with root hash
+        let root_hashable = Hashable::Hash(self.root.clone());
+
+        // Build path as a list: [hash+h1 [hash+h2 [... leaf+~]]]
+        let path_hashable = self.path.iter().rev().fold(
+            Hashable::null(), // leaf+~ (empty list terminator)
+            |acc, hash| Hashable::cell(Hashable::Hash(hash.clone()), acc),
+        );
+
+        // Pair root with path
+        Hashable::cell(root_hashable, path_hashable)
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
+}
+
 #[derive(Debug, Clone, NounDecode)]
 pub struct PkhSignature {
     pub map: ZMap<Hash, PkhSignatureValue>,
+}
+
+impl PkhSignature {
+    /// Compute hashable for pkh-signature
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1580-1592):
+    /// ```hoon
+    /// ++  hashable
+    ///   |=  =form
+    ///   ^-  hashable:tip5
+    ///   |^
+    ///   ?~  form  leaf+form
+    ///   :+  [hash+p.n.form (hashable-val q.n.form)]
+    ///       $(form l.form)
+    ///   $(form r.form)
+    ///   ::
+    ///   ++  hashable-val
+    ///     |=  [pk=schnorr-pubkey sig=schnorr-signature]
+    ///     ^-  hashable:tip5
+    ///     [hash+(hash:schnorr-pubkey pk) (hashable:schnorr-signature sig)]
+    ///   --
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        self.map
+            .to_hashable(|hash| Hashable::Hash(hash.clone()), |val| val.to_hashable())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct PkhSignatureValue {
     pub pk: SchnorrPubkey,
     pub sig: SchnorrSignature,
+}
+
+impl PkhSignatureValue {
+    /// Compute hashable for pkh-signature value
+    ///
+    /// From Hoon (tx-engine-1.hoon lines ~1587-1591):
+    /// ```hoon
+    /// ++  hashable-val
+    ///   |=  [pk=schnorr-pubkey sig=schnorr-signature]
+    ///   ^-  hashable:tip5
+    ///   [hash+(hash:schnorr-pubkey pk) (hashable:schnorr-signature sig)]
+    /// ```
+    pub fn to_hashable(&self) -> Hashable {
+        // Pair: [hash+(pubkey) hashable(signature)]
+        Hashable::cell(Hashable::Hash(self.pk.to_hash()), self.sig.to_hashable())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
 }
