@@ -401,19 +401,30 @@ impl NounEncode for NNameV1 {
 impl NounEncode for SeedV1 {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
         use nockvm::noun::T;
-        // Minimal, field-stable encoding; precompute parts to avoid borrow conflicts
-        let lock = self.lock_root.to_noun(alloc);
+
+        // Encode all 5 fields: output_source, lock_root, note_data, gift, parent_hash
+        let output_source = self.output_source.to_noun(alloc);
+        let lock_root = self.lock_root.to_noun(alloc);
+        let note_data = self.note_data.to_noun(alloc);
         let gift = self.gift.to_noun(alloc);
-        let parent = self.parent_hash.to_noun(alloc);
-        T(alloc, &[lock, gift, parent])
+        let parent_hash = self.parent_hash.to_noun(alloc);
+
+        T(
+            alloc,
+            &[output_source, lock_root, note_data, gift, parent_hash],
+        )
     }
 }
 
 impl NounEncode for OutputV1 {
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, _alloc: &mut A) -> nockvm::noun::Noun {
-        use nockvm::noun::D;
-        // Minimal placeholder encoding to satisfy trait requirements without deep encoding
-        D(0)
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        use nockvm::noun::T;
+
+        // Encode both fields: note and seeds
+        let note = self.note.to_noun(alloc);
+        let seeds = self.seeds.to_noun(alloc);
+
+        T(alloc, &[note, seeds])
     }
 }
 
