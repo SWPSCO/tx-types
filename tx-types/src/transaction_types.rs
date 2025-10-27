@@ -855,6 +855,15 @@ pub struct Spend {
     pub body: SpendBody,
 }
 
+impl NounEncode for Spend {
+    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
+        use nockvm::noun::T;
+        let version_noun = self.version.to_noun(allocator);
+        let body_noun = self.body.to_noun(allocator);
+        T(allocator, &[version_noun, body_noun])
+    }
+}
+
 impl Spend {
     /// Compute hashable for spend
     ///
@@ -892,12 +901,8 @@ impl NounEncode for SpendBody {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
         match self {
             SpendBody::V0(v) => v.to_noun(allocator),
-            SpendBody::V0ToV1(_v) => {
-                // Encode as [signature seeds fee] - same structure as V0 but seeds are V1
-                // For now, placeholder - we'll need proper encoding
-                D(0)
-            }
-            SpendBody::V1(_) => D(0), // placeholder
+            SpendBody::V0ToV1(v) => v.to_noun(allocator),
+            SpendBody::V1(v) => v.to_noun(allocator),
         }
     }
 }

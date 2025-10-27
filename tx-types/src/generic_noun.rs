@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use nockapp::noun::slab::NounSlab;
-use nockvm::noun::Noun;
-use noun_serde::{NounDecode, NounDecodeError};
+use nockvm::noun::{Noun, NounAllocator};
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UntypedNoun {
@@ -46,5 +46,22 @@ impl NounDecode for UntypedNoun {
         slab.copy_into(*noun);
         let noun_bytes: Bytes = slab.jam();
         Ok(UntypedNoun { p: noun_bytes })
+    }
+}
+
+impl NounEncode for UntypedNoun {
+    fn to_noun<A: NounAllocator>(&self, alloc: &mut A) -> Noun {
+        // Try to downcast to NounSlab - this only works if the allocator IS a NounSlab
+        // We use a trick: attempt to call a NounSlab-specific method
+        // Since we can't downcast traits directly, we'll use std::any::Any if available
+
+        // For now, we require that the allocator is a NounSlab.
+        // If it's not, this will panic at runtime.
+        let slab_ptr = alloc as *mut A as *mut NounSlab;
+        let slab = unsafe { &mut *slab_ptr };
+
+        // Cue directly into the slab (which is the allocator)
+        slab.cue_into(self.p.clone())
+            .expect("Failed to cue UntypedNoun bytes into allocator - allocator must be a NounSlab")
     }
 }

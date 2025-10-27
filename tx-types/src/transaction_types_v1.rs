@@ -14,7 +14,7 @@ pub struct NNameV1 {
 }
     */
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct NNoteV1 {
     pub version: u64,
     pub origin_page: PageNumber,
@@ -26,6 +26,13 @@ pub struct NNoteV1 {
 #[derive(Debug, Clone, NounDecode)]
 pub struct NoteData {
     pub map: ZMap<String, UntypedNoun>,
+}
+
+impl NounEncode for NoteData {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        // Simply delegate to ZMap's to_noun implementation
+        self.map.to_noun(alloc)
+    }
 }
 
 impl NoteData {
@@ -139,7 +146,7 @@ impl SeedV1 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SeedsV1 {
     pub set: ZSet<SeedV1>,
 }
@@ -180,7 +187,7 @@ impl SeedsV1 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct TxV1 {
     pub version: u64,
     pub raw_tx: RawTransactionV1,
@@ -188,7 +195,7 @@ pub struct TxV1 {
     pub outputs: OutputsV1,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct OutputsV1 {
     pub set: ZSet<OutputV1>,
 }
@@ -199,14 +206,14 @@ pub struct OutputV1 {
     pub seeds: SeedsV1,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct RawTransactionV1 {
     pub version: u64,
     pub id: Hash,
     pub spends: SpendsV1,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SpendsV1 {
     pub map: ZMap<NName, Spend>,
 }
@@ -245,18 +252,18 @@ impl SpendsV1 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct InputsV1 {
     pub map: ZMap<NName, InputV1>,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct InputV1 {
     pub note: NNoteV1,
     pub spend: SpendV1,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SpendV1 {
     pub witness: Witness,
     pub seeds: SeedsV1,
@@ -311,7 +318,7 @@ impl SpendV1 {
 ///
 /// This corresponds to `spend-0:v1:transact` in tx-engine-1.hoon.
 /// It uses V0 signatures (ZMap<SchnorrPubkey, SchnorrSignature>) but creates V1 seeds.
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SpendV0ToV1 {
     pub signature: ZMap<SchnorrPubkey, SchnorrSignature>,
     pub seeds: SeedsV1,
@@ -403,7 +410,7 @@ impl NounEncode for SeedV1 {
 }
 
 impl NounEncode for OutputV1 {
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, _alloc: &mut A) -> nockvm::noun::Noun {
         use nockvm::noun::D;
         // Minimal placeholder encoding to satisfy trait requirements without deep encoding
         D(0)
@@ -437,7 +444,7 @@ impl ZSetDorTip for OutputV1 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Witness {
     pub lmp: LockMerkleProof,
     pub pkh: PkhSignature,
@@ -531,7 +538,7 @@ impl Witness {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct LockMerkleProof {
     pub spend_condition: SpendCondition,
     pub axis: u64,
@@ -571,7 +578,7 @@ impl LockMerkleProof {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SpendCondition {
     pub p: Vec<LockPrimitive>,
 }
@@ -596,7 +603,7 @@ pub enum LockPrimitiveBody {
     Brn(Brn),
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Pkh {
     pub m: u64,
     pub h: ZSet<Hash>,
@@ -615,7 +622,7 @@ impl Pkh {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Tim {
     // lockscript timelock
     pub rel: TimelockRange,
@@ -631,7 +638,7 @@ impl Tim {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Hax {
     pub set: ZSet<Hash>,
 }
@@ -645,7 +652,7 @@ impl Hax {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Brn {
     pub value: u64, // this will always be 0
 }
@@ -710,7 +717,24 @@ impl LockPrimitive {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+impl NounEncode for LockPrimitive {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        use nockapp::utils::make_tas;
+        use nockvm::noun::T;
+
+        let header_atom = make_tas(alloc, &self.header);
+        let body_noun = match &self.body {
+            LockPrimitiveBody::Pkh(pkh) => pkh.to_noun(alloc),
+            LockPrimitiveBody::Tim(tim) => tim.to_noun(alloc),
+            LockPrimitiveBody::Hax(hax) => hax.to_noun(alloc),
+            LockPrimitiveBody::Brn(brn) => brn.to_noun(alloc),
+        };
+
+        T(alloc, &[header_atom.as_noun(), body_noun])
+    }
+}
+
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct MerkleProof {
     pub root: Hash,
     pub path: Vec<Hash>,
@@ -751,7 +775,7 @@ impl MerkleProof {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct PkhSignature {
     pub map: ZMap<Hash, PkhSignatureValue>,
 }
@@ -787,7 +811,7 @@ impl PkhSignature {
     }
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct PkhSignatureValue {
     pub pk: SchnorrPubkey,
     pub sig: SchnorrSignature,
