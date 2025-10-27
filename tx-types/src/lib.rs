@@ -13,6 +13,7 @@ pub mod signer;
 pub mod transaction_types;
 pub mod transaction_types_v0;
 pub mod transaction_types_v1;
+pub mod tx_builder_batch;
 pub mod tx_builder_v1;
 pub mod tx_to_noun;
 
@@ -41,7 +42,12 @@ pub use crypto::CryptoError;
 
 pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
 
-pub use tx_builder_v1::{build_spends, create_spends_0, create_spends_1, LockData, Order};
+pub use tx_builder_v1::{
+    build_spends, create_spends_0, create_spends_1, lock_data_to_untyped_noun, sign_spend_v0_to_v1,
+    sign_spend_v1, LockData, Order,
+};
+
+pub use tx_builder_batch::{build_batch_spends, BatchOrder};
 
 // Re-export main transaction types
 pub use transaction_types::*;

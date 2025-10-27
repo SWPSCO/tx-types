@@ -110,7 +110,7 @@ pub type Reason<T> = Result<T, String>;
 ///
 /// # Returns
 /// An UntypedNoun containing the jammed lock-data
-fn lock_data_to_untyped_noun(lock_data: &LockData) -> UntypedNoun {
+pub fn lock_data_to_untyped_noun(lock_data: &LockData) -> UntypedNoun {
     let mut slab = NounSlab::new();
 
     match lock_data {
@@ -974,7 +974,16 @@ fn create_refund(
 ///
 /// # Returns
 /// A signed Spend (wrapped in the versioned enum)
-fn sign_spend_v1(
+/// Sign a V1 spend with the secret key
+///
+/// # Arguments
+/// * `spend_body` - The SpendV1 body to sign
+/// * `sign_key` - Secret key for signing (T8 format)
+/// * `pubkey` - Public key corresponding to sign_key
+///
+/// # Returns
+/// A fully signed Spend with version and signature
+pub fn sign_spend_v1(
     spend_body: SpendV1,
     sign_key: T8,
     pubkey: SchnorrPubkey,
@@ -1137,7 +1146,7 @@ fn create_refund_v0_to_v1(
 ///     signature  (~(put z-by signature.sen) pk sig)
 ///   ==
 /// ```
-fn sign_spend_v0_to_v1(
+pub fn sign_spend_v0_to_v1(
     mut spend_body: SpendV0ToV1,
     sign_key: T8,
     pubkey: SchnorrPubkey,
