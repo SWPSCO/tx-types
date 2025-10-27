@@ -1,5 +1,5 @@
+use crate::{ZMap, ZSet};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
-use crate::{ZSet, ZMap};
 
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
@@ -27,11 +27,11 @@ impl NNoteV0 {
     pub fn to_hash(&self) -> Hash {
         // Convert to hashable structure
         let hashable = self.to_hashable();
-        
+
         // Hash the structure
         hash_hashable(&hashable)
     }
-    
+
     pub fn to_hashable(&self) -> Hashable {
         // NNote hashable matches Hoon implementation in tx-engine.hoon lines 1462-1472
         // Structure: [[version origin-page timelock-hash] [name-hash lock-hash source-hash assets]]
@@ -75,7 +75,7 @@ impl SeedV0 {
         //     (hashable:timelock-intent timelock-intent.sed)
         //   leaf+gift.sed
         // hash+parent-hash.sed
-        
+
         // This is a 4-element structure (quad)
         // Using nested cells to represent it
         Hashable::cell(
@@ -84,12 +84,12 @@ impl SeedV0 {
                 to_hashable_timelock_intent(&self.timelock_intent),
                 Hashable::cell(
                     self.gift.to_hashable(),
-                    Hashable::Hash(self.parent_hash.clone())
-                )
-            )
+                    Hashable::Hash(self.parent_hash.clone()),
+                ),
+            ),
         )
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
@@ -106,14 +106,11 @@ impl SeedV0 {
         // This is a 5-element structure represented as nested cells
         // First element is the hashable-unit for output-source
         let output_source_hashable = match &self.output_source {
-            None => Hashable::null(),  // ?~  s  leaf+~
+            None => Hashable::null(), // ?~  s  leaf+~
             Some(source) => {
                 // :-  leaf+~
                 // (hashable u.s)
-                Hashable::cell(
-                    Hashable::null(),
-                    source.to_hashable()
-                )
+                Hashable::cell(Hashable::null(), source.to_hashable())
             }
         };
 
@@ -126,10 +123,10 @@ impl SeedV0 {
                     to_hashable_timelock_intent(&self.timelock_intent),
                     Hashable::cell(
                         self.gift.to_hashable(),
-                        Hashable::Hash(self.parent_hash.clone())
-                    )
-                )
-            )
+                        Hashable::Hash(self.parent_hash.clone()),
+                    ),
+                ),
+            ),
         )
     }
 }
@@ -183,10 +180,8 @@ pub struct Signature {
 impl Signature {
     pub fn to_hashable(&self) -> Hashable {
         // Signature is just a ZMap, so delegate to its to_hashable method
-        self.map.to_hashable(
-            |pubkey| pubkey.to_hashable(),
-            |sig| sig.to_hashable(),
-        )
+        self.map
+            .to_hashable(|pubkey| pubkey.to_hashable(), |sig| sig.to_hashable())
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -296,7 +291,8 @@ pub struct InputsV0 {
 
 impl InputsV0 {
     pub fn to_hashable(&self) -> Hashable {
-        self.p.to_hashable(|name| name.to_hashable(), |input| input.to_hashable())
+        self.p
+            .to_hashable(|name| name.to_hashable(), |input| input.to_hashable())
     }
 
     pub fn to_hash(&self) -> Hash {

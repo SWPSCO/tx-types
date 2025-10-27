@@ -1,3 +1,4 @@
+pub mod block_types;
 /// Transaction processing module
 ///
 /// This module contains all transaction-related functionality organized into:
@@ -6,42 +7,41 @@
 /// - Hashing algorithms and transaction ID computation (hashing/)
 /// - Data structures like Z-maps (collections/)
 /// - Transaction validation logic (validation/)
-
 // Core modules in root
 pub mod generic_noun;
+pub mod signer;
 pub mod transaction_types;
 pub mod transaction_types_v0;
 pub mod transaction_types_v1;
+pub mod tx_builder_v1;
 pub mod tx_to_noun;
-pub mod block_types;
-pub mod signer;
 
 // Submodules
-pub mod hashing;
 pub mod collections;
-pub mod validation;
 pub mod crypto;
-
+pub mod hashing;
+pub mod validation;
 
 // Re-export commonly used types from submodules
 pub use hashing::{
     hashable::Hashable,
     hasher::{hash_hashable, hash_noun_varlen, hash_ten_cell},
-    tip5::{Tip5Hasher, Tip5Error},
+    tip5::{Tip5Error, Tip5Hasher},
     tx_id::{compute_tx_id, compute_tx_id_base58},
 };
 
-pub use collections::{zmap::ZMap, zset::{ZSet, DorTip}};
-
-pub use validation::{
-    TransactionValidator,
-    TransactionValidationError,
-    schnorr_verify_digest,
+pub use collections::{
+    zmap::ZMap,
+    zset::{DorTip, ZSet},
 };
+
+pub use validation::{schnorr_verify_digest, TransactionValidationError, TransactionValidator};
 
 pub use crypto::CryptoError;
 
 pub use signer::{schnorr_sign_digest, sign_spend, sign_tx};
+
+pub use tx_builder_v1::{build_spends, create_spends_0, create_spends_1, LockData, Order};
 
 // Re-export main transaction types
 pub use transaction_types::*;
@@ -49,7 +49,7 @@ pub use transaction_types_v0::*;
 pub use transaction_types_v1::*;
 
 // Re-export tx-engine types
-pub use transaction_types::{Tx, Outputs, Output};
+pub use transaction_types::{Output, Outputs, Tx};
 
 // Re-export block types
 pub use block_types::*;

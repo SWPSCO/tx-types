@@ -1,26 +1,25 @@
-use nockapp::Noun;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use nockapp::Noun;
 use nockvm::noun::{Atom, NounAllocator, D, T};
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use std::collections::HashMap;
 
-use crate::collections::{ZSet, ZMap};
+use crate::collections::{ZMap, ZSet};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::hashing::tip5::Tip5Hasher;
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
 
-use num_bigint::BigUint;
-use num_traits::{Zero, One};
 use bytes::Bytes;
-
+use num_bigint::BigUint;
+use num_traits::{One, Zero};
 
 // Coin name structure
 #[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Coins {
-   pub value: u64
+    pub value: u64,
 }
 
 impl Coins {
@@ -32,7 +31,7 @@ impl Coins {
 // page number name structure
 #[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageNumber {
-   pub value: u64
+    pub value: u64,
 }
 
 impl PageNumber {
@@ -67,37 +66,37 @@ impl Hash {
     /// values[0] is least significant, values[4] is most significant
     pub fn to_ubig(&self) -> ibig::UBig {
         use ibig::UBig;
-        
+
         // Build the UBig from bytes in little-endian order
         let mut bytes = Vec::with_capacity(40); // 5 * 8 bytes
-        
+
         // Add each u64 in little-endian byte order
         for value in &self.values {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        
+
         // Create UBig from little-endian bytes
         UBig::from_le_bytes(&bytes)
     }
-    
+
     /// Create a Hash from a UBig integer (inverse of to_ubig)
     /// Returns None if the UBig is too large to fit in 320 bits
     pub fn from_ubig(big: &ibig::UBig) -> Option<Self> {
         // Convert to little-endian bytes
         let bytes = big.to_le_bytes();
-        
+
         // Check if it fits in 320 bits (40 bytes)
         if bytes.len() > 40 {
             return None;
         }
-        
+
         let mut values = [0u64; 5];
-        
+
         // Parse each u64 from the bytes
         for i in 0..5 {
             let start = i * 8;
             let end = (i + 1) * 8;
-            
+
             if start < bytes.len() {
                 // Get up to 8 bytes for this u64
                 let mut u64_bytes = [0u8; 8];
@@ -106,57 +105,59 @@ impl Hash {
                 values[i] = u64::from_le_bytes(u64_bytes);
             }
         }
-        
+
         Some(Hash { values })
     }
-    
+
     /// Convert base58 encoded string to Hash
     /// Implements the Hoon from-b58 function:
     /// ++  from-b58  |=(=cord `form`(atom-to-digest:tip5 (de-base58 (trip cord))))
     pub fn from_b58(base58: &str) -> Result<Self, String> {
         use crate::hashing::u320::U320;
-        
-        let n = U320::from_base58(base58)
-            .map_err(|e| format!("Invalid base58: {}", e))?;
-        
+
+        let n = U320::from_base58(base58).map_err(|e| format!("Invalid base58: {}", e))?;
+
         // Four divmods by p: collect remainders a..d; final quotient e
         let (q1, a) = n.divrem_p();
         let (q2, b) = q1.divrem_p();
         let (q3, c) = q2.divrem_p();
         let (e_q, d) = q3.divrem_p();
-        let e = e_q.as_single_u64()
+        let e = e_q
+            .as_single_u64()
             .map_err(|e| format!("Hash value too large: {}", e))?;
-        
-        Ok(Hash { values: [a, b, c, d, e] })
+
+        Ok(Hash {
+            values: [a, b, c, d, e],
+        })
     }
-    
+
     /// Convert Hash to base58 encoded string
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(has=form `cord`(crip (en-base58 (digest-to-atom:tip5 has))))
     pub fn to_b58(&self) -> String {
-        use num_bigint::BigUint;
         use bs58;
-        
+        use num_bigint::BigUint;
+
         // The Goldilocks prime
         const GOLDILOCKS_PRIME: u64 = 0xFFFF_FFFF_0000_0001;
         let p = BigUint::from(GOLDILOCKS_PRIME);
-        
+
         // digest-to-atom:tip5 uses formula: a + b*p + c*p² + d*p³ + e*p⁴
         let mut result = BigUint::from(self.values[0]);
-        
+
         for i in 1..5 {
             let power = p.pow(i as u32);
             result += BigUint::from(self.values[i]) * power;
         }
-        
+
         bs58::encode(result.to_bytes_be()).into_string()
     }
 }
 
-// Note name structure  
+// Note name structure
 #[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NName {
-    pub p: Vec<Hash>
+    pub p: Vec<Hash>,
 }
 
 impl NName {
@@ -179,7 +180,7 @@ impl NName {
             Hashable::triple(
                 Hashable::Hash(self.p[0].clone()),
                 Hashable::Hash(self.p[1].clone()),
-                Hashable::null()  // null() returns Leaf(0)
+                Hashable::null(), // null() returns Leaf(0)
             )
         } else if self.p.len() == 1 {
             // If only one hash, still need proper structure
@@ -187,7 +188,7 @@ impl NName {
             Hashable::triple(
                 Hashable::Hash(self.p[0].clone()),
                 Hashable::null(),
-                Hashable::null()
+                Hashable::null(),
             )
         } else {
             // Empty NName
@@ -227,11 +228,8 @@ impl NName {
             Hashable::null(),
             Hashable::cell(
                 Hashable::leaf_from_atom(&value.to_le_bytes()),
-                Hashable::cell(
-                    Hashable::Hash(owners.to_hash()),
-                    Hashable::null()
-                )
-            )
+                Hashable::cell(Hashable::Hash(owners.to_hash()), Hashable::null()),
+            ),
         );
         hash_hashable(&hashable)
     }
@@ -250,38 +248,27 @@ impl NName {
             Hashable::null(),
             Hashable::cell(
                 Hashable::Hash(source.to_hash()),
-                Hashable::cell(
-                    Hashable::Hash(timelock.to_hash()),
-                    Hashable::null()
-                )
-            )
+                Hashable::cell(Hashable::Hash(timelock.to_hash()), Hashable::null()),
+            ),
         );
         hash_hashable(&hashable)
     }
 
     pub fn new_v1(lock: Hash, source: Source) -> Self {
-        Self { p: vec![
-            Self::first_v1(lock),
-            Self::last_v1(source)
-        ],}
+        Self {
+            p: vec![Self::first_v1(lock), Self::last_v1(source)],
+        }
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        hash_hashable(&Hashable::cell(
-            Hashable::null(),
-            Hashable::Hash(lock),
-        ))
+        hash_hashable(&Hashable::cell(Hashable::null(), Hashable::Hash(lock)))
     }
 
     pub fn last_v1(source: Source) -> Hash {
         hash_hashable(&Hashable::cell(
             Hashable::null(),
-            Hashable::cell(
-                source.to_hashable(),
-                Hashable::null()
-            )
+            Hashable::cell(source.to_hashable(), Hashable::null()),
         ))
-
     }
 }
 
@@ -294,7 +281,7 @@ impl Timelock {
         // Timelock just delegates to its TimelockIntent
         to_hashable_timelock_intent(&self.intent)
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
@@ -307,16 +294,14 @@ pub fn to_hashable_timelock_intent(intent: &TimelockIntent) -> Hashable {
     // :+  leaf+~
     //   (hashable:timelock-range absolute.u.form)
     // (hashable:timelock-range relative.u.form)
-    
+
     match intent {
         None => Hashable::null(),
-        Some((absolute, relative)) => {
-            Hashable::triple(
-                Hashable::null(),
-                absolute.to_hashable(),
-                relative.to_hashable(),
-            )
-        }
+        Some((absolute, relative)) => Hashable::triple(
+            Hashable::null(),
+            absolute.to_hashable(),
+            relative.to_hashable(),
+        ),
     }
 }
 
@@ -332,14 +317,17 @@ impl Timelock {
     pub fn new(intent: TimelockIntent) -> Result<Self, String> {
         if let Some((ref absolute, ref relative)) = intent {
             // Check if both ranges are empty (equivalent to [~ ~ ~])
-            if absolute.min.is_none() && absolute.max.is_none() &&
-               relative.min.is_none() && relative.max.is_none() {
+            if absolute.min.is_none()
+                && absolute.max.is_none()
+                && relative.min.is_none()
+                && relative.max.is_none()
+            {
                 return Err("Timelock cannot be [~ ~ ~] (both ranges empty)".to_string());
             }
         }
         Ok(Timelock { intent })
     }
-    
+
     /// Create a Timelock that allows any intent (used for testing/construction)
     pub fn new_unchecked(intent: TimelockIntent) -> Self {
         Timelock { intent }
@@ -355,8 +343,7 @@ impl NounEncode for Timelock {
 impl NounDecode for Timelock {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let intent = TimelockIntent::from_noun(noun)?;
-        Timelock::new(intent)
-            .map_err(|e| NounDecodeError::Custom(e))
+        Timelock::new(intent).map_err(|e| NounDecodeError::Custom(e))
     }
 }
 
@@ -372,26 +359,20 @@ impl TimelockRange {
         // Following the Hoon pattern:
         // :-  ?~(min.form %leaf^~ [%leaf^~ leaf+u.min.form])
         // ?~(max.form %leaf^~ [%leaf^~ leaf+u.max.form])
-        
+
         let min_hashable = match &self.min {
             None => Hashable::null(),
-            Some(val) => Hashable::cell(
-                Hashable::null(),
-                val.to_hashable()
-            ),
+            Some(val) => Hashable::cell(Hashable::null(), val.to_hashable()),
         };
 
         let max_hashable = match &self.max {
             None => Hashable::null(),
-            Some(val) => Hashable::cell(
-                Hashable::null(),
-                val.to_hashable()
-            ),
+            Some(val) => Hashable::cell(Hashable::null(), val.to_hashable()),
         };
-        
+
         Hashable::cell(min_hashable, max_hashable)
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
@@ -418,16 +399,20 @@ impl NounDecode for F6LT {
         let mut current = *noun;
 
         for i in 0..5 {
-            let cell = current.as_cell()
+            let cell = current
+                .as_cell()
                 .map_err(|_| NounDecodeError::ExpectedCell)?;
-            values[i] = cell.head().as_atom()
+            values[i] = cell
+                .head()
+                .as_atom()
                 .map_err(|_| NounDecodeError::ExpectedAtom)?
                 .as_u64()?;
             current = cell.tail();
         }
 
         // Last element
-        values[5] = current.as_atom()
+        values[5] = current
+            .as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;
 
@@ -467,11 +452,11 @@ impl SchnorrPubkey {
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
-    
+
     /// Convert base58 encoded string to SchnorrPubkey
     /// Implements the Hoon from-b58 function:
     /// ++  from-b58  |=(=cord `form`(base58-to-a-pt:cheetah cord))
-    /// 
+    ///
     /// The base58 encoding represents a compressed elliptic curve point
     pub fn from_b58(s: &str) -> Result<Self, String> {
         if s == "inf" {
@@ -481,7 +466,8 @@ impl SchnorrPubkey {
                 inf: true,
             });
         }
-        let bytes = bs58::decode(s).into_vec()
+        let bytes = bs58::decode(s)
+            .into_vec()
             .map_err(|e| format!("invalid base58: {e}"))?;
         if bytes.len() != 97 || bytes[0] != 0x01 {
             return Err("a-pt b58: expected 97 bytes with 0x01 prefix".into());
@@ -522,7 +508,7 @@ impl SchnorrPubkey {
 
     fn pack_le(words: &[u64]) -> num_bigint::BigUint {
         use num_bigint::BigUint;
-        use num_traits::{Zero, One};
+        use num_traits::{One, Zero};
         let mut n = BigUint::zero();
         for (i, &w) in words.iter().enumerate() {
             n += BigUint::from(w) << (64 * i);
@@ -539,11 +525,16 @@ impl SchnorrPubkey {
         let x = Self::pack_le(&self.x.values);
         let y = Self::pack_le(&self.y.values);
         n = (y << (64 * 6)) | x;
-        n = (n << 1) | if self.inf { BigUint::one() } else { BigUint::from(0u32) };
+        n = (n << 1)
+            | if self.inf {
+                BigUint::one()
+            } else {
+                BigUint::from(0u32)
+            };
 
         bs58::encode(n.to_bytes_be()).into_string()
     }
-    
+
     /// Convert SchnorrPubkey to base58 encoded string
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
@@ -551,8 +542,8 @@ impl SchnorrPubkey {
         if self.inf {
             return "inf".to_string();
         }
-        let mut bytes = Vec::with_capacity(1 + 6*8 + 6*8);
-        bytes.push(1u8);                        // fixed prefix
+        let mut bytes = Vec::with_capacity(1 + 6 * 8 + 6 * 8);
+        bytes.push(1u8); // fixed prefix
         Self::f6lt_words_be_desc(&self.y, &mut bytes); // Y first
         Self::f6lt_words_be_desc(&self.x, &mut bytes); // then X
         bs58::encode(bytes).into_string()
@@ -560,7 +551,7 @@ impl SchnorrPubkey {
 
     pub fn from_base58(s: &str) -> Self {
         use num_bigint::BigUint;
-        use num_traits::{Zero, One};
+        use num_traits::{One, Zero};
 
         let mut n = Self::de_base58(s);
         let inf = (&n & BigUint::one()) == BigUint::one();
@@ -576,8 +567,16 @@ impl SchnorrPubkey {
         x_vals.resize(6, 0);
         y_vals.resize(6, 0);
 
-        let x = F6LT { values: [x_vals[0], x_vals[1], x_vals[2], x_vals[3], x_vals[4], x_vals[5]] };
-        let y = F6LT { values: [y_vals[0], y_vals[1], y_vals[2], y_vals[3], y_vals[4], y_vals[5]] };
+        let x = F6LT {
+            values: [
+                x_vals[0], x_vals[1], x_vals[2], x_vals[3], x_vals[4], x_vals[5],
+            ],
+        };
+        let y = F6LT {
+            values: [
+                y_vals[0], y_vals[1], y_vals[2], y_vals[3], y_vals[4], y_vals[5],
+            ],
+        };
 
         SchnorrPubkey { x, y, inf }
     }
@@ -605,7 +604,9 @@ impl SchnorrPubkey {
             out.push(w);
             x >>= sixty_four;
         }
-        if out.is_empty() { out.push(0); }
+        if out.is_empty() {
+            out.push(0);
+        }
         out
     }
 }
@@ -620,22 +621,22 @@ impl PartialOrd for SchnorrPubkey {
 impl Ord for SchnorrPubkey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
-        
+
         // First try to compare based on hash (gor-tip style)
         // Since we don't have the hash computation here, fall back to dor comparison
-        
+
         // Compare inf flag first
         match self.inf.cmp(&other.inf) {
             Ordering::Equal => {}
             other => return other,
         }
-        
+
         // Compare x coordinates
         match self.x.values.cmp(&other.x.values) {
             Ordering::Equal => {}
             other => return other,
         }
-        
+
         // Compare y coordinates
         self.y.values.cmp(&other.y.values)
     }
@@ -656,7 +657,7 @@ impl Lock {
         // :+  hash+(hash:schnorr-pubkey n.pubkeys)
         //   $(pubkeys l.pubkeys)
         // $(pubkeys r.pubkeys)
-        
+
         // Use ZSet's to_hashable method which properly traverses the tree
         let pubkeys_hashable = self.pubkeys.to_hashable(|pubkey| {
             // Hash each pubkey
@@ -666,18 +667,18 @@ impl Lock {
                 .unwrap_or_else(|_| Hash { values: [0; 5] });
             Hashable::Hash(pubkey_hash)
         });
-        
+
         // Create the cell [leaf+m hashable-pubkeys]
         Hashable::cell(
             Hashable::leaf_from_atom(&self.m.to_le_bytes()),
-            pubkeys_hashable
+            pubkeys_hashable,
         )
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
-    
+
     /// Convert base58 encoded multisig parameters to Lock
     /// Implements the Hoon from-b58 function for Lock:
     /// ++  from-b58
@@ -691,30 +692,33 @@ impl Lock {
     ///   (from-b58:schnorr-pubkey pk)
     pub fn from_b58(m: u64, pubkeys_b58: Vec<String>) -> Result<Self, String> {
         let mut pubkeys = ZSet::new();
-        
+
         // Convert each base58 pubkey string to SchnorrPubkey and add to set
         for pk_str in pubkeys_b58 {
             let pubkey = SchnorrPubkey::from_b58(&pk_str)?;
             pubkeys.put(pubkey);
         }
-        
+
         // The Hoon code calls 'check' which validates the lock
         // We should do the same validation here
         if m == 0 {
             return Err("Lock m value cannot be 0".to_string());
         }
-        
+
         let pubkeys_len = pubkeys.len() as u64;
         if m > pubkeys_len {
-            return Err(format!("Lock m value {} exceeds number of pubkeys {}", m, pubkeys_len));
+            return Err(format!(
+                "Lock m value {} exceeds number of pubkeys {}",
+                m, pubkeys_len
+            ));
         }
-        
+
         // Create the lock with m-of-n multisig
         let lock = Lock { m, pubkeys };
-        
+
         Ok(lock)
     }
-    
+
     /// Convert Lock to base58 encoded representation
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58
@@ -723,11 +727,8 @@ impl Lock {
     ///   :-  m.loc
     ///   (turn ~(tap z-in pubkeys.loc) to-b58:schnorr-pubkey)
     pub fn to_b58(&self) -> (u64, Vec<String>) {
-        let pubkeys_b58: Vec<String> = self.pubkeys
-            .iter()
-            .map(|pk| pk.to_b58())
-            .collect();
-        
+        let pubkeys_b58: Vec<String> = self.pubkeys.iter().map(|pk| pk.to_b58()).collect();
+
         (self.m, pubkeys_b58)
     }
 }
@@ -738,7 +739,8 @@ impl std::hash::Hash for Lock {
         // Sort the pubkeys to ensure consistent hashing
         let mut sorted_pubkeys: Vec<_> = self.pubkeys.iter().collect();
         sorted_pubkeys.sort_by(|a, b| {
-            a.x.values.cmp(&b.x.values)
+            a.x.values
+                .cmp(&b.x.values)
                 .then_with(|| a.y.values.cmp(&b.y.values))
                 .then_with(|| a.inf.cmp(&b.inf))
         });
@@ -765,7 +767,7 @@ impl Source {
             Hashable::leaf_from_atom(&value.to_le_bytes()),
         )
     }
-    
+
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
@@ -786,7 +788,9 @@ impl NounDecode for NNote {
         if let Ok(v1) = NNoteV1::from_noun(noun) {
             return Ok(NNote::V1(v1));
         }
-        Err(NounDecodeError::Custom("NNote enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "NNote enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -850,6 +854,7 @@ pub struct Spend {
 #[derive(Debug, Clone)]
 pub enum SpendBody {
     V0(SpendV0),
+    V0ToV1(SpendV0ToV1), // Spend V0 note into V1 outputs
     V1(SpendV1),
 }
 
@@ -857,6 +862,11 @@ impl NounEncode for SpendBody {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
         match self {
             SpendBody::V0(v) => v.to_noun(allocator),
+            SpendBody::V0ToV1(_v) => {
+                // Encode as [signature seeds fee] - same structure as V0 but seeds are V1
+                // For now, placeholder - we'll need proper encoding
+                D(0)
+            }
             SpendBody::V1(_) => D(0), // placeholder
         }
     }
@@ -864,13 +874,21 @@ impl NounEncode for SpendBody {
 
 impl NounDecode for SpendBody {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        // Try V0 first
         if let Ok(v0) = SpendV0::from_noun(noun) {
             return Ok(SpendBody::V0(v0));
         }
+        // Try V0ToV1
+        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun) {
+            return Ok(SpendBody::V0ToV1(v0tov1));
+        }
+        // Try V1
         if let Ok(v1) = SpendV1::from_noun(noun) {
             return Ok(SpendBody::V1(v1));
         }
-        Err(NounDecodeError::Custom("SpendBody enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "SpendBody enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -878,19 +896,23 @@ impl SpendBody {
     pub fn to_hashable(&self) -> Hashable {
         match self {
             SpendBody::V0(v) => v.to_hashable(),
+            SpendBody::V0ToV1(v) => v.to_hashable(),
             SpendBody::V1(_) => Hashable::null(), // placeholder
         }
     }
-    pub fn to_hash(&self) -> Hash { hash_hashable(&self.to_hashable()) }
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
     pub fn sig_hash(&self) -> Hash {
         match self {
             SpendBody::V0(v) => v.sig_hash(),
+            SpendBody::V0ToV1(v) => v.compute_sig_hash(),
             SpendBody::V1(_) => Hash { values: [0; 5] },
         }
     }
 }
 
-// Input structure  
+// Input structure
 #[derive(Debug, Clone)]
 pub enum Input {
     V0(InputV0),
@@ -911,7 +933,9 @@ impl NounDecode for Input {
         if let Ok(v0) = InputV0::from_noun(noun) {
             return Ok(Input::V0(v0));
         }
-        Err(NounDecodeError::Custom("Input enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "Input enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -922,7 +946,9 @@ impl Input {
             Input::V1(_) => Hashable::null(),
         }
     }
-    pub fn to_hash(&self) -> Hash { hash_hashable(&self.to_hashable()) }
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
     pub fn calculate_timelock_range(&self) -> (Option<u64>, Option<u64>) {
         match self {
             Input::V0(v) => v.calculate_timelock_range(),
@@ -952,7 +978,9 @@ impl NounDecode for Inputs {
         if let Ok(v0) = InputsV0::from_noun(noun) {
             return Ok(Inputs::V0(v0));
         }
-        Err(NounDecodeError::Custom("Inputs enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "Inputs enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -963,14 +991,16 @@ impl Inputs {
             Inputs::V1(_) => Hashable::null(),
         }
     }
-    pub fn to_hash(&self) -> Hash { hash_hashable(&self.to_hashable()) }
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
 }
 
 // Hash wrapper for transaction IDs and other hashes
 #[derive(Debug, Clone, NounEncode, NounDecode)]
 pub struct Transaction {
     pub name: String,
-    pub p: Inputs
+    pub p: Inputs,
 }
 
 // Tx-engine transaction representation (actual blockchain transaction)
@@ -1029,7 +1059,9 @@ impl NounDecode for Outputs {
         if let Ok(v0) = OutputsV0::from_noun(noun) {
             return Ok(Outputs::V0(v0));
         }
-        Err(NounDecodeError::Custom("Outputs enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "Outputs enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -1053,7 +1085,9 @@ impl NounDecode for Output {
         if let Ok(v0) = OutputV0::from_noun(noun) {
             return Ok(Output::V0(v0));
         }
-        Err(NounDecodeError::Custom("Output enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "Output enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -1075,7 +1109,9 @@ impl NounDecode for RawTransaction {
         if let Ok(v0) = RawTransactionV0::from_noun(noun) {
             return Ok(RawTransaction::V0(v0));
         }
-        Err(NounDecodeError::Custom("RawTransaction enum decode: unsupported format".into()))
+        Err(NounDecodeError::Custom(
+            "RawTransaction enum decode: unsupported format".into(),
+        ))
     }
 }
 
@@ -1113,16 +1149,18 @@ impl NounEncode for T8 {
 
 #[cfg(test)]
 mod tests {
-    use nockvm::{mem::NockStack, noun::FullDebugCell};
     use crate::collections::ZSet;
+    use nockvm::{mem::NockStack, noun::FullDebugCell};
 
     use super::*;
 
     #[test]
-    fn test_hash_encoding(){
+    fn test_hash_encoding() {
         let mut stack = NockStack::new(8 << 10 << 10, 0);
 
-        let hash = Hash { values: [0x1234; 5] };
+        let hash = Hash {
+            values: [0x1234; 5],
+        };
         let encoded = hash.to_noun(&mut stack);
         //let decoded : Hash = Hash::from_noun(&encoded).unwrap();
         println!("Encoded: {:?}", FullDebugCell(&encoded.as_cell().unwrap()));
@@ -1131,42 +1169,62 @@ mod tests {
     #[test]
     fn test_hash_to_ubig() {
         use ibig::UBig;
-        
+
         // Test with a simple hash
-        let hash1 = Hash { values: [1, 2, 3, 4, 5] };
+        let hash1 = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
         let big1 = hash1.to_ubig();
-        
+
         // Convert back and verify
         let hash1_back = Hash::from_ubig(&big1).unwrap();
         assert_eq!(hash1.values, hash1_back.values);
-        
+
         // Test with larger values
-        let hash2 = Hash { values: [u64::MAX, u64::MAX-1, u64::MAX-2, u64::MAX-3, u64::MAX-4] };
+        let hash2 = Hash {
+            values: [
+                u64::MAX,
+                u64::MAX - 1,
+                u64::MAX - 2,
+                u64::MAX - 3,
+                u64::MAX - 4,
+            ],
+        };
         let big2 = hash2.to_ubig();
         let hash2_back = Hash::from_ubig(&big2).unwrap();
         assert_eq!(hash2.values, hash2_back.values);
-        
+
         // Test with zeros
-        let hash3 = Hash { values: [0, 0, 0, 0, 0] };
+        let hash3 = Hash {
+            values: [0, 0, 0, 0, 0],
+        };
         let big3 = hash3.to_ubig();
         assert_eq!(big3, UBig::from(0u64));
         let hash3_back = Hash::from_ubig(&big3).unwrap();
         assert_eq!(hash3.values, hash3_back.values);
-        
+
         // Test comparison using UBig
-        let hash_a = Hash { values: [100, 0, 0, 0, 0] };
-        let hash_b = Hash { values: [99, 0, 0, 0, 0] };
+        let hash_a = Hash {
+            values: [100, 0, 0, 0, 0],
+        };
+        let hash_b = Hash {
+            values: [99, 0, 0, 0, 0],
+        };
         let big_a = hash_a.to_ubig();
         let big_b = hash_b.to_ubig();
         assert!(big_a > big_b);
-        
+
         // Test with most significant bit differences
-        let hash_c = Hash { values: [0, 0, 0, 0, 1] };
-        let hash_d = Hash { values: [u64::MAX, u64::MAX, u64::MAX, u64::MAX, 0] };
+        let hash_c = Hash {
+            values: [0, 0, 0, 0, 1],
+        };
+        let hash_d = Hash {
+            values: [u64::MAX, u64::MAX, u64::MAX, u64::MAX, 0],
+        };
         let big_c = hash_c.to_ubig();
         let big_d = hash_d.to_ubig();
         assert!(big_c > big_d); // MSB difference should dominate
-        
+
         println!("Hash to UBig conversion tests passed!");
     }
 
@@ -1175,28 +1233,38 @@ mod tests {
         let mut stack = NockStack::new(8 << 10 << 10, 0);
 
         // Create test data for RawTransaction
-        let tx_id = Hash { values: [0x1111, 0x2222, 0x3333, 0x4444, 0x5555] };
-        
+        let tx_id = Hash {
+            values: [0x1111, 0x2222, 0x3333, 0x4444, 0x5555],
+        };
+
         // Create a simple input
         let name = NName {
-            p: vec![Hash { values: [1, 2, 3, 4, 5] }],
+            p: vec![Hash {
+                values: [1, 2, 3, 4, 5],
+            }],
         };
-        
+
         let pubkey = SchnorrPubkey {
-            x: F6LT { values: [1, 2, 3, 4, 5, 0] },
-            y: F6LT { values: [6, 7, 8, 9, 10, 0] },
+            x: F6LT {
+                values: [1, 2, 3, 4, 5, 0],
+            },
+            y: F6LT {
+                values: [6, 7, 8, 9, 10, 0],
+            },
             inf: false,
         };
-        
+
         let mut pubkeys = ZSet::new();
         pubkeys.put(pubkey);
         let lock = Lock { m: 1, pubkeys };
-        
+
         let source = Source {
-            p: Hash { values: [10, 20, 30, 40, 50] },
+            p: Hash {
+                values: [10, 20, 30, 40, 50],
+            },
             is_coinbase: false,
         };
-        
+
         let note = NNote::V0(NNoteV0 {
             meta: NNoteHead {
                 version: 1,
@@ -1219,49 +1287,77 @@ mod tests {
             source: source.clone(),
             assets: Coins { value: 1000 },
         });
-        
+
         let seed = Seed::V0(SeedV0 {
             output_source: Some(source),
             recipient: lock,
             timelock_intent: None,
             gift: Coins { value: 100 },
-            parent_hash: Hash { values: [5, 4, 3, 2, 1] },
+            parent_hash: Hash {
+                values: [5, 4, 3, 2, 1],
+            },
         });
-        
+
         let mut seed_set = ZSet::new();
-        if let Seed::V0(s) = seed { seed_set.put(s); } else { unreachable!(); }
-        
+        if let Seed::V0(s) = seed {
+            seed_set.put(s);
+        } else {
+            unreachable!();
+        }
+
         let spend = Spend::V0(SpendV0 {
             signature: None,
             seeds: SeedsV0 { set: seed_set },
             fee: Coins { value: 10 },
         });
-        
-        let input = Input::V0(InputV0 { note: match note { NNote::V0(v) => v, _ => unreachable!() }, spend: match spend { Spend::V0(v) => v, _ => unreachable!() } });
-        
+
+        let input = Input::V0(InputV0 {
+            note: match note {
+                NNote::V0(v) => v,
+                _ => unreachable!(),
+            },
+            spend: match spend {
+                Spend::V0(v) => v,
+                _ => unreachable!(),
+            },
+        });
+
         let mut input_map = ZMap::new();
-        input_map.put(name, match input { Input::V0(v) => v, _ => unreachable!() });
+        input_map.put(
+            name,
+            match input {
+                Input::V0(v) => v,
+                _ => unreachable!(),
+            },
+        );
         let inputs = Inputs::V0(InputsV0 { p: input_map });
-        
+
         // Create RawTransaction
         let raw_tx = RawTransaction::V0(RawTransactionV0 {
             id: tx_id,
-            inputs: match inputs { Inputs::V0(v) => v, _ => unreachable!() },
+            inputs: match inputs {
+                Inputs::V0(v) => v,
+                _ => unreachable!(),
+            },
             timelock_range: TimelockRange {
                 min: Some(PageNumber { value: 100 }),
                 max: Some(PageNumber { value: 200 }),
             },
             total_fees: Coins { value: 10 },
         });
-        
+
         // Encode to noun
         let encoded = raw_tx.to_noun(&mut stack);
         println!("RawTransaction encoded successfully");
-        
+
         // Decode back
-        let _decoded: RawTransaction = RawTransaction::from_noun(&encoded)
-            .unwrap_or_else(|_| RawTransaction::V0(match raw_tx { RawTransaction::V0(v) => v, _ => unreachable!() }));
-        
+        let _decoded: RawTransaction = RawTransaction::from_noun(&encoded).unwrap_or_else(|_| {
+            RawTransaction::V0(match raw_tx {
+                RawTransaction::V0(v) => v,
+                _ => unreachable!(),
+            })
+        });
+
         // Verify fields
         if let RawTransaction::V0(decoded) = _decoded {
             assert_eq!(decoded.id.values, [0x1111, 0x2222, 0x3333, 0x4444, 0x5555]);
@@ -1269,8 +1365,10 @@ mod tests {
             assert_eq!(decoded.timelock_range.min.unwrap().value, 100);
             assert_eq!(decoded.timelock_range.max.unwrap().value, 200);
             assert_eq!(decoded.inputs.p.wyt(), 1);
-        } else { unreachable!() }
-        
+        } else {
+            unreachable!()
+        }
+
         println!("RawTransaction test passed!");
     }
 
@@ -1279,24 +1377,27 @@ mod tests {
         let mut stack = NockStack::new(8 << 10 << 10, 0);
 
         // Create some test data
-        let hash = Hash { values: [0x1234, 0x5678, 0x9abc, 0xdef0, 0x1111] };
+        let hash = Hash {
+            values: [0x1234, 0x5678, 0x9abc, 0xdef0, 0x1111],
+        };
         let page_number = PageNumber { value: 42 };
         let coins = Coins { value: 1000 };
 
         // Create a SchnorrPubkey
         let pubkey = SchnorrPubkey {
-            x: F6LT { values: [1, 2, 3, 4, 5, 0] },
-            y: F6LT { values: [6, 7, 8, 9, 10, 0] },
+            x: F6LT {
+                values: [1, 2, 3, 4, 5, 0],
+            },
+            y: F6LT {
+                values: [6, 7, 8, 9, 10, 0],
+            },
             inf: false,
         };
 
         // Create a Lock with the pubkey
         let mut pubkeys = ZSet::new();
         pubkeys.put(pubkey.clone());
-        let lock = Lock {
-            m: 1,
-            pubkeys,
-        };
+        let lock = Lock { m: 1, pubkeys };
 
         // Create Source
         let source = Source {
@@ -1311,7 +1412,10 @@ mod tests {
         };
         let timelock_intent: TimelockIntent = Some((
             timelock_range,
-            TimelockRange { min: None, max: None },
+            TimelockRange {
+                min: None,
+                max: None,
+            },
         ));
         let timelock = Timelock {
             intent: timelock_intent.clone(),
@@ -1319,7 +1423,12 @@ mod tests {
 
         // Create NName
         let name = NName {
-            p: vec![hash.clone(), Hash { values: [0x2222, 0x3333, 0x4444, 0x5555, 0x6666] }],
+            p: vec![
+                hash.clone(),
+                Hash {
+                    values: [0x2222, 0x3333, 0x4444, 0x5555, 0x6666],
+                },
+            ],
         };
 
         // Create NNoteHead
@@ -1349,22 +1458,44 @@ mod tests {
 
         // Create Seeds
         let mut seed_set = ZSet::new();
-        if let Seed::V0(s) = seed { seed_set.put(s); } else { unreachable!(); }
+        if let Seed::V0(s) = seed {
+            seed_set.put(s);
+        } else {
+            unreachable!();
+        }
         let seeds = Seeds::V0(SeedsV0 { set: seed_set });
 
         // Create Spend
         let spend = Spend::V0(SpendV0 {
             signature: None, // Simplified - no signature for this test
-            seeds: match seeds { Seeds::V0(v) => v, _ => unreachable!() },
+            seeds: match seeds {
+                Seeds::V0(v) => v,
+                _ => unreachable!(),
+            },
             fee: Coins { value: 10 },
         });
 
         // Create Input
-        let input = Input::V0(InputV0 { note: match note { NNote::V0(v) => v, _ => unreachable!() }, spend: match spend { Spend::V0(v) => v, _ => unreachable!() } });
+        let input = Input::V0(InputV0 {
+            note: match note {
+                NNote::V0(v) => v,
+                _ => unreachable!(),
+            },
+            spend: match spend {
+                Spend::V0(v) => v,
+                _ => unreachable!(),
+            },
+        });
 
         // Create Inputs
         let mut input_map = ZMap::new();
-        input_map.put(name, match input { Input::V0(v) => v, _ => unreachable!() });
+        input_map.put(
+            name,
+            match input {
+                Input::V0(v) => v,
+                _ => unreachable!(),
+            },
+        );
         let inputs = Inputs::V0(InputsV0 { p: input_map });
 
         // Create Transaction
@@ -1375,7 +1506,10 @@ mod tests {
 
         // Encode to noun
         let encoded = transaction.to_noun(&mut stack);
-        println!("Transaction encoded: {:?}", FullDebugCell(&encoded.as_cell().unwrap()));
+        println!(
+            "Transaction encoded: {:?}",
+            FullDebugCell(&encoded.as_cell().unwrap())
+        );
 
         // Test that we can decode it back
         let decoded: Transaction = Transaction::from_noun(&encoded).unwrap();
@@ -1383,4 +1517,3 @@ mod tests {
         println!("Number of inputs: {}", decoded.p.p.wyt());
     }
 }
-
