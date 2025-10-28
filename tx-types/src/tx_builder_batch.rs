@@ -14,6 +14,7 @@ extern crate alloc;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
+use crate::block_types::build_lock_merkle_proof;
 use crate::collections::{ZMap, ZSet};
 use crate::hashing::hasher::hash_hashable;
 use crate::transaction_types::*;
@@ -305,7 +306,7 @@ fn create_batch_spends_1(
 
     // Calculate our pkh for default refunds
     let our_pkh = pubkey.to_hash();
-    let refund_hash = refund_pkh.unwrap_or(our_pkh);
+    let refund_hash = refund_pkh.unwrap_or(our_pkh.clone());
 
     // Track remaining amounts
     let mut remaining_orders: Vec<(Hash, u64)> = orders
@@ -422,8 +423,94 @@ fn create_batch_spends_1(
 
         // Only create spend if we actually consumed from this note
         if consumed > 0 {
-            // TODO: Extract and validate lock from note-data (similar to create_spends_1)
-            // For now, use simplified approach
+            // === Extract and validate lock from note-data ===
+            // Similar to create_spends_1 in tx_builder_v1.rs
+
+            // Get note-data from the note
+            let nd = &note.note_data;
+
+            // Build the simple PKH lock for our pubkey
+            let simple_pkh = LockPrimitive {
+                header: "pkh".to_string(),
+                body: LockPrimitiveBody::Pkh(Pkh {
+                    m: 1,
+                    h: {
+                        let mut set = ZSet::new();
+                        set.put(our_pkh.clone());
+                        set
+                    },
+                }),
+            };
+
+            // Build the coinbase lock (used as fallback)
+            let coinbase_lock = SpendCondition {
+                p: vec![simple_pkh.clone()],
+            };
+
+            // Try to extract lock from note-data, or use coinbase lock as default
+            let input_lock: Result<SpendCondition, String> = {
+                match nd.map.get(&"lock".to_string()) {
+                    None => {
+                        // No lock noun found, use coinbase lock
+                        Ok(coinbase_lock)
+                    }
+                    Some(lock_noun) => {
+                        // Found a lock noun in note-data, deserialize it
+                        match lock_noun.to_typed::<LockData>() {
+                            Ok(lock_data) => {
+                                // Successfully deserialized the lock data
+                                let spend_condition = match lock_data {
+                                    LockData::V0(sc) => sc,
+                                };
+
+                                // Validate it's spendable: must be a single PKH with m=1
+                                if spend_condition.p.len() != 1 {
+                                    return Err(
+                                        "Lock has multiple primitives, unsupported".to_string()
+                                    );
+                                }
+
+                                let primitive = &spend_condition.p[0];
+                                if primitive.header != "pkh" {
+                                    return Err("Lock is not a PKH lock, unsupported".to_string());
+                                }
+
+                                match &primitive.body {
+                                    LockPrimitiveBody::Pkh(pkh_lock) => {
+                                        if pkh_lock.m != 1 {
+                                            return Err(
+                                                "Lock requires m != 1 signatures, unsupported"
+                                                    .to_string(),
+                                            );
+                                        }
+
+                                        // Check if our public key hash is in the lock's hash set
+                                        if !pkh_lock.h.has(&our_pkh) {
+                                            return Err(
+                                                "Our PKH is not in the lock's hash set".to_string()
+                                            );
+                                        }
+
+                                        Ok(spend_condition)
+                                    }
+                                    _ => Err("Unsupported lock primitive type".to_string()),
+                                }
+                            }
+                            Err(e) => {
+                                Err(format!("Failed to deserialize lock from note-data: {}", e))
+                            }
+                        }
+                    }
+                }
+            };
+
+            // If input-lock validation failed, error out
+            let input_lock = match input_lock {
+                Ok(lock) => lock,
+                Err(reason) => {
+                    return Err(format!("Error processing note: {}", reason));
+                }
+            };
 
             // Create seeds set
             let mut seeds_set = ZSet::new();
@@ -435,17 +522,13 @@ fn create_batch_spends_1(
             // Calculate fee portion for this note
             let fee_portion = fee.value - remaining_fee;
 
-            // TODO: Build proper lock merkle proof
-            // For now, create empty witness
+            // === Build lock merkle proof ===
+            // Build a merkle proof showing that the spend-condition is in the lock tree
+            let lmp = build_lock_merkle_proof(input_lock.clone(), 1);
+
+            // Create witness with proper lock merkle proof
             let witness = Witness {
-                lmp: LockMerkleProof {
-                    spend_condition: SpendCondition { p: Vec::new() },
-                    axis: 1,
-                    merkle_proof: MerkleProof {
-                        root: Hash { values: [0; 5] },
-                        path: Vec::new(),
-                    },
-                },
+                lmp,
                 pkh: PkhSignature { map: ZMap::new() },
                 hax: ZMap::new(),
                 tim: 0,
@@ -641,8 +724,62 @@ fn create_unsigned_batch_spends_1(
 
         // Only create spend if we actually consumed from this note
         if consumed > 0 {
-            // TODO: Extract and validate lock from note-data (similar to create_spends_1)
-            // For now, use simplified approach
+            // === Extract lock from note-data ===
+            // Note: This is the unsigned version, so we don't validate ownership
+
+            // Get note-data from the note
+            let nd = &note.note_data;
+
+            // Build the simple PKH lock for the refund_pkh
+            let simple_pkh = LockPrimitive {
+                header: "pkh".to_string(),
+                body: LockPrimitiveBody::Pkh(Pkh {
+                    m: 1,
+                    h: {
+                        let mut set = ZSet::new();
+                        set.put(refund_pkh.clone());
+                        set
+                    },
+                }),
+            };
+
+            // Build the coinbase lock (used as fallback)
+            let coinbase_lock = SpendCondition {
+                p: vec![simple_pkh.clone()],
+            };
+
+            // Try to extract lock from note-data, or use coinbase lock as default
+            let input_lock: Result<SpendCondition, String> = {
+                match nd.map.get(&"lock".to_string()) {
+                    None => {
+                        // No lock noun found, use coinbase lock
+                        Ok(coinbase_lock)
+                    }
+                    Some(lock_noun) => {
+                        // Found a lock noun in note-data, deserialize it
+                        match lock_noun.to_typed::<LockData>() {
+                            Ok(lock_data) => {
+                                // Successfully deserialized the lock data
+                                let spend_condition = match lock_data {
+                                    LockData::V0(sc) => sc,
+                                };
+                                Ok(spend_condition)
+                            }
+                            Err(e) => {
+                                Err(format!("Failed to deserialize lock from note-data: {}", e))
+                            }
+                        }
+                    }
+                }
+            };
+
+            // If input-lock extraction failed, error out
+            let input_lock = match input_lock {
+                Ok(lock) => lock,
+                Err(reason) => {
+                    return Err(format!("Error processing note: {}", reason));
+                }
+            };
 
             // Create seeds set
             let mut seeds_set = ZSet::new();
@@ -654,17 +791,13 @@ fn create_unsigned_batch_spends_1(
             // Calculate fee portion for this note
             let fee_portion = fee.value - remaining_fee;
 
-            // TODO: Build proper lock merkle proof
-            // For now, create empty witness
+            // === Build lock merkle proof ===
+            // Build a merkle proof showing that the spend-condition is in the lock tree
+            let lmp = build_lock_merkle_proof(input_lock.clone(), 1);
+
+            // Create witness with proper lock merkle proof
             let witness = Witness {
-                lmp: LockMerkleProof {
-                    spend_condition: SpendCondition { p: Vec::new() },
-                    axis: 1,
-                    merkle_proof: MerkleProof {
-                        root: Hash { values: [0; 5] },
-                        path: Vec::new(),
-                    },
-                },
+                lmp,
                 pkh: PkhSignature { map: ZMap::new() },
                 hax: ZMap::new(),
                 tim: 0,
@@ -677,7 +810,13 @@ fn create_unsigned_batch_spends_1(
                 witness,
             };
 
-            spends.put(note.name.clone(), Spend { version: 1, body: SpendBody::V1(spend_body) });
+            spends.put(
+                note.name.clone(),
+                Spend {
+                    version: 1,
+                    body: SpendBody::V1(spend_body),
+                },
+            );
         }
     }
 
