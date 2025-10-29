@@ -40,24 +40,30 @@ impl NoteData {
     ///
     /// From Hoon, note-data is a z-map of @tas to *
     pub fn to_hashable(&self) -> Hashable {
-        // Use ZMap's to_hashable which properly traverses the tree
         self.map.to_hashable(
-            |key| {
-                // Convert the string key to a tas atom and create a leaf
-                use nockapp::noun::slab::NounSlab;
-                use nockapp::utils::make_tas;
-
-                let mut slab: NounSlab = NounSlab::new();
-                let tas_atom = make_tas(&mut slab, key);
-                slab.set_root(tas_atom.as_noun());
-                Hashable::Leaf(slab.jam().to_vec())
-            },
-            |untyped_noun| {
-                // The UntypedNoun already contains jammed bytes
-                Hashable::Leaf(untyped_noun.p.to_vec())
-            },
+            |key| Hashable::leaf_from_tas(key),
+            |untyped| hashable_from_untyped(untyped),
         )
     }
+}
+
+fn hashable_from_untyped(un: &UntypedNoun) -> Hashable {
+    use nockapp::noun::slab::NounSlab;
+    use nockvm::noun::Noun;
+
+    fn go(n: Noun) -> Hashable {
+        if let Ok(a) = n.as_atom() {
+            Hashable::leaf_from_atom(a.as_ne_bytes())
+        } else {
+            let c = n.as_cell().unwrap();
+            Hashable::cell(go(c.head()), go(c.tail()))
+        }
+    }
+
+    let mut slab: NounSlab = NounSlab::new();
+    let noun = slab.cue_into(un.p.clone().into())
+        .expect("cue untyped noun");
+    go(noun)
 }
 
 #[derive(Debug, Clone, NounDecode)]
@@ -519,11 +525,7 @@ impl Witness {
     fn hashable_hax(&self) -> Hashable {
         self.hax.to_hashable(
             |hash| Hashable::Hash(hash.clone()),
-            |untyped_noun| {
-                // hashable-noun recursively builds cells for cells, leaves for atoms
-                // But since UntypedNoun is just jammed bytes, we treat it as a leaf
-                self.hashable_noun_from_untyped(untyped_noun)
-            },
+            |untyped| hashable_from_untyped(untyped),
         )
     }
 
@@ -622,16 +624,16 @@ pub struct Pkh {
 
 impl Pkh {
     pub fn to_hashable(&self) -> Hashable {
-        let hash_hashable = self.h.to_hashable(|h| Hashable::Hash(h.clone()));
         Hashable::cell(
-            Hashable::leaf_from_atom(b"pkh"),
+            Hashable::leaf_from_tas("pkh"),
             Hashable::cell(
                 Hashable::leaf_from_atom(&self.m.to_le_bytes()),
-                hash_hashable,
+                self.h.to_hashable(|h| Hashable::Hash(h.clone())),
             ),
         )
     }
 }
+
 
 #[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct Tim {
@@ -642,10 +644,8 @@ pub struct Tim {
 
 impl Tim {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(
-            Hashable::leaf_from_atom(b"tim"),
-            Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable()),
-        )
+        Hashable::cell(Hashable::leaf_from_tas("tim"),
+            Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable()))
     }
 }
 
@@ -656,10 +656,8 @@ pub struct Hax {
 
 impl Hax {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(
-            Hashable::leaf_from_atom(b"hax"),
-            Hashable::leaf_from_atom(b"fake"), // TODO
-        )
+        // replace the placeholder; at minimum tag must be tas:
+        Hashable::cell(Hashable::leaf_from_tas("hax"), Hashable::null())
     }
 }
 
@@ -670,7 +668,7 @@ pub struct Brn {
 
 impl Brn {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(Hashable::leaf_from_atom(b"brn"), Hashable::null())
+        Hashable::cell(Hashable::leaf_from_tas("brn"), Hashable::null())
     }
 }
 

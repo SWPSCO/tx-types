@@ -71,6 +71,17 @@ impl Hashable {
         Hashable::Leaf(slab.jam().to_vec())
     }
 
+    // for tagged unions -- eg [%1 =raw-tx =size =outputs]
+    pub fn leaf_from_tas(s: &str) -> Hashable {
+        use nockapp::noun::slab::NounSlab;
+        use nockapp::utils::make_tas;
+        // build @tas atom for `s`, jam it, wrap as leaf
+        let mut slab: NounSlab = NounSlab::new();
+        let tas_noun = make_tas(&mut slab, s).as_noun();
+        slab.set_root(tas_noun);
+        Hashable::Leaf(slab.jam().to_vec())
+    }
+
     /// Create a leaf representing null/empty
     ///
     /// In Hoon, null (0) is represented as leaf+0. This creates
