@@ -8,5 +8,21 @@ use noun_serde::{NounDecode, NounEncode};
 pub struct BalanceByFirstName {
     pub page_number: PageNumber,
     pub block_id: Hash,
-    pub map: ZMap<NName, NNoteV1>
+    pub balance: Balance,
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct Balance {
+    pub map: ZMap<NName, NNote>
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct MiningPubkeys {
+    pub values: Vec<MiningPubkey>
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct MiningPubkey {
+    pub m: u64,
+    pub pks: Vec<String>,
 }

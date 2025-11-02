@@ -604,6 +604,11 @@ impl SpendCondition {
             .rev()
             .fold(base, |acc, lp| Hashable::cell(lp.to_hashable(), acc))
     }
+
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
 }
 
 #[derive(Debug, Clone, NounDecode)]
