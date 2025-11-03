@@ -784,6 +784,15 @@ pub enum NNote {
     V1(NNoteV1),
 }
 
+impl NNote {
+    pub fn to_hash(&self) -> Hash {
+        match self {
+            NNote::V0(v0) => v0.to_hash(),
+            NNote::V1(v1) => v1.to_hash(),
+        }
+    }
+}
+
 impl NounDecode for NNote {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         if let Ok(v0) = NNoteV0::from_noun(noun) {

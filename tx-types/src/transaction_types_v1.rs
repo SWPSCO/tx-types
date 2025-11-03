@@ -23,6 +23,37 @@ pub struct NNoteV1 {
     pub assets: Coins,
 }
 
+impl NNoteV1 {
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
+
+    pub fn to_hashable(&self) -> Hashable {
+        /*
+            :*  leaf+version.form
+                leaf+origin-page.form
+                hash+(hash:nname name.form)
+                hash+(hash:note-data note-data.form)
+                leaf+assets.form
+            ==
+        */
+        Hashable::cell(
+            Hashable::leaf_from_atom(&self.version.to_le_bytes()),
+            Hashable::cell(
+                self.origin_page.to_hashable(), 
+                Hashable::cell(
+                    Hashable::Hash(self.name.to_hash()),
+                    Hashable::cell(
+                        Hashable::Hash(self.note_data.to_hash()),
+                        self.assets.to_hashable()
+                    )
+                )
+            )
+        )
+    }
+}
+
 #[derive(Debug, Clone, NounDecode)]
 pub struct NoteData {
     pub map: ZMap<String, UntypedNoun>,
@@ -36,6 +67,11 @@ impl NounEncode for NoteData {
 }
 
 impl NoteData {
+    pub fn to_hash(&self) -> Hash {
+        use crate::hashing::hasher::hash_hashable;
+        hash_hashable(&self.to_hashable())
+    }
+
     /// Compute hashable for note-data
     ///
     /// From Hoon, note-data is a z-map of @tas to *
