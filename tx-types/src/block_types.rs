@@ -83,8 +83,9 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 
 pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
     // alias
+    let hashable_form = Hashable::Hash(form.to_hash());
     let hashable_index = leaf_number;
-    let (axis, merkle_proof) = prove_hashable_by_index(form.to_hashable(), hashable_index);
+    let (axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
     let spend_condition = traverse_lock(form);
     LockMerkleProof {
         spend_condition,
