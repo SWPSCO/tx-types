@@ -539,31 +539,17 @@ impl PageV0 {
     pub fn to_hashable_block_commitment(&self) -> Hashable {
         // Build the structure using nested cells for the Hoon tuple
         // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
-        Hashable::cell(
+        Hashable::cons_list([
             Hashable::Hash(self.parent.clone()),
-            Hashable::cell(
-                Hashable::Hash(self.tx_ids.to_hash()),
-                Hashable::cell(
-                    Hashable::Hash(self.coinbase.to_hash()),
-                    Hashable::cell(
-                        self.timestamp.to_hashable(),
-                        Hashable::cell(
-                            self.epoch_counter.to_hashable(),
-                            Hashable::cell(
-                                self.target.to_hashable(),
-                                Hashable::cell(
-                                    self.accumulated_work.to_hashable(),
-                                    Hashable::cell(
-                                        self.height.to_hashable(),
-                                        self.msg.to_hashable(),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        )
+            Hashable::Hash(self.tx_ids.to_hash()),
+            Hashable::Hash(self.coinbase.to_hash()),
+            self.timestamp.to_hashable(),
+            self.epoch_counter.to_hashable(),
+            self.target.to_hashable(),
+            self.accumulated_work.to_hashable(),
+            self.height.to_hashable(),
+            self.msg.to_hashable(),
+        ])
     }
 
     /// Hash the block commitment to produce the commitment hash

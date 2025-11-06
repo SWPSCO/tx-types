@@ -13,6 +13,7 @@ nockapp = { workspace = true }
 nockvm = { workspace = true }
 nockchain-libp2p-io = { workspace = true }
 zkvm-jetpack = { workspace = true }
+nockchain-math = { workspace = true }
 ibig = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

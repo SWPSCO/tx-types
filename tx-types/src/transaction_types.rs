@@ -224,13 +224,12 @@ impl NName {
     /// ==
     pub fn first_v0(owners: Lock, has_timelock: bool) -> Hash {
         let value = if has_timelock { 0u64 } else { 1u64 };
-        let hashable = Hashable::cell(
+        let hashable = Hashable::cons_list([
             Hashable::null(),
-            Hashable::cell(
-                Hashable::leaf_from_atom(&value.to_le_bytes()),
-                Hashable::cell(Hashable::Hash(owners.to_hash()), Hashable::null()),
-            ),
-        );
+            Hashable::leaf_from_atom(&value.to_le_bytes()),
+            Hashable::Hash(owners.to_hash()),
+            Hashable::null(),
+        ]);
         hash_hashable(&hashable)
     }
 
@@ -244,13 +243,12 @@ impl NName {
     ///     leaf+~                          :: second pact
     /// ==
     pub fn last_v0(source: Source, timelock: Timelock) -> Hash {
-        let hashable = Hashable::cell(
+        let hashable = Hashable::cons_list([
             Hashable::null(),
-            Hashable::cell(
-                Hashable::Hash(source.to_hash()),
-                Hashable::cell(Hashable::Hash(timelock.to_hash()), Hashable::null()),
-            ),
-        );
+            Hashable::Hash(source.to_hash()),
+            Hashable::Hash(timelock.to_hash()),
+            Hashable::null(),
+        ]);
         hash_hashable(&hashable)
     }
 
@@ -261,14 +259,18 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        hash_hashable(&Hashable::cell(Hashable::null(), Hashable::Hash(lock)))
+        hash_hashable(&Hashable::cons_list([
+            Hashable::null(),
+            Hashable::Hash(lock),
+        ]))
     }
 
     pub fn last_v1(source: Source) -> Hash {
-        hash_hashable(&Hashable::cell(
+        hash_hashable(&Hashable::cons_list([
             Hashable::null(),
-            Hashable::cell(source.to_hashable(), Hashable::null()),
-        ))
+            source.to_hashable(),
+            Hashable::null(),
+        ]))
     }
 
     pub fn display(&self) -> Vec<String> {

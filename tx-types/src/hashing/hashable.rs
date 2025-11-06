@@ -108,4 +108,18 @@ impl Hashable {
     pub fn list(items: Vec<Hashable>) -> Self {
         Hashable::List(items)
     }
+
+    /// Build a proper Hoon list (right-associated cells ending in null)
+    /// from the provided hashable elements.
+    pub fn cons_list<I>(elements: I) -> Self
+    where
+        I: IntoIterator<Item = Hashable>,
+    {
+        let mut tail = Hashable::null();
+        let mut items: Vec<Hashable> = elements.into_iter().collect();
+        while let Some(elem) = items.pop() {
+            tail = Hashable::cell(elem, tail);
+        }
+        tail
+    }
 }
