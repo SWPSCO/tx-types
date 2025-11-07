@@ -259,15 +259,14 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        hash_hashable(&Hashable::cell_chain([
-            Hashable::null(),
-            Hashable::Hash(lock),
-        ]))
+        let true_leaf = Hashable::leaf_from_atom([1u8]);
+        hash_hashable(&Hashable::cell(true_leaf, Hashable::Hash(lock)))
     }
 
     pub fn last_v1(source: Source) -> Hash {
+        let true_leaf = Hashable::leaf_from_atom([1u8]);
         hash_hashable(&Hashable::cell_chain([
-            Hashable::null(),
+            true_leaf,
             source.to_hashable(),
             Hashable::null(),
         ]))

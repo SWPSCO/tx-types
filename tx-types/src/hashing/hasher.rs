@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_hash_hashable_leaf() {
-        let h = Hashable::leaf_from_atom(b"test");
+        let h = Hashable::leaf_from_tas("test");
         let digest = hash_hashable(&h);
         // Just check it doesn't panic and produces a digest
         assert_eq!(digest.values.len(), 5);
@@ -201,8 +201,8 @@ mod tests {
     #[test]
     fn test_hash_hashable_cell() {
         let h = Hashable::cell(
-            Hashable::leaf_from_atom(b"left"),
-            Hashable::leaf_from_atom(b"right"),
+            Hashable::leaf_from_tas("left"),
+            Hashable::leaf_from_tas("right"),
         );
         let digest = hash_hashable(&h);
         assert_eq!(digest.values.len(), 5);

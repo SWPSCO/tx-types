@@ -971,7 +971,7 @@ impl Pkh {
     pub fn to_hashable(&self) -> Hashable {
         let hash_hashable = self.h.to_hashable(|h| Hashable::Hash(h.clone()));
         Hashable::cell(
-            Hashable::leaf_from_atom(b"pkh"),
+            Hashable::leaf_from_tas("pkh"),
             Hashable::cell(
                 Hashable::leaf_from_atom(&self.m.to_le_bytes()),
                 hash_hashable,
@@ -990,7 +990,7 @@ pub struct Tim {
 impl Tim {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"tim"),
+            Hashable::leaf_from_tas("tim"),
             Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable()),
         )
     }
@@ -1004,8 +1004,8 @@ pub struct Hax {
 impl Hax {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"hax"),
-            Hashable::leaf_from_atom(b"fake"), // TODO
+            Hashable::leaf_from_tas("hax"),
+            Hashable::leaf_from_tas("fake"), // TODO
         )
     }
 }
@@ -1017,7 +1017,7 @@ pub struct Brn {
 
 impl Brn {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(Hashable::leaf_from_atom(b"brn"), Hashable::null())
+        Hashable::cell(Hashable::leaf_from_tas("brn"), Hashable::null())
     }
 }
 

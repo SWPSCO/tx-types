@@ -87,7 +87,7 @@ where
 
                         // Check if rotation needed (mor-tip comparison)
                         if let Some(ref left_child) = n.left {
-                            if Self::mor_tip(&n.key, &left_child.key) == Ordering::Greater {
+                            if Self::mor_tip(&n.key, &left_child.key) != Ordering::Less {
                                 // Left child has higher priority, rotate right
                                 Some(Self::rotate_right(n))
                             } else {
@@ -103,7 +103,7 @@ where
 
                         // Check if rotation needed (mor-tip comparison)
                         if let Some(ref right_child) = n.right {
-                            if Self::mor_tip(&n.key, &right_child.key) == Ordering::Greater {
+                            if Self::mor_tip(&n.key, &right_child.key) != Ordering::Less {
                                 // Right child has higher priority, rotate left
                                 Some(Self::rotate_left(n))
                             } else {
