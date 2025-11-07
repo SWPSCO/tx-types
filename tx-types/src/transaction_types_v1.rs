@@ -1,12 +1,12 @@
 use noun_serde::{NounDecode, NounEncode};
 
-use nockapp::noun::slab::NounSlab;
-use nockapp::utils::make_tas;
-use nockvm::noun::{Atom, D, Noun};
 use crate::collections::zset::DorTip as ZSetDorTip;
 use crate::collections::{ZMap, ZSet};
 use crate::generic_noun::UntypedNoun;
 use crate::transaction_types::*;
+use nockapp::noun::slab::NounSlab;
+use nockapp::utils::make_tas;
+use nockvm::noun::{Atom, Noun, D};
 
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_ten_cell;
@@ -355,7 +355,7 @@ impl NNoteV1 {
                 leaf+assets.form
             ==
         */
-        Hashable::cons_list([
+        Hashable::cell_chain([
             Hashable::leaf_from_atom(&self.version.to_le_bytes()),
             self.origin_page.to_hashable(),
             Hashable::Hash(self.name.to_hash()),
@@ -430,10 +430,7 @@ impl SeedV1 {
         // Compute output_source hashable
         let output_source_hashable = match &self.output_source {
             None => Hashable::null(),
-            Some(source) => Hashable::cons_list([
-                Hashable::null(),
-                source.to_hashable(),
-            ]),
+            Some(source) => Hashable::cell_chain([Hashable::null(), source.to_hashable()]),
         };
 
         // Hash the note_data
@@ -441,7 +438,7 @@ impl SeedV1 {
 
         // Build the 5-element structure (quint)
         // Using nested cells: [a [b [c [d e]]]]
-        Hashable::cons_list([
+        Hashable::cell_chain([
             output_source_hashable,
             Hashable::Hash(self.lock_root.clone()),
             Hashable::Hash(note_data_hash),
@@ -842,7 +839,7 @@ impl Witness {
         let hax_hashable = self.hashable_hax();
         let hax_hash = hash_hashable(&hax_hashable);
 
-        Hashable::cons_list([
+        Hashable::cell_chain([
             Hashable::Hash(lmp_hash),
             Hashable::Hash(pkh_hash),
             Hashable::Hash(hax_hash),
@@ -946,7 +943,7 @@ impl SpendCondition {
         // So we need to fold from the right
         self.p
             .iter()
-            .rev()  // reverse to process from end
+            .rev() // reverse to process from end
             .fold(base, |acc, lp| Hashable::cell(lp.to_hashable(), acc))
     }
 

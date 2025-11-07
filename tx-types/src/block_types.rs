@@ -372,16 +372,19 @@ pub struct Pow {
 impl NounDecode for Pow {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         if noun.is_atom() {
-            return Ok(Pow { p: None })
+            return Ok(Pow { p: None });
         }
-        let proof = noun.as_cell()
+        let proof = noun
+            .as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?
             .tail();
 
         let mut slab: NounSlab = NounSlab::new();
         slab.copy_into(proof);
         let noun_bytes: Bytes = slab.jam();
-        Ok(Pow { p: Some(noun_bytes) })
+        Ok(Pow {
+            p: Some(noun_bytes),
+        })
     }
 }
 
@@ -539,7 +542,7 @@ impl PageV0 {
     pub fn to_hashable_block_commitment(&self) -> Hashable {
         // Build the structure using nested cells for the Hoon tuple
         // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
-        Hashable::cons_list([
+        Hashable::cell_chain([
             Hashable::Hash(self.parent.clone()),
             Hashable::Hash(self.tx_ids.to_hash()),
             Hashable::Hash(self.coinbase.to_hash()),

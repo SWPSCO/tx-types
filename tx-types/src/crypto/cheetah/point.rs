@@ -1,19 +1,23 @@
 /// Cheetah elliptic curve point operations (copied from working siger-esp implementation)
-use super::field::{F6Element, F6_ZERO, F6_ONE};
-use zkvm_jetpack::form::math::belt::Belt;
-use ibig::UBig;
+use super::field::{F6Element, F6_ONE, F6_ZERO};
 use crate::transaction_types::{SchnorrPubkey, F6LT};
+use ibig::UBig;
+use zkvm_jetpack::form::math::belt::Belt;
 
 /// Point on the Cheetah elliptic curve
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CheetahPoint {
     pub x: F6Element,
     pub y: F6Element,
-    pub inf: bool,  // Point at infinity flag
+    pub inf: bool, // Point at infinity flag
 }
 
 /// Identity element constant
-pub const A_ID: CheetahPoint = CheetahPoint { x: F6_ZERO, y: F6_ONE, inf: true };
+pub const A_ID: CheetahPoint = CheetahPoint {
+    x: F6_ZERO,
+    y: F6_ONE,
+    inf: true,
+};
 
 /// Generator point constants from working implementation
 pub const GX: F6Element = F6Element([
@@ -35,7 +39,8 @@ pub const GY: F6Element = F6Element([
 ]);
 
 /// Group order constant
-pub const GROUP_ORDER_HEX: &str = "7af2599b3b3f22d0563fbf0f990a37b5327aa72330157722d443623eaed4accf";
+pub const GROUP_ORDER_HEX: &str =
+    "7af2599b3b3f22d0563fbf0f990a37b5327aa72330157722d443623eaed4accf";
 
 pub fn cheetah_order() -> UBig {
     UBig::from_str_radix(GROUP_ORDER_HEX, 16).expect("valid group order")
@@ -46,27 +51,35 @@ impl CheetahPoint {
     pub fn identity() -> Self {
         A_ID
     }
-    
+
     /// Generator point
     pub fn generator() -> Self {
-        CheetahPoint { x: GX, y: GY, inf: false }
+        CheetahPoint {
+            x: GX,
+            y: GY,
+            inf: false,
+        }
     }
-    
+
     /// Create point from coordinates (does not validate curve equation)
     pub fn new(x: F6Element, y: F6Element) -> Self {
         CheetahPoint { x, y, inf: false }
     }
-    
+
     /// Check if this is the identity element
     pub fn is_identity(&self) -> bool {
         self.inf
     }
-    
+
     /// Point negation
     pub fn neg(&self) -> Self {
-        CheetahPoint { x: self.x, y: self.y.neg(), inf: self.inf }
+        CheetahPoint {
+            x: self.x,
+            y: self.y.neg(),
+            inf: self.inf,
+        }
     }
-    
+
     /// Point doubling using working implementation
     pub fn double(&self) -> Self {
         if self.inf || self.y == F6_ZERO {
@@ -74,72 +87,86 @@ impl CheetahPoint {
         }
         self.double_unsafe()
     }
-    
+
     /// Unsafe point doubling (assumes point is not at infinity and y != 0)
     fn double_unsafe(&self) -> Self {
         // slope = (3*x^2 + 1) / (2*y)
-        let slope = self.x.square().mul_by_scalar(Belt(3)).add(&F6_ONE)
+        let slope = self
+            .x
+            .square()
+            .mul_by_scalar(Belt(3))
+            .add(&F6_ONE)
             .div(&self.y.mul_by_scalar(Belt(2)))
             .expect("Division should work for non-zero y");
-        
+
         let x_out = slope.square().sub(&self.x.mul_by_scalar(Belt(2)));
         let y_out = slope.mul(&self.x.sub(&x_out)).sub(&self.y);
-        
-        CheetahPoint { x: x_out, y: y_out, inf: false }
+
+        CheetahPoint {
+            x: x_out,
+            y: y_out,
+            inf: false,
+        }
     }
-    
+
     /// Point addition using working implementation
     pub fn add(&self, other: &Self) -> Self {
-        if self.inf { 
-            return *other; 
+        if self.inf {
+            return *other;
         }
-        if other.inf { 
-            return *self; 
+        if other.inf {
+            return *self;
         }
-        if *self == other.neg() { 
-            return A_ID; 
+        if *self == other.neg() {
+            return A_ID;
         }
-        if self == other { 
-            return self.double(); 
+        if self == other {
+            return self.double();
         }
         self.add_unsafe(*other)
     }
-    
+
     /// Unsafe point addition (assumes points are distinct and not inverses)
     fn add_unsafe(&self, other: CheetahPoint) -> Self {
         // slope = (p.y - q.y) / (p.x - q.x)
-        let slope = self.y.sub(&other.y)
+        let slope = self
+            .y
+            .sub(&other.y)
             .div(&self.x.sub(&other.x))
             .expect("Division should work for distinct x coordinates");
-            
+
         let x_out = slope.square().sub(&self.x.add(&other.x));
         let y_out = slope.mul(&self.x.sub(&x_out)).sub(&self.y);
-        
-        CheetahPoint { x: x_out, y: y_out, inf: false }
+
+        CheetahPoint {
+            x: x_out,
+            y: y_out,
+            inf: false,
+        }
     }
-    
+
     /// Scalar multiplication using binary method from working implementation
     pub fn scalar_mul(&self, scalar: &UBig) -> Self {
         let mut n = scalar.clone();
         let mut q = *self;
         let mut acc = A_ID;
-        
+
         while n > UBig::from(0u8) {
-            if n.bit(0) { 
-                acc = acc.add(&q); 
+            if n.bit(0) {
+                acc = acc.add(&q);
             }
             q = q.double();
             n >>= 1;
         }
         acc
     }
-    
+
     /// Generate public key from private key
     pub fn from_private_key(private_key: &[u8; 32]) -> Self {
         let scalar = UBig::from_be_bytes(private_key) % cheetah_order();
         Self::generator().scalar_mul(&scalar)
     }
-    
+
     /// Convert to SchnorrPubkey format
     pub fn to_schnorr_pubkey(&self) -> SchnorrPubkey {
         if self.inf {
@@ -150,13 +177,17 @@ impl CheetahPoint {
             }
         } else {
             SchnorrPubkey {
-                x: F6LT { values: self.x.to_u64_array() },
-                y: F6LT { values: self.y.to_u64_array() },
+                x: F6LT {
+                    values: self.x.to_u64_array(),
+                },
+                y: F6LT {
+                    values: self.y.to_u64_array(),
+                },
                 inf: false,
             }
         }
     }
-    
+
     /// Create from SchnorrPubkey
     pub fn from_schnorr_pubkey(pk: &SchnorrPubkey) -> Self {
         if pk.inf {
@@ -169,12 +200,12 @@ impl CheetahPoint {
             }
         }
     }
-    
+
     /// Convert to raw coordinate arrays for compatibility
     pub fn to_coordinates(&self) -> [[u64; 6]; 2] {
         [self.x.to_u64_array(), self.y.to_u64_array()]
     }
-    
+
     /// Create from raw coordinate arrays
     pub fn from_coordinates(coords: [[u64; 6]; 2]) -> Self {
         CheetahPoint {

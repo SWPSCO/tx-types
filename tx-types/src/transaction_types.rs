@@ -224,7 +224,7 @@ impl NName {
     /// ==
     pub fn first_v0(owners: Lock, has_timelock: bool) -> Hash {
         let value = if has_timelock { 0u64 } else { 1u64 };
-        let hashable = Hashable::cons_list([
+        let hashable = Hashable::cell_chain([
             Hashable::null(),
             Hashable::leaf_from_atom(&value.to_le_bytes()),
             Hashable::Hash(owners.to_hash()),
@@ -243,7 +243,7 @@ impl NName {
     ///     leaf+~                          :: second pact
     /// ==
     pub fn last_v0(source: Source, timelock: Timelock) -> Hash {
-        let hashable = Hashable::cons_list([
+        let hashable = Hashable::cell_chain([
             Hashable::null(),
             Hashable::Hash(source.to_hash()),
             Hashable::Hash(timelock.to_hash()),
@@ -259,14 +259,14 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        hash_hashable(&Hashable::cons_list([
+        hash_hashable(&Hashable::cell_chain([
             Hashable::null(),
             Hashable::Hash(lock),
         ]))
     }
 
     pub fn last_v1(source: Source) -> Hash {
-        hash_hashable(&Hashable::cons_list([
+        hash_hashable(&Hashable::cell_chain([
             Hashable::null(),
             source.to_hashable(),
             Hashable::null(),

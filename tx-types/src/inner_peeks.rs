@@ -1,7 +1,7 @@
 // temporary module to handle nockchain node inner.hoon peeks
+use crate::collections::ZMap;
 use crate::transaction_types::*;
 use crate::transaction_types_v1::*;
-use crate::collections::ZMap;
 use noun_serde::{NounDecode, NounEncode};
 
 #[derive(Debug, Clone, NounDecode)]
@@ -13,12 +13,12 @@ pub struct BalanceByFirstName {
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct Balance {
-    pub map: ZMap<NName, NNote>
+    pub map: ZMap<NName, NNote>,
 }
 
 #[derive(Debug, Clone, NounDecode)]
 pub struct MiningPubkeys {
-    pub values: Vec<MiningPubkey>
+    pub values: Vec<MiningPubkey>,
 }
 
 #[derive(Debug, Clone, NounDecode)]

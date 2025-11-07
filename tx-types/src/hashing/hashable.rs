@@ -1,8 +1,7 @@
+use crate::transaction_types::Hash;
 /// Hashable enum mirroring Hoon's hashable type
 /// This is an intermediate representation for hashing complex structures
-
 use std::fmt::Debug;
-use crate::transaction_types::Hash;
 
 /// Hashable representation matching Hoon's hashable type
 #[derive(Debug, Clone)]
@@ -44,8 +43,8 @@ impl Hashable {
     /// the jammed bytes in a Leaf variant.
     pub fn leaf_from_atom(data: impl AsRef<[u8]>) -> Self {
         use nockapp::noun::slab::NounSlab;
+        use nockapp::{AtomExt, Bytes};
         use nockvm::noun::Atom;
-        use nockapp::{Bytes, AtomExt};
 
         let bytes = data.as_ref();
         let mut slab: NounSlab = NounSlab::new();
@@ -100,7 +99,7 @@ impl Hashable {
     pub fn triple(first: Hashable, second: Hashable, third: Hashable) -> Self {
         Hashable::Cell(
             Box::new(first),
-            Box::new(Hashable::Cell(Box::new(second), Box::new(third)))
+            Box::new(Hashable::Cell(Box::new(second), Box::new(third))),
         )
     }
 
@@ -121,5 +120,25 @@ impl Hashable {
             tail = Hashable::cell(elem, tail);
         }
         tail
+    }
+
+    /// Build nested cells without a terminating null (Hoon `:* ... ==`).
+    ///
+    /// For example, `cell_chain([a, b, c, d])` produces `[a [b [c d]]]`.
+    /// If no elements are provided, this returns `Hashable::null()`.
+    pub fn cell_chain<I>(elements: I) -> Self
+    where
+        I: IntoIterator<Item = Hashable>,
+    {
+        let mut items: Vec<Hashable> = elements.into_iter().collect();
+        match items.pop() {
+            None => Hashable::null(),
+            Some(mut acc) => {
+                while let Some(elem) = items.pop() {
+                    acc = Hashable::cell(elem, acc);
+                }
+                acc
+            }
+        }
     }
 }

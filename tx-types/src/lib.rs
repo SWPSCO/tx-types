@@ -10,6 +10,7 @@ pub mod block_types;
 // Core modules in root
 pub mod fee_calculator;
 pub mod generic_noun;
+pub mod inner_peeks;
 pub mod signer;
 pub mod transaction_types;
 pub mod transaction_types_v0;
@@ -17,7 +18,6 @@ pub mod transaction_types_v1;
 pub mod tx_builder_batch;
 pub mod tx_builder_v1;
 pub mod tx_to_noun;
-pub mod inner_peeks;
 
 // Submodules
 pub mod collections;

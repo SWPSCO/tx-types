@@ -1,14 +1,18 @@
 #[cfg(test)]
 pub mod tests {
     use crate::block_types::Page;
-    use crate::transaction_types::*;
     use crate::collections::{ZMap, ZSet};
+    use crate::transaction_types::*;
 
     // Helper to create test lock
     fn test_lock() -> Lock {
         let pubkey = SchnorrPubkey {
-            x: F6LT { values: [1, 2, 3, 4, 5, 6] },
-            y: F6LT { values: [7, 8, 9, 10, 11, 12] },
+            x: F6LT {
+                values: [1, 2, 3, 4, 5, 6],
+            },
+            y: F6LT {
+                values: [7, 8, 9, 10, 11, 12],
+            },
             inf: false,
         };
         let mut pubkeys = ZSet::new();
@@ -71,16 +75,22 @@ pub mod tests {
         coinbase_map.put(lock.clone(), coins.clone());
         let coinbase = crate::block_types::Coinbase { map: coinbase_map };
 
-        let parent_hash = Hash { values: [1, 2, 3, 4, 5] };
+        let parent_hash = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
 
         let page = Page {
-            digest: Hash { values: [0, 0, 0, 0, 0] },
-            pow: crate::block_types::Pow { p: bytes::Bytes::new() },
+            digest: Hash {
+                values: [0, 0, 0, 0, 0],
+            },
+            pow: crate::block_types::Pow {
+                p: bytes::Bytes::new(),
+            },
             parent: parent_hash.clone(),
             tx_ids: crate::block_types::TransactionIds::new(),
             coinbase,
             timestamp: crate::block_types::Timestamp {
-                value: chrono::Utc::now()
+                value: chrono::Utc::now(),
             },
             epoch_counter: crate::block_types::EpochCounter::new(0),
             target: crate::block_types::BigNum {
@@ -115,13 +125,20 @@ pub mod tests {
         let lock1 = test_lock();
 
         let pubkey2 = SchnorrPubkey {
-            x: F6LT { values: [2, 2, 2, 2, 2, 2] },
-            y: F6LT { values: [3, 3, 3, 3, 3, 3] },
+            x: F6LT {
+                values: [2, 2, 2, 2, 2, 2],
+            },
+            y: F6LT {
+                values: [3, 3, 3, 3, 3, 3],
+            },
             inf: false,
         };
         let mut pubkeys2 = ZSet::new();
         pubkeys2.put(pubkey2);
-        let lock2 = Lock { m: 1, pubkeys: pubkeys2 };
+        let lock2 = Lock {
+            m: 1,
+            pubkeys: pubkeys2,
+        };
 
         let coins1 = Coins { value: 1000 };
         let coins2 = Coins { value: 2000 };
@@ -131,16 +148,22 @@ pub mod tests {
         coinbase_map.put(lock2.clone(), coins2.clone());
         let coinbase = crate::block_types::Coinbase { map: coinbase_map };
 
-        let parent_hash = Hash { values: [5, 4, 3, 2, 1] };
+        let parent_hash = Hash {
+            values: [5, 4, 3, 2, 1],
+        };
 
         let page = Page {
-            digest: Hash { values: [0, 0, 0, 0, 0] },
-            pow: crate::block_types::Pow { p: bytes::Bytes::new() },
+            digest: Hash {
+                values: [0, 0, 0, 0, 0],
+            },
+            pow: crate::block_types::Pow {
+                p: bytes::Bytes::new(),
+            },
             parent: parent_hash.clone(),
             tx_ids: crate::block_types::TransactionIds::new(),
             coinbase,
             timestamp: crate::block_types::Timestamp {
-                value: chrono::Utc::now()
+                value: chrono::Utc::now(),
             },
             epoch_counter: crate::block_types::EpochCounter::new(0),
             target: crate::block_types::BigNum {
