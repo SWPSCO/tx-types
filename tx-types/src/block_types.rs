@@ -598,7 +598,7 @@ impl PageV1 {
 
             let mut reward_sum: u64 = 0;
 
-            for hash in vec_wrapped_hash {
+            for hash in vec_wrapped_hash.clone() {
                 for (key, value) in cb.clone() {
                     if key == hash {
                         reward_sum += value.value;
@@ -608,17 +608,17 @@ impl PageV1 {
 
             let assets = Coins { value: reward_sum };
 
-            // placeholder
-            let root = Hash { values: [0; 5] };
-            let source = Source {
-                p: self.parent.clone(),
-                is_coinbase: true,
-            };
+            let mut name_hashes = ZSet::new();
+            for hash in vec_wrapped_hash.clone() {
+                name_hashes.put(hash);
+            }
+
+            let name = make_name(name_hashes, self.parent.clone());
 
             notes.push(NNote::V1(NNoteV1 {
                 version: 1,
                 origin_page: self.height,
-                name: NName::new_v1(root, source),
+                name,
                 note_data: NoteData { map: ZMap::new() },
                 assets,
             }));
