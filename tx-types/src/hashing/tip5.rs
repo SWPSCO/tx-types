@@ -1,3 +1,4 @@
+use nockapp::noun::slab::NounSlab;
 use nockapp::Noun;
 use nockchain_libp2p_io::tip5_util;
 
@@ -5,8 +6,10 @@ use nockchain_libp2p_io::tip5_util;
 pub use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::jets::util::test::init_context;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Atom, D, T};
-use zkvm_jetpack::jets::tip5_jets::{hash_10_jet, hash_noun_varlen_jet, hash_varlen_jet};
+use nockvm::noun::{D, T};
+use zkvm_jetpack::jets::tip5_jets::{
+    hash_10_jet, hash_hashable_jet, hash_noun_varlen_jet, hash_varlen_jet,
+};
 
 use crate::transaction_types::Hash;
 
@@ -43,6 +46,38 @@ impl From<JetErr> for Tip5Error {
 pub struct Tip5Hasher;
 
 impl Tip5Hasher {
+    fn digest_from_noun(hash_noun: Noun) -> Result<Hash, Tip5Error> {
+        let mut values = [0u64; 5];
+        let mut current = hash_noun;
+
+        for i in 0..4 {
+            let cell = current
+                .as_cell()
+                .map_err(|_| Tip5Error::HashingError(format!("Expected cell at position {}", i)))?;
+
+            let atom = cell
+                .head()
+                .as_atom()
+                .map_err(|_| Tip5Error::HashingError(format!("Expected atom at position {}", i)))?;
+
+            values[i] = atom.as_u64().map_err(|_| {
+                Tip5Error::HashingError(format!("Atom too large at position {}", i))
+            })?;
+
+            current = cell.tail();
+        }
+
+        let atom = current
+            .as_atom()
+            .map_err(|_| Tip5Error::HashingError("Expected atom at position 4".to_string()))?;
+
+        values[4] = atom
+            .as_u64()
+            .map_err(|_| Tip5Error::HashingError("Atom too large at position 4".to_string()))?;
+
+        Ok(Hash { values })
+    }
+
     /// Hash a noun using the TIP5 algorithm and return as a Hash struct
     ///
     /// This corresponds to the Hoon hash-noun-varlen function. It takes any noun
@@ -61,76 +96,10 @@ impl Tip5Hasher {
         // The jet expects the sample at slot 6, so we need [0 sample 0]
         let subject = T(&mut context.stack, &[D(0), noun, D(0)]);
 
-        // Call the TIP5 hash jet - returns a 5-element tuple (belt)
         let hash_noun = hash_noun_varlen_jet(context, subject)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hashing failed: {:?}", e)))?;
 
-        // Extract the 5 u64 values from the belt
-        // The belt is a nested cell structure: [a [b [c [d e]]]]
-        let mut values = [0u64; 5];
-        let mut current = hash_noun;
-
-        for i in 0..4 {
-            let cell = current
-                .as_cell()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected cell at position {}", i)))?;
-
-            // Get the atom
-            let atom = cell
-                .head()
-                .as_atom()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected atom at position {}", i)))?;
-
-            // Handle the conversion properly
-            values[i] = if atom.is_direct() {
-                atom.as_u64().map_err(|_| {
-                    Tip5Error::HashingError(format!("Atom too large at position {}", i))
-                })?
-            } else {
-                // For indirect atoms, we need to handle the bytes properly
-                let bytes = atom.as_ne_bytes();
-                if bytes.len() > 8 {
-                    return Err(Tip5Error::HashingError(format!(
-                        "Atom too large at position {}",
-                        i
-                    )));
-                }
-                // Reconstruct u64 from little-endian bytes
-                let mut result = 0u64;
-                for (j, &byte) in bytes.iter().enumerate() {
-                    result |= (byte as u64) << (j * 8);
-                }
-                result
-            };
-
-            current = cell.tail();
-        }
-
-        // The last element
-        let atom = current
-            .as_atom()
-            .map_err(|_| Tip5Error::HashingError("Expected atom at position 4".to_string()))?;
-
-        values[4] = if atom.is_direct() {
-            atom.as_u64()
-                .map_err(|_| Tip5Error::HashingError("Atom too large at position 4".to_string()))?
-        } else {
-            // For indirect atoms, we need to handle the bytes properly
-            let bytes = atom.as_ne_bytes();
-            if bytes.len() > 8 {
-                return Err(Tip5Error::HashingError(
-                    "Atom too large at position 4".to_string(),
-                ));
-            }
-            // Reconstruct u64 from little-endian bytes
-            let mut result = 0u64;
-            for (j, &byte) in bytes.iter().enumerate() {
-                result |= (byte as u64) << (j * 8);
-            }
-            result
-        };
-
-        Ok(Hash { values })
+        Self::digest_from_noun(hash_noun)
     }
 
     /// Hash a 10-tuple using the TIP5 hash_10 algorithm
@@ -151,59 +120,24 @@ impl Tip5Hasher {
         // The jet expects the sample at slot 6, so we need [0 sample 0]
         let subject = T(&mut context.stack, &[D(0), ten_list, D(0)]);
 
-        // Call the TIP5 hash_10 jet - returns a list (not a tuple)
         let hash_noun = hash_10_jet(context, subject)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_10 failed: {:?}", e)))?;
 
-        // Extract the 5 u64 values from the list
-        // The result is a list structure: [a [b [c [d [e 0]]]]]
-        let mut values = [0u64; 5];
-        let mut current = hash_noun;
+        Self::digest_from_noun(hash_noun)
+    }
 
-        for i in 0..5 {
-            let cell = current
-                .as_cell()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected cell at position {}", i)))?;
+    /// Hash a Hashable structure using the TIP5 jet.
+    pub fn hash_hashable(hashable: &crate::hashing::hashable::Hashable) -> Result<Hash, Tip5Error> {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = hashable.to_noun(&mut slab);
+        slab.set_root(noun);
 
-            // Get the atom
-            let atom = cell
-                .head()
-                .as_atom()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected atom at position {}", i)))?;
+        let context = &mut init_context();
+        let subject = T(&mut context.stack, &[D(0), noun, D(0)]);
+        let hash_noun = hash_hashable_jet(context, subject)
+            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_hashable failed: {:?}", e)))?;
 
-            // Handle the conversion properly
-            values[i] = if atom.is_direct() {
-                atom.as_u64().map_err(|_| {
-                    Tip5Error::HashingError(format!("Atom too large at position {}", i))
-                })?
-            } else {
-                // For indirect atoms, we need to handle the bytes properly
-                let bytes = atom.as_ne_bytes();
-                if bytes.len() > 8 {
-                    return Err(Tip5Error::HashingError(format!(
-                        "Atom too large at position {}",
-                        i
-                    )));
-                }
-                // Reconstruct u64 from little-endian bytes
-                let mut result = 0u64;
-                for (j, &byte) in bytes.iter().enumerate() {
-                    result |= (byte as u64) << (j * 8);
-                }
-                result
-            };
-
-            current = cell.tail();
-        }
-
-        // current should now be 0 (end of list)
-        if current.as_atom().is_ok() && current.as_atom().unwrap().as_u64().unwrap_or(1) != 0 {
-            return Err(Tip5Error::HashingError(
-                "Expected list to end with 0".to_string(),
-            ));
-        }
-
-        Ok(Hash { values })
+        Self::digest_from_noun(hash_noun)
     }
 
     /// Hash a noun and convert to base58 string

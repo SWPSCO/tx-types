@@ -888,8 +888,6 @@ impl Spend {
     ///   ==
     /// ```
     pub fn to_hashable(&self) -> Hashable {
-        // In Hoon, leaf+%0 means a leaf containing the atom 0
-        // [leaf+%0 body] is a cell of [Leaf(0), body-hashable]
         let version_leaf = Hashable::leaf_from_atom(&self.version.to_le_bytes());
 
         // Pair with the body's hashable: [version-leaf body-hashable]

@@ -4,13 +4,25 @@ use crate::collections::zset::DorTip as ZSetDorTip;
 use crate::collections::{ZMap, ZSet};
 use crate::generic_noun::UntypedNoun;
 use crate::transaction_types::*;
-use nockapp::noun::slab::NounSlab;
+use nockapp::noun::slab::{CueError, NounSlab};
 use nockapp::utils::make_tas;
+use nockapp::Bytes;
 use nockvm::noun::{Atom, Noun, D};
+use once_cell::sync::Lazy;
 
 use crate::hashing::hashable::Hashable;
-use crate::hashing::hasher::hash_ten_cell;
+use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
+use crate::hashing::raw::{
+    compute_tx_id_v1_from_raw_noun, hashable_note_data_from_raw, hashable_pkh_signature_direct,
+    hashable_pkh_signature_from_raw, hashable_seeds_from_raw, hashable_spend_from_raw,
+    hashable_spends_from_raw, hashable_witness_from_raw,
+};
 use crate::hashing::tip5::Tip5Hasher;
+
+static LOCK_MERKLE_AXIS_HASH: Lazy<Hash> = Lazy::new(|| {
+    Hash::from_b58("6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A")
+        .expect("valid lock merkle proof axis hash constant")
+});
 
 fn hashable_from_noun_recursive(noun: nockvm::noun::Noun) -> Hashable {
     if let Ok(cell) = noun.as_cell() {
@@ -86,7 +98,7 @@ fn hashable_note_data_from_zmap(noun: Noun) -> Hashable {
     )
 }
 
-fn hashable_spends_from_zmap(noun: Noun) -> Hashable {
+pub fn hashable_spends_from_zmap(noun: Noun) -> Hashable {
     if noun_is_null(noun) {
         return Hashable::null();
     }
@@ -575,7 +587,7 @@ impl SpendsV1 {
     pub fn to_hashable(&self) -> Hashable {
         let mut slab: NounSlab = NounSlab::new();
         let noun = build_canonical_spends_noun(&mut slab, &self.map);
-        hashable_spends_from_zmap(noun)
+        hashable_spends_from_raw(noun).expect("invalid spends noun")
     }
 
     /// Compute hash of spends
@@ -599,6 +611,34 @@ impl SpendsV1 {
         slab.set_root(noun);
         slab.jam().to_vec()
     }
+}
+
+fn version_leaf_hashable() -> Hashable {
+    Hashable::leaf_from_atom(1u64.to_le_bytes())
+}
+
+/// Compute a tx-id from an already computed spends hashable structure.
+fn compute_tx_id_from_spends_hashable(spends_hashable: Hashable) -> Hash {
+    let hashable = Hashable::cell(version_leaf_hashable(), spends_hashable);
+    hash_hashable(&hashable)
+}
+
+/// Compute the tx-id from an in-memory spends map.
+pub fn compute_tx_id_v1(spends: &SpendsV1) -> Hash {
+    compute_tx_id_from_spends_hashable(spends.to_hashable())
+}
+
+/// Compute the tx-id from the raw noun representation of the spends map.
+pub fn compute_tx_id_v1_from_noun(spends_noun: Noun) -> Hash {
+    let spends = SpendsV1::from_noun(&spends_noun).expect("invalid spends noun");
+    compute_tx_id_v1(&spends)
+}
+
+/// Compute the tx-id directly from the jammed noun bytes of the spends map.
+pub fn compute_tx_id_v1_from_jam(spends_jam: &[u8]) -> Result<Hash, CueError> {
+    let mut slab: NounSlab = NounSlab::new();
+    let noun = slab.cue_into(Bytes::copy_from_slice(spends_jam))?;
+    Ok(compute_tx_id_v1_from_noun(noun))
 }
 
 #[derive(Debug, Clone, NounDecode, NounEncode)]
@@ -893,7 +933,7 @@ impl LockMerkleProof {
     ///   ^-  hashable:tip5
     ///   |^
     ///   :+  hash+(hash:spend-condition spend-condition.form)
-    ///     leaf+axis
+    ///     hash+(from-b58:^hash '6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A')
     ///   (hashable-merk-proof merk-proof.form)
     /// ```
     pub fn to_hashable(&self) -> Hashable {
@@ -901,11 +941,10 @@ impl LockMerkleProof {
 
         // Hash the spend condition
         let spend_condition_hash = hash_hashable(&self.spend_condition.to_hashable());
-
-        // Build the triple: [hash+(spend-condition) leaf+axis merkle-proof-hashable]
+        // Build the triple: [hash+(spend-condition) axis-constant merkle-proof-hashable]
         Hashable::triple(
             Hashable::Hash(spend_condition_hash),
-            Hashable::leaf_from_atom(&self.axis.to_le_bytes()),
+            Hashable::Hash(LOCK_MERKLE_AXIS_HASH.clone()),
             self.merkle_proof.to_hashable(),
         )
     }

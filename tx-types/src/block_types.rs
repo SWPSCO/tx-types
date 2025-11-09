@@ -85,11 +85,15 @@ pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMe
     // alias
     let hashable_form = Hashable::Hash(form.to_hash());
     let hashable_index = leaf_number;
-    let (axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
+    let (_computed_axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
     let spend_condition = traverse_lock(form);
     LockMerkleProof {
         spend_condition,
-        axis,
+        // Temporary compatibility: chain currently hardcodes the axis contribution
+        // to a fixed hash (see tx-engine-1.hoon lock-merkle-proof hashable).
+        // Keep emitting axis=1 until the protocol upgrade that reintroduces
+        // full-axis commitments lands on both Hoon and Rust implementations.
+        axis: 1,
         merkle_proof,
     }
 }
@@ -746,8 +750,5 @@ mod tests {
             "Block commitment hash should match Hoon output.\nGot:      {:x?}\nExpected: {:x?}",
             commitment_hash.values, expected_hash.values
         );
-
-        println!("✓ Block commitment hash matches Hoon output!");
-        println!("  Hash: {:x?}", commitment_hash.values);
     }
 }

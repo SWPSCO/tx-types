@@ -11,6 +11,7 @@ pub mod block_types;
 pub mod fee_calculator;
 pub mod generic_noun;
 pub mod inner_peeks;
+pub mod inspect;
 pub mod signer;
 pub mod transaction_types;
 pub mod transaction_types_v0;
@@ -57,6 +58,8 @@ pub use fee_calculator::{calculate_min_fee, BASE_FEE, MIN_FEE};
 pub use transaction_types::*;
 pub use transaction_types_v0::*;
 pub use transaction_types_v1::*;
+
+pub use inspect::{spends_dump, transaction_json, transaction_stats, TransactionStats};
 
 // Re-export tx-engine types
 pub use transaction_types::{Output, Outputs, Tx};

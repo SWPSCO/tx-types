@@ -4,7 +4,7 @@ use super::hashable::Hashable;
 use crate::transaction_types::Hash;
 use nockapp::noun::slab::NounSlab;
 use nockapp::Noun;
-use nockvm::noun::{Atom, T};
+use nockvm::noun::Atom;
 
 /// Goldilocks prime: 2^64 - 2^32 + 1
 pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
@@ -36,89 +36,31 @@ pub fn hash_noun_varlen(data: &[u8]) -> Hash {
     result
 }
 
-/// Hash two digests together (hash-ten-cell in Hoon)
-/// Takes two 5-element digests and produces a new 5-element digest
-///
-/// The Hoon implementation:
-/// 1. Creates a ten-cell from the two 5-element hashes
-/// 2. Calls leaf-sequence:shape to flatten it
-/// 3. Hashes the flattened sequence with hash-10
-///
-/// We create a list of 10 values and use the specific hash_10 function
+/// Hash two digests together (hash-ten-cell in Hoon).
 pub fn hash_ten_cell(left: Hash, right: Hash) -> Hash {
     use super::tip5::Tip5Hasher;
     use nockvm::noun::Cell;
 
-    // Create a cell from the two hashes and hash it
     let mut slab: NounSlab = NounSlab::new();
+    let mut list = Atom::new(&mut slab, 0).as_noun();
 
-    // Create a Hoon list (right-associative linked list) of 10 values
-    // A list in Hoon is [a [b [c [d ... 0]]]]
-    let mut list = Atom::new(&mut slab, 0).as_noun(); // Start with nil (0)
-
-    // Add right hash values in reverse order (since we're building from the tail)
     for value in right.values.iter().rev() {
         let atom = Atom::new(&mut slab, *value).as_noun();
         list = Cell::new(&mut slab, atom, list).as_noun();
     }
 
-    // Add left hash values in reverse order
     for value in left.values.iter().rev() {
         let atom = Atom::new(&mut slab, *value).as_noun();
         list = Cell::new(&mut slab, atom, list).as_noun();
     }
 
-    // Use the specific hash_10 function for lists of 10 elements
     Tip5Hasher::hash_10(list).unwrap_or_else(|_| Hash { values: [0; 5] })
 }
 
 /// Recursively hash a Hashable structure
 /// This mirrors the Hoon hash-hashable function
 pub fn hash_hashable(h: &Hashable) -> Hash {
-    match h {
-        Hashable::Leaf(data) => {
-            // Hash raw data
-            hash_noun_varlen(data)
-        }
-        Hashable::Hash(digest) => {
-            // Already hashed, return as-is
-            digest.clone()
-        }
-        Hashable::Cell(left, right) => {
-            // Recursively hash both sides and combine
-            let left_hash = hash_hashable(left);
-            let right_hash = hash_hashable(right);
-            hash_ten_cell(left_hash, right_hash)
-        }
-        Hashable::List(items) => {
-            use super::tip5::Tip5Hasher;
-
-            // Hash each item recursively
-            let hashes: Vec<Hash> = items.iter().map(hash_hashable).collect();
-
-            // Convert list of hashes to a noun list structure
-            let mut slab: NounSlab = NounSlab::new();
-
-            // Build a list of hash nouns
-            let hash_nouns: Vec<_> = hashes
-                .iter()
-                .map(|hash| {
-                    let atoms = hash.values.map(|v| Atom::new(&mut slab, v).as_noun());
-                    T(&mut slab, &atoms)
-                })
-                .collect();
-
-            // Create a noun list
-            let list_noun = if hash_nouns.is_empty() {
-                Atom::new(&mut slab, 0).as_noun() // Empty list is 0
-            } else {
-                T(&mut slab, &hash_nouns)
-            };
-
-            // Hash the list using real TIP5
-            Tip5Hasher::hash_noun_varlen(list_noun).unwrap_or_else(|_| Hash { values: [0; 5] })
-        }
-    }
+    super::tip5::Tip5Hasher::hash_hashable(h).unwrap_or_else(|_| Hash { values: [0; 5] })
 }
 
 /// Convert a digest to a base58 string (for display)
