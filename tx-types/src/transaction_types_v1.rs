@@ -384,7 +384,8 @@ pub struct NoteData {
 
 impl NounEncode for NoteData {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        build_canonical_note_data_noun(alloc, &self.map)
+        // Preserve the exact ZMap layout so the jam matches tx-engine's molds.
+        self.map.to_noun(alloc)
     }
 }
 
@@ -559,15 +560,9 @@ pub struct RawTransactionV1 {
     pub spends: SpendsV1,
 }
 
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone, NounDecode, NounEncode)]
 pub struct SpendsV1 {
     pub map: ZMap<NName, Spend>,
-}
-
-impl NounEncode for SpendsV1 {
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        build_canonical_spends_noun(alloc, &self.map)
-    }
 }
 
 impl SpendsV1 {
@@ -604,7 +599,7 @@ impl SpendsV1 {
         hash_hashable(&self.to_hashable())
     }
 
-    /// Return the canonical spends noun jam used for hashing/debugging.
+    /// Return the raw spends noun jam used for hashing/debugging.
     pub fn jam_canonical(&self) -> Vec<u8> {
         let mut slab: NounSlab = NounSlab::new();
         let noun = build_canonical_spends_noun(&mut slab, &self.map);
