@@ -259,14 +259,14 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        let true_leaf = Hashable::leaf_from_atom([1u8]);
-        hash_hashable(&Hashable::cell(true_leaf, Hashable::Hash(lock)))
+        // Hoon uses leaf+& here, which is atom 0.
+        hash_hashable(&Hashable::cell(Hashable::null(), Hashable::Hash(lock)))
     }
 
     pub fn last_v1(source: Source) -> Hash {
-        let true_leaf = Hashable::leaf_from_atom([1u8]);
+        // Matches Hoon: :*  leaf+&  (hashable:^source source)  leaf+~
         hash_hashable(&Hashable::cell_chain([
-            true_leaf,
+            Hashable::null(),
             source.to_hashable(),
             Hashable::null(),
         ]))
