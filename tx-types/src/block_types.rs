@@ -1,15 +1,17 @@
-use chrono::{DateTime, Utc, TimeZone};
-use serde::{Deserialize, Serialize};
-use crate::transaction_types::*;
-use crate::collections::zset::ZSet;
 use crate::collections::zmap::ZMap;
+use crate::collections::zset::ZSet;
 use crate::hashing::hashable::Hashable;
-use crate::hashing::hasher::hash_hashable;
-use num_bigint::BigUint;
-use nockvm::noun::Noun;
-use nockapp::noun::slab::NounSlab;
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
+use crate::transaction_types::*;
+use crate::transaction_types_v0::*;
+use crate::transaction_types_v1::*;
 use bytes::Bytes;
+use chrono::{DateTime, TimeZone, Utc};
+use nockapp::noun::slab::NounSlab;
+use nockvm::noun::Noun;
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use num_bigint::BigUint;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Block Type Wrapper Types
@@ -23,23 +25,191 @@ pub struct Coinbase {
 
 impl Coinbase {
     pub fn new() -> Self {
-        Coinbase {
-            map: ZMap::new(),
-        }
+        Coinbase { map: ZMap::new() }
     }
 
     pub fn to_hashable(&self) -> Hashable {
         // Coinbase is a ZMap<Lock, Coins>
         // Delegate to ZMap's to_hashable which handles the tree structure
-        self.map.to_hashable(
-            |lock| lock.to_hashable(),
-            |coins| coins.to_hashable(),
-        )
+        self.map
+            .to_hashable(|lock| lock.to_hashable(), |coins| coins.to_hashable())
     }
 
     pub fn to_hash(&self) -> Hash {
         hash_hashable(&self.to_hashable())
     }
+}
+
+#[derive(Debug, Clone, NounDecode, NounEncode)]
+pub struct CoinbaseV1 {
+    pub map: ZMap<Hash, Coins>,
+}
+
+pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
+    let m = pkh_hashes.len() as u64;
+
+    let pkh = LockPrimitive {
+        header: "pkh".to_string(),
+        body: LockPrimitiveBody::Pkh(Pkh { m, h: pkh_hashes }),
+    };
+
+    let tim = LockPrimitive {
+        header: "tim".to_string(),
+        body: LockPrimitiveBody::Tim(Tim {
+            rel: TimelockRange {
+                min: Some(PageNumber { value: 100 }),
+                max: None,
+            },
+            abs: TimelockRange {
+                min: None,
+                max: None,
+            },
+        }),
+    };
+
+    let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
+
+    let lmp = build_lock_merkle_proof(lk, 1);
+    let root = lmp.merkle_proof.root;
+
+    NName::new_v1(
+        root,
+        Source {
+            p: parent_hash,
+            is_coinbase: true,
+        },
+    )
+}
+
+pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
+    // alias
+    let hashable_form = Hashable::Hash(form.to_hash());
+    let hashable_index = leaf_number;
+    let (_computed_axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
+    let spend_condition = traverse_lock(form);
+    LockMerkleProof {
+        spend_condition,
+        // Temporary compatibility: chain currently hardcodes the axis contribution
+        // to a fixed hash (see tx-engine-1.hoon lock-merkle-proof hashable).
+        // Keep emitting axis=1 until the protocol upgrade that reintroduces
+        // full-axis commitments lands on both Hoon and Rust implementations.
+        axis: 1,
+        merkle_proof,
+    }
+}
+
+/// Tree address composition (peg) - combines two axes into a single address
+///
+/// This function computes the composition of tree addresses in Nock.
+/// For example, peg(2, 3) = 5 (go left, then right)
+///
+/// The algorithm works by bit manipulation:
+/// - Take all bits of `a`
+/// - Take all bits of `b` except the leading 1
+/// - Concatenate them: [b without leading 1][a]
+fn peg(a: u64, b: u64) -> u64 {
+    assert!(a != 0, "peg: a must be non-zero");
+    assert!(b != 0, "peg: b must be non-zero");
+
+    // Find the number of bits in b
+    let b_bits = 64 - b.leading_zeros();
+
+    // The output has (a_bits + b_bits - 1) bits
+    // We remove the leading 1 from b and concatenate with all of a
+
+    // Mask to get b without its leading bit
+    let b_mask = (1u64 << (b_bits - 1)) - 1;
+    let b_without_leading = b & b_mask;
+
+    // Shift a left by (b_bits - 1) and OR with b_without_leading
+    (a << (b_bits - 1)) | b_without_leading
+}
+
+/// Count the number of leaves in a Hashable tree
+fn leaf_count(h: &Hashable) -> u64 {
+    match h {
+        // Non-cell cases: Leaf, Hash, and List all count as 1 leaf
+        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => 1,
+        // Cell case: sum of left and right subtrees
+        Hashable::Cell(left, right) => leaf_count(left) + leaf_count(right),
+    }
+}
+
+/// Build a merkle proof for the leaf at the given index in a Hashable tree
+///
+/// This is the core recursive function that:
+/// - Returns the root hash, path (list of sibling hashes), and tree axis
+/// - Navigates left or right based on leaf counts
+/// - Builds the proof path as it recurses back up
+fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
+    match node {
+        // Base case: non-cell node (Leaf, Hash, or List)
+        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => {
+            let root = hash_hashable(node);
+            (root, Vec::new(), 1)
+        }
+
+        // Recursive case: Cell
+        Hashable::Cell(left, right) => {
+            let lc = leaf_count(left);
+
+            if index <= lc {
+                // The target leaf is in the left subtree
+                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(left, index);
+                let sibling = hash_hashable(right);
+
+                // Combine the recursive root with the sibling
+                let root = hash_ten_cell(rec_root, sibling.clone());
+
+                // Add sibling to the path
+                rec_path.push(sibling);
+
+                // Compute new axis: go left (2) then follow rec_axis
+                let axis = peg(2, rec_axis);
+
+                (root, rec_path, axis)
+            } else {
+                // The target leaf is in the right subtree
+                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(right, index - lc);
+                let sibling = hash_hashable(left);
+
+                // Combine sibling with the recursive root
+                let root = hash_ten_cell(sibling.clone(), rec_root);
+
+                // Add sibling to the path
+                rec_path.push(sibling);
+
+                // Compute new axis: go right (3) then follow rec_axis
+                let axis = peg(3, rec_axis);
+
+                (root, rec_path, axis)
+            }
+        }
+    }
+}
+
+/// Build a merkle proof for a hashable at a given index
+///
+/// Given a Hashable tree structure and a 1-based index, this returns:
+/// - The axis (tree address) of the leaf
+/// - A MerkleProof containing the root hash and sibling path
+///
+/// # Panics
+/// Panics if index is 0 (indices are 1-based)
+pub fn prove_hashable_by_index(hashable: Hashable, index: u64) -> (u64, MerkleProof) {
+    assert!(
+        index != 0,
+        "prove_hashable_by_index: index must be non-zero (1-based indexing)"
+    );
+
+    let (root, path, axis) = prove_hashable_go(&hashable, index);
+
+    (axis, MerkleProof { root, path })
+}
+
+pub fn traverse_lock(spend_condition: SpendCondition) -> SpendCondition {
+    // for coinbase we don't need to implement this
+    spend_condition
 }
 
 /// Wrapper for transaction ID set
@@ -50,9 +220,7 @@ pub struct TransactionIds {
 
 impl TransactionIds {
     pub fn new() -> Self {
-        TransactionIds {
-            set: ZSet::new(),
-        }
+        TransactionIds { set: ZSet::new() }
     }
 
     pub fn to_hashable(&self) -> Hashable {
@@ -116,59 +284,9 @@ impl PageMsg {
     }
 }
 
-// ============================================================================
-// Simple RPC Types (from main branch)
-// Used for high-level RPC responses and API
-// ============================================================================
-
-/// High-level block representation for RPC responses
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockPage {
-    pub height: u64,
-    pub hash: String,
-    pub parent_hash: String,
-    pub timestamp: DateTime<Utc>,
-    pub transactions: Vec<SimpleTransaction>,
-    pub target: String,
-    pub coinbase: Vec<CoinbaseRecipient>,
-}
-
-/// Simplified transaction for RPC responses
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransaction {
-    pub id: String,
-    pub inputs: Vec<SimpleTransactionInput>,
-    pub outputs: Vec<SimpleTransactionOutput>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransactionInput {
-    pub tx_id: String,
-    pub index: u32,
-    pub signature: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleTransactionOutput {
-    pub index: u32,
-    pub amount: u64,
-    pub address: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoinbaseRecipient {
-    pub address: String,
-    pub amount: u64,
-}
-
-// ============================================================================
-// Full Noun-Based Types (from nallux/rpc branch)
-// Used for direct noun decoding from blockchain data
-// ============================================================================
-
 /// Full page structure with noun decoding
 #[derive(Debug, Clone, NounDecode)]
-pub struct Page {
+pub struct PageV0 {
     pub digest: Hash,
     // everything below this is what is hashed for the digest: +.page
     pub pow: Pow,
@@ -190,6 +308,53 @@ pub struct Pages {
     pub pages: ZMap<Hash, Page>,
 }
 
+#[derive(Debug, Clone, NounDecode)]
+pub struct PageV1 {
+    pub version: u64,
+    pub digest: Hash,
+    // everything below this is what is hashed for the digest: +.page
+    pub pow: Pow,
+    // everything below this is what is hashed for the block commitment: +>.page
+    pub parent: Hash,
+    pub tx_ids: TransactionIds,
+    pub coinbase: CoinbaseV1,
+    pub timestamp: Timestamp,
+    pub epoch_counter: EpochCounter,
+    pub target: BigNum,
+    pub accumulated_work: BigNum,
+    pub height: PageNumber,
+    pub msg: PageMsg,
+}
+
+#[derive(Debug, Clone)]
+pub enum Page {
+    V0(PageV0),
+    V1(PageV1),
+}
+
+impl NounDecode for Page {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = PageV0::from_noun(noun) {
+            return Ok(Page::V0(v0));
+        }
+        if let Ok(v1) = PageV1::from_noun(noun) {
+            return Ok(Page::V1(v1));
+        }
+        Err(NounDecodeError::Custom(
+            "Page enum decode: unsupported format".to_string(),
+        ))
+    }
+}
+
+impl Page {
+    pub fn coinbase_notes(&self) -> Vec<NNote> {
+        match self {
+            Page::V0(v) => v.coinbase_notes(),
+            Page::V1(v) => v.coinbase_notes(),
+        }
+    }
+}
+
 /// Summarized page information
 #[derive(NounDecode, Debug, Clone)]
 pub struct PageSummary {
@@ -205,15 +370,25 @@ pub struct PageSummary {
 /// Proof-of-work stored as pre-jammed bytes
 #[derive(Debug, Clone)]
 pub struct Pow {
-    pub p: Bytes,
+    pub p: Option<Bytes>,
 }
 
 impl NounDecode for Pow {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        if noun.is_atom() {
+            return Ok(Pow { p: None });
+        }
+        let proof = noun
+            .as_cell()
+            .map_err(|_| NounDecodeError::ExpectedCell)?
+            .tail();
+
         let mut slab: NounSlab = NounSlab::new();
-        slab.copy_into(*noun);
+        slab.copy_into(proof);
         let noun_bytes: Bytes = slab.jam();
-        Ok(Pow { p: noun_bytes })
+        Ok(Pow {
+            p: Some(noun_bytes),
+        })
     }
 }
 
@@ -227,7 +402,9 @@ pub struct BigNum {
 impl BigNum {
     pub fn to_decimal_string(&self) -> String {
         let le_u32 = self.body.clone();
-        if le_u32.is_empty() { return "0".into(); }
+        if le_u32.is_empty() {
+            return "0".into();
+        }
         let bytes: Vec<u8> = le_u32.iter().flat_map(|w| w.to_le_bytes()).collect();
         BigUint::from_bytes_le(&bytes).to_str_radix(10)
     }
@@ -267,73 +444,18 @@ impl NounDecode for Timestamp {
         let base_urbit_epoch = 0x8000000cce9e0d80u64;
         let raw_value = u64::from_noun(noun)?;
         let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
-        let datetime_utc = Utc.timestamp_opt(unix_timestamp, 0)
+        let datetime_utc = Utc
+            .timestamp_opt(unix_timestamp, 0)
             .single()
             .ok_or_else(|| NounDecodeError::Custom("Invalid timestamp".to_string()))?;
-        Ok(Timestamp { value: datetime_utc })
-    }
-}
-
-// ============================================================================
-// Conversions and Utility Implementations
-// ============================================================================
-
-impl BlockPage {
-    /// Create a mock BlockPage for testing
-    pub fn mock(height: u64) -> Self {
-        BlockPage {
-            height,
-            hash: format!("hash_{}", height),
-            parent_hash: if height > 0 {
-                format!("hash_{}", height - 1)
-            } else {
-                "genesis".to_string()
-            },
-            timestamp: Utc::now(),
-            transactions: vec![],
-            target: "00000000ffff0000000000000000000000000000000000000000000000000000".to_string(),
-            coinbase: vec![
-                CoinbaseRecipient {
-                    address: "mock_miner".to_string(),
-                    amount: 5000000000,
-                }
-            ],
-        }
-    }
-}
-
-impl TryFrom<nockapp::Noun> for BlockPage {
-    type Error = String;
-
-    fn try_from(_noun: nockapp::Noun) -> Result<Self, Self::Error> {
-        // For now, return a simple mock-like structure
-        // TODO: Implement actual Noun parsing based on kernel's data format
-        Ok(BlockPage {
-            height: 0,
-            hash: "from_noun".to_string(),
-            parent_hash: "parent".to_string(),
-            timestamp: Utc::now(),
-            transactions: vec![],
-            target: "target".to_string(),
-            coinbase: vec![],
+        Ok(Timestamp {
+            value: datetime_utc,
         })
     }
 }
 
-// Conversion utilities between low-level and high-level types
-impl From<Transaction> for SimpleTransaction {
-    fn from(tx: Transaction) -> Self {
-        // TODO: Implement proper conversion from Transaction to SimpleTransaction
-        SimpleTransaction {
-            id: tx.name,
-            inputs: vec![],
-            outputs: vec![],
-        }
-    }
-}
-
-// Page coinbase functionality
-impl Page {
+// PageV0 coinbase functionality
+impl PageV0 {
     /// Generate coinbase reward notes for this page
     ///
     /// Converts the coinbase Coinbase wrapper into actual NNote instances
@@ -343,7 +465,10 @@ impl Page {
         let mut notes: Vec<NNote> = Vec::new();
 
         // Get the locks and their coinbase rewards
-        let locks: Vec<(Lock, Coins)> = self.coinbase.map.tap()
+        let locks: Vec<(Lock, Coins)> = self
+            .coinbase
+            .map
+            .tap()
             .into_iter()
             .map(|(lock, coins)| (lock, coins))
             .collect();
@@ -359,22 +484,18 @@ impl Page {
 
             let source = Source {
                 p: self.parent.clone(),
-                is_coinbase: true
+                is_coinbase: true,
             };
 
-            let name = NName::new_default(
-                lock.clone(),
-                source.clone(),
-                timelock.clone()
-            );
+            let name = NName::new_default_v0(lock.clone(), source.clone(), timelock.clone());
 
-            let note = NNote {
+            let note = NNote::V0(NNoteV0 {
                 meta,
                 name,
                 lock,
                 source,
-                assets
-            };
+                assets,
+            });
 
             notes.push(note);
         }
@@ -388,14 +509,24 @@ impl Page {
         const COINBASE_TIMELOCK_MIN: u64 = 100;
 
         let val = if height.value < FIRST_MONTH_COINBASE_MIN {
-            Some(PageNumber { value: FIRST_MONTH_COINBASE_MIN })
+            Some(PageNumber {
+                value: FIRST_MONTH_COINBASE_MIN,
+            })
         } else {
-            Some(PageNumber { value: COINBASE_TIMELOCK_MIN })
+            Some(PageNumber {
+                value: COINBASE_TIMELOCK_MIN,
+            })
         };
 
         Timelock::new_unchecked(Some((
-            TimelockRange { min: None, max: None },
-            TimelockRange { min: val, max: None },
+            TimelockRange {
+                min: None,
+                max: None,
+            },
+            TimelockRange {
+                min: val,
+                max: None,
+            },
         )))
     }
 
@@ -415,31 +546,17 @@ impl Page {
     pub fn to_hashable_block_commitment(&self) -> Hashable {
         // Build the structure using nested cells for the Hoon tuple
         // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
-        Hashable::cell(
+        Hashable::cell_chain([
             Hashable::Hash(self.parent.clone()),
-            Hashable::cell(
-                Hashable::Hash(self.tx_ids.to_hash()),
-                Hashable::cell(
-                    Hashable::Hash(self.coinbase.to_hash()),
-                    Hashable::cell(
-                        self.timestamp.to_hashable(),
-                        Hashable::cell(
-                            self.epoch_counter.to_hashable(),
-                            Hashable::cell(
-                                self.target.to_hashable(),
-                                Hashable::cell(
-                                    self.accumulated_work.to_hashable(),
-                                    Hashable::cell(
-                                        self.height.to_hashable(),
-                                        self.msg.to_hashable()
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        )
+            Hashable::Hash(self.tx_ids.to_hash()),
+            Hashable::Hash(self.coinbase.to_hash()),
+            self.timestamp.to_hashable(),
+            self.epoch_counter.to_hashable(),
+            self.target.to_hashable(),
+            self.accumulated_work.to_hashable(),
+            self.height.to_hashable(),
+            self.msg.to_hashable(),
+        ])
     }
 
     /// Hash the block commitment to produce the commitment hash
@@ -448,6 +565,69 @@ impl Page {
     /// This is the hash of the block commitment structure (everything after PoW)
     pub fn hash_block_commitment(&self) -> Hash {
         hash_hashable(&self.to_hashable_block_commitment())
+    }
+}
+
+impl PageV1 {
+    pub fn coinbase_notes(&self) -> Vec<NNote> {
+        let mut notes: Vec<NNote> = Vec::new();
+        // =/  cb-split=coinbase-split  ~(coinbase get:^page page)
+        let cb = self.coinbase.map.tap().into_iter();
+        /*
+        %+  turn  ~(tap z-in ~(key z-by +.cb))
+        |=  h=hash:t
+        (new:coinbase:t pag (~(put z-in *(z-set hash:t)) h))
+        */
+        let pkh_hashes: Vec<Hash> = cb.clone().map(|(hash, _)| hash).collect();
+        for h in pkh_hashes.clone() {
+            let vec_wrapped_hash = vec![h];
+            // sum rewards for all provided hashes
+            /*
+            =/  reward=coins
+            %+  roll  ~(tap z-in pkh-hashes)
+            |=  [h=hash acc=coins]
+            (add acc (~(got z-by +.cb-split) h))
+            */
+
+            let mut reward_sum: u64 = 0;
+
+            for hash in vec_wrapped_hash.clone() {
+                for (key, value) in cb.clone() {
+                    if key == hash {
+                        reward_sum += value.value;
+                    }
+                }
+            }
+
+            let assets = Coins { value: reward_sum };
+
+            let mut name_hashes = ZSet::new();
+            for hash in vec_wrapped_hash.clone() {
+                name_hashes.put(hash);
+            }
+
+            let name = make_name(name_hashes, self.parent.clone());
+
+            notes.push(NNote::V1(NNoteV1 {
+                version: 1,
+                origin_page: self.height,
+                name,
+                note_data: NoteData { map: ZMap::new() },
+                assets,
+            }));
+        }
+        /*
+        %*  .  *nnote-1:v1
+        version      %1
+        origin-page  ~(height get:^page page)
+        name         (make-name pkh-hashes ~(parent get:^page page))
+        note-data    *(z-map @tas *)
+        assets       reward
+        ==
+
+        */
+
+        notes
     }
 }
 
@@ -499,12 +679,14 @@ mod tests {
         let coinbase = Coinbase { map: coinbase_map };
 
         // Create other page fields matching Hoon output
-        let parent = Hash { values: [0x1, 0x2, 0x3, 0x4, 0x5] };
+        let parent = Hash {
+            values: [0x1, 0x2, 0x3, 0x4, 0x5],
+        };
         let tx_ids = TransactionIds::new();
 
         // Timestamp: 1704067200 is Jan 1, 2024 00:00:00 UTC
         let timestamp = Timestamp {
-            value: chrono::Utc.timestamp_opt(1704067200, 0).unwrap()
+            value: chrono::Utc.timestamp_opt(1704067200, 0).unwrap(),
         };
 
         let epoch_counter = EpochCounter::new(42);
@@ -513,8 +695,8 @@ mod tests {
         let target = BigNum {
             header: "bn".to_string(),
             body: vec![
-                4293656576, 3932159, 4287102976, 11796479, 4281597952,
-                11796479, 4287102976, 3932159, 4293656576, 262143
+                4293656576, 3932159, 4287102976, 11796479, 4281597952, 11796479, 4287102976,
+                3932159, 4293656576, 262143,
             ],
         };
 
@@ -522,8 +704,8 @@ mod tests {
         let accumulated_work = BigNum {
             header: "bn".to_string(),
             body: vec![
-                4293656576, 3932159, 4287102976, 11796479, 4281597952,
-                11796479, 4287102976, 3932159, 4293656576, 262143
+                4293656576, 3932159, 4287102976, 11796479, 4281597952, 11796479, 4287102976,
+                3932159, 4293656576, 262143,
             ],
         };
 
@@ -532,8 +714,12 @@ mod tests {
 
         // Create the page with all fields
         let page = Page {
-            digest: Hash { values: [0xa, 0xb, 0xc, 0xd, 0xe] },
-            pow: Pow { p: bytes::Bytes::new() },
+            digest: Hash {
+                values: [0xa, 0xb, 0xc, 0xd, 0xe],
+            },
+            pow: Pow {
+                p: bytes::Bytes::new(),
+            },
             parent,
             tx_ids,
             coinbase,
@@ -556,7 +742,7 @@ mod tests {
                 0xeeaafb68d3749196,
                 0x3dc939cfc714f6f6,
                 0x58c1fef56a1656f0,
-            ]
+            ],
         };
 
         assert_eq!(
@@ -564,8 +750,5 @@ mod tests {
             "Block commitment hash should match Hoon output.\nGot:      {:x?}\nExpected: {:x?}",
             commitment_hash.values, expected_hash.values
         );
-
-        println!("✓ Block commitment hash matches Hoon output!");
-        println!("  Hash: {:x?}", commitment_hash.values);
     }
 }

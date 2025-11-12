@@ -2,7 +2,6 @@
 ///
 /// This module contains format conversion functions used by both
 /// signing and verification operations.
-
 use crate::transaction_types::T8;
 
 /// Convert T8 to 32-byte big-endian array
@@ -43,15 +42,15 @@ mod tests {
         // Test with known T8 value
         let t8 = T8 {
             values: [
-                0xbbbb_cccc,  // LSW
+                0xbbbb_cccc, // LSW
                 0x9999_aaaa,
                 0x7777_8888,
                 0x5555_6666,
                 0x3333_4444,
                 0x1111_2222,
                 0x9abc_def0,
-                0x1234_5678,  // MSW
-            ]
+                0x1234_5678, // MSW
+            ],
         };
 
         let be32 = t8_to_be32(&t8);

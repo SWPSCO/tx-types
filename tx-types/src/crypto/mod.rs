@@ -4,15 +4,14 @@
 /// - Cheetah elliptic curve over F^6 extension field
 /// - Schnorr signatures with TIP5 challenge generation
 /// - SLIP-10 hierarchical deterministic key derivation
-
 pub mod cheetah;
 pub mod slip10;
 pub mod utils;
 
 // Re-export main types for convenience
-pub use cheetah::{CheetahPoint, F6Element};
-pub use slip10::{ExtendedKey, master_from_seed, master_from_mnemonic};
 pub use crate::signer::schnorr_sign_digest;
+pub use cheetah::{CheetahPoint, F6Element};
+pub use slip10::{master_from_mnemonic, master_from_seed, ExtendedKey};
 
 /// Cryptographic errors
 #[derive(Debug, Clone)]
