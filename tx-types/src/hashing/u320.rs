@@ -28,7 +28,8 @@ impl U320 {
         let remainder = &self.inner % &p;
 
         // Convert remainder to u64 - it must fit since it's mod p
-        let remainder_u64: u64 = remainder.try_into()
+        let remainder_u64: u64 = remainder
+            .try_into()
             .expect("Remainder mod Goldilocks prime should fit in u64");
 
         (U320 { inner: quotient }, remainder_u64)

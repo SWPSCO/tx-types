@@ -107,27 +107,16 @@ impl SeedV0 {
         // First element is the hashable-unit for output-source
         let output_source_hashable = match &self.output_source {
             None => Hashable::null(), // ?~  s  leaf+~
-            Some(source) => {
-                // :-  leaf+~
-                // (hashable u.s)
-                Hashable::cell(Hashable::null(), source.to_hashable())
-            }
+            Some(source) => Hashable::cell_chain([Hashable::null(), source.to_hashable()]),
         };
 
-        // Create the 5-tuple structure
-        Hashable::cell(
+        Hashable::cell_chain([
             output_source_hashable,
-            Hashable::cell(
-                self.recipient.to_hashable(),
-                Hashable::cell(
-                    to_hashable_timelock_intent(&self.timelock_intent),
-                    Hashable::cell(
-                        self.gift.to_hashable(),
-                        Hashable::Hash(self.parent_hash.clone()),
-                    ),
-                ),
-            ),
-        )
+            self.recipient.to_hashable(),
+            to_hashable_timelock_intent(&self.timelock_intent),
+            self.gift.to_hashable(),
+            Hashable::Hash(self.parent_hash.clone()),
+        ])
     }
 }
 

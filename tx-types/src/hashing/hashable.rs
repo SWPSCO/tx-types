@@ -1,11 +1,15 @@
+use crate::transaction_types::Hash;
+use nockapp::noun::slab::NounSlab;
+use nockapp::utils::make_tas;
+use nockapp::{AtomExt, Bytes};
+use nockvm::noun::{Noun, D, T};
+use noun_serde::{NounDecode, NounEncode};
 /// Hashable enum mirroring Hoon's hashable type
 /// This is an intermediate representation for hashing complex structures
-
 use std::fmt::Debug;
-use crate::transaction_types::Hash;
 
 /// Hashable representation matching Hoon's hashable type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hashable {
     /// Jammed noun bytes to be hashed (equivalent to [%leaf p=*])
     ///
@@ -44,8 +48,8 @@ impl Hashable {
     /// the jammed bytes in a Leaf variant.
     pub fn leaf_from_atom(data: impl AsRef<[u8]>) -> Self {
         use nockapp::noun::slab::NounSlab;
+        use nockapp::{AtomExt, Bytes};
         use nockvm::noun::Atom;
-        use nockapp::{Bytes, AtomExt};
 
         let bytes = data.as_ref();
         let mut slab: NounSlab = NounSlab::new();
@@ -67,6 +71,14 @@ impl Hashable {
         };
 
         // Set the noun as the slab root and jam it
+        slab.set_root(noun);
+        Hashable::Leaf(slab.jam().to_vec())
+    }
+
+    /// Create a leaf from an @tas (ASCII) string, matching Hoon's `leaf+%foo`.
+    pub fn leaf_from_tas(text: &str) -> Self {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = make_tas(&mut slab, text).as_noun();
         slab.set_root(noun);
         Hashable::Leaf(slab.jam().to_vec())
     }
@@ -100,7 +112,7 @@ impl Hashable {
     pub fn triple(first: Hashable, second: Hashable, third: Hashable) -> Self {
         Hashable::Cell(
             Box::new(first),
-            Box::new(Hashable::Cell(Box::new(second), Box::new(third)))
+            Box::new(Hashable::Cell(Box::new(second), Box::new(third))),
         )
     }
 
@@ -108,4 +120,138 @@ impl Hashable {
     pub fn list(items: Vec<Hashable>) -> Self {
         Hashable::List(items)
     }
+
+    /// Build a proper Hoon list (right-associated cells ending in null)
+    /// from the provided hashable elements.
+    pub fn cons_list<I>(elements: I) -> Self
+    where
+        I: IntoIterator<Item = Hashable>,
+    {
+        let mut tail = Hashable::null();
+        let mut items: Vec<Hashable> = elements.into_iter().collect();
+        while let Some(elem) = items.pop() {
+            tail = Hashable::cell(elem, tail);
+        }
+        tail
+    }
+
+    /// Build nested cells without a terminating null (Hoon `:* ... ==`).
+    ///
+    /// For example, `cell_chain([a, b, c, d])` produces `[a [b [c d]]]`.
+    /// If no elements are provided, this returns `Hashable::null()`.
+    pub fn cell_chain<I>(elements: I) -> Self
+    where
+        I: IntoIterator<Item = Hashable>,
+    {
+        let mut items: Vec<Hashable> = elements.into_iter().collect();
+        match items.pop() {
+            None => Hashable::null(),
+            Some(mut acc) => {
+                while let Some(elem) = items.pop() {
+                    acc = Hashable::cell(elem, acc);
+                }
+                acc
+            }
+        }
+    }
+
+    /// Convert this hashable structure into a Hoon noun representation.
+    /// Primarily used for debugging to compare with the wallet's hashable output.
+    pub fn to_noun(&self, slab: &mut NounSlab) -> Noun {
+        match self {
+            Hashable::Leaf(bytes) => {
+                let tag = make_tas(slab, "leaf").as_noun();
+                let mut cue_slab: NounSlab = NounSlab::new();
+                let value_noun = cue_slab
+                    .cue_into(Bytes::copy_from_slice(bytes))
+                    .unwrap_or_else(|_| D(0));
+                let copied = slab.copy_into(value_noun);
+                T(slab, &[tag, copied])
+            }
+            Hashable::Hash(hash) => {
+                let tag = make_tas(slab, "hash").as_noun();
+                let hash_noun = hash.to_noun(slab);
+                T(slab, &[tag, hash_noun])
+            }
+            Hashable::Cell(left, right) => {
+                let l = left.to_noun(slab);
+                let r = right.to_noun(slab);
+                T(slab, &[l, r])
+            }
+            Hashable::List(items) => {
+                let tag = make_tas(slab, "list").as_noun();
+                let mut tail = D(0);
+                for item in items.iter().rev() {
+                    let noun = item.to_noun(slab);
+                    tail = T(slab, &[noun, tail]);
+                }
+                T(slab, &[tag, tail])
+            }
+        }
+    }
+
+    /// Serialize the hashable structure into jammed bytes of the underlying noun.
+    pub fn to_jam(&self) -> Vec<u8> {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = self.to_noun(&mut slab);
+        slab.set_root(noun);
+        slab.jam().to_vec()
+    }
+
+    /// Reconstruct a `Hashable` structure from a noun that follows the Hoon
+    /// `%hashable` encoding (used by tx-engine and TIP5 hashing).
+    pub fn from_noun(noun: &Noun) -> Result<Self, String> {
+        if let Ok(cell) = noun.as_cell() {
+            if let Ok(tag_atom) = cell.head().as_atom() {
+                if tag_atom.eq_bytes(b"leaf") {
+                    let jam = jam_noun(cell.tail());
+                    return Ok(Hashable::Leaf(jam));
+                } else if tag_atom.eq_bytes(b"hash") {
+                    let digest =
+                        Hash::from_noun(&cell.tail()).map_err(|e| format!("hash decode: {e}"))?;
+                    return Ok(Hashable::Hash(digest));
+                } else if tag_atom.eq_bytes(b"list") {
+                    let items = decode_hashable_list(cell.tail())?;
+                    return Ok(Hashable::List(items));
+                }
+            }
+
+            Ok(Hashable::Cell(
+                Box::new(Hashable::from_noun(&cell.head())?),
+                Box::new(Hashable::from_noun(&cell.tail())?),
+            ))
+        } else {
+            Err("hashable noun must be a cell".into())
+        }
+    }
+}
+
+fn jam_noun(noun: Noun) -> Vec<u8> {
+    let mut slab: NounSlab = NounSlab::new();
+    let copied = slab.copy_into(noun);
+    slab.set_root(copied);
+    slab.jam().to_vec()
+}
+
+fn decode_hashable_list(noun: Noun) -> Result<Vec<Hashable>, String> {
+    let mut items = Vec::new();
+    let mut cursor = noun;
+    loop {
+        if let Ok(atom) = cursor.as_atom() {
+            let end = atom
+                .as_u64()
+                .map_err(|e| format!("list terminator decode: {e}"))?;
+            if end != 0 {
+                return Err("hashable list not properly terminated".into());
+            }
+            break;
+        }
+
+        let cell = cursor
+            .as_cell()
+            .map_err(|_| "expected cell while decoding hashable list".to_string())?;
+        items.push(Hashable::from_noun(&cell.head())?);
+        cursor = cell.tail();
+    }
+    Ok(items)
 }

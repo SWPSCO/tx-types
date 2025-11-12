@@ -224,13 +224,12 @@ impl NName {
     /// ==
     pub fn first_v0(owners: Lock, has_timelock: bool) -> Hash {
         let value = if has_timelock { 0u64 } else { 1u64 };
-        let hashable = Hashable::cell(
+        let hashable = Hashable::cell_chain([
             Hashable::null(),
-            Hashable::cell(
-                Hashable::leaf_from_atom(&value.to_le_bytes()),
-                Hashable::cell(Hashable::Hash(owners.to_hash()), Hashable::null()),
-            ),
-        );
+            Hashable::leaf_from_atom(&value.to_le_bytes()),
+            Hashable::Hash(owners.to_hash()),
+            Hashable::null(),
+        ]);
         hash_hashable(&hashable)
     }
 
@@ -244,13 +243,12 @@ impl NName {
     ///     leaf+~                          :: second pact
     /// ==
     pub fn last_v0(source: Source, timelock: Timelock) -> Hash {
-        let hashable = Hashable::cell(
+        let hashable = Hashable::cell_chain([
             Hashable::null(),
-            Hashable::cell(
-                Hashable::Hash(source.to_hash()),
-                Hashable::cell(Hashable::Hash(timelock.to_hash()), Hashable::null()),
-            ),
-        );
+            Hashable::Hash(source.to_hash()),
+            Hashable::Hash(timelock.to_hash()),
+            Hashable::null(),
+        ]);
         hash_hashable(&hashable)
     }
 
@@ -261,14 +259,17 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        hash_hashable(&Hashable::cell(Hashable::null(), Hashable::Hash(lock)))
+        let true_leaf = Hashable::leaf_from_atom([1u8]);
+        hash_hashable(&Hashable::cell(true_leaf, Hashable::Hash(lock)))
     }
 
     pub fn last_v1(source: Source) -> Hash {
-        hash_hashable(&Hashable::cell(
+        let true_leaf = Hashable::leaf_from_atom([1u8]);
+        hash_hashable(&Hashable::cell_chain([
+            true_leaf,
+            source.to_hashable(),
             Hashable::null(),
-            Hashable::cell(source.to_hashable(), Hashable::null()),
-        ))
+        ]))
     }
 
     pub fn display(&self) -> Vec<String> {
@@ -887,8 +888,6 @@ impl Spend {
     ///   ==
     /// ```
     pub fn to_hashable(&self) -> Hashable {
-        // In Hoon, leaf+%0 means a leaf containing the atom 0
-        // [leaf+%0 body] is a cell of [Leaf(0), body-hashable]
         let version_leaf = Hashable::leaf_from_atom(&self.version.to_le_bytes());
 
         // Pair with the body's hashable: [version-leaf body-hashable]

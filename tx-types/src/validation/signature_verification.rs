@@ -1,3 +1,6 @@
+use crate::crypto::cheetah::point::CheetahPoint;
+use crate::crypto::utils::{be32_lt, t8_to_be32, trunc_g_order_to_be32, CHEETAH_N};
+use crate::hashing::hasher::hash_transcript_list;
 /// Schnorr signature verification over the Cheetah curve
 ///
 /// This module implements the verification algorithm for Schnorr signatures
@@ -5,16 +8,7 @@
 ///
 /// We verify by computing R = s·G - e·P and checking that the recomputed
 /// challenge e' = TIP5([R, P, message]) matches the provided challenge e.
-
-use crate::transaction_types::{SchnorrPubkey, SchnorrSignature, Hash};
-use crate::crypto::cheetah::point::CheetahPoint;
-use crate::crypto::utils::{
-    t8_to_be32,
-    trunc_g_order_to_be32,
-    be32_lt,
-    CHEETAH_N,
-};
-use crate::hashing::hasher::hash_transcript_list;
+use crate::transaction_types::{Hash, SchnorrPubkey, SchnorrSignature};
 use ibig::UBig;
 
 /// Verify a Schnorr signature over the Cheetah curve
@@ -70,8 +64,7 @@ pub fn schnorr_verify_digest(
     let sg = CheetahPoint::generator().scalar_mul(&s_scalar);
 
     // Then compute e·P
-    let ep = CheetahPoint::from_schnorr_pubkey(&public_key)
-        .scalar_mul(&e_scalar);
+    let ep = CheetahPoint::from_schnorr_pubkey(&public_key).scalar_mul(&e_scalar);
 
     // Then R = s·G - e·P
     let r_point = sg.add(&ep.neg());
@@ -102,9 +95,9 @@ pub fn schnorr_verify_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signer::schnorr_sign_digest;
     use crate::crypto::cheetah::point::cheetah_pub_from_sk;
-    use crate::transaction_types::{T8, F6LT};
+    use crate::signer::schnorr_sign_digest;
+    use crate::transaction_types::{F6LT, T8};
 
     #[test]
     fn test_round_trip_signature_verification() {
@@ -119,20 +112,26 @@ mod tests {
                 0x1111_2222,
                 0x9abc_def0,
                 0x1234_5678,
-            ]
+            ],
         };
 
         // Derive public key
         let sk_be = t8_to_be32(&secret_key);
         let pk_coords = cheetah_pub_from_sk(sk_be);
         let public_key = SchnorrPubkey {
-            x: F6LT { values: pk_coords[0] },
-            y: F6LT { values: pk_coords[1] },
+            x: F6LT {
+                values: pk_coords[0],
+            },
+            y: F6LT {
+                values: pk_coords[1],
+            },
             inf: false,
         };
 
         // Create a message
-        let message = Hash { values: [1, 2, 3, 4, 5] };
+        let message = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
 
         // Sign the message
         let (chal, sig) = schnorr_sign_digest(secret_key, public_key.clone(), message.clone());
@@ -143,7 +142,8 @@ mod tests {
         };
 
         // Verify the signature
-        let is_valid = schnorr_verify_digest(public_key.clone(), message.clone(), signature.clone());
+        let is_valid =
+            schnorr_verify_digest(public_key.clone(), message.clone(), signature.clone());
         assert!(is_valid, "Valid signature should verify successfully");
 
         println!("✓ Round-trip signature verification works");
@@ -154,20 +154,32 @@ mod tests {
         // Create and sign a message
         let secret_key = T8 {
             values: [
-                0xbbbb_cccc, 0x9999_aaaa, 0x7777_8888, 0x5555_6666,
-                0x3333_4444, 0x1111_2222, 0x9abc_def0, 0x1234_5678,
-            ]
+                0xbbbb_cccc,
+                0x9999_aaaa,
+                0x7777_8888,
+                0x5555_6666,
+                0x3333_4444,
+                0x1111_2222,
+                0x9abc_def0,
+                0x1234_5678,
+            ],
         };
 
         let sk_be = t8_to_be32(&secret_key);
         let pk_coords = cheetah_pub_from_sk(sk_be);
         let public_key = SchnorrPubkey {
-            x: F6LT { values: pk_coords[0] },
-            y: F6LT { values: pk_coords[1] },
+            x: F6LT {
+                values: pk_coords[0],
+            },
+            y: F6LT {
+                values: pk_coords[1],
+            },
             inf: false,
         };
 
-        let message = Hash { values: [1, 2, 3, 4, 5] };
+        let message = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
         let (mut chal, sig) = schnorr_sign_digest(secret_key, public_key.clone(), message.clone());
 
         // Modify the challenge
@@ -190,20 +202,32 @@ mod tests {
         // Create and sign a message
         let secret_key = T8 {
             values: [
-                0xbbbb_cccc, 0x9999_aaaa, 0x7777_8888, 0x5555_6666,
-                0x3333_4444, 0x1111_2222, 0x9abc_def0, 0x1234_5678,
-            ]
+                0xbbbb_cccc,
+                0x9999_aaaa,
+                0x7777_8888,
+                0x5555_6666,
+                0x3333_4444,
+                0x1111_2222,
+                0x9abc_def0,
+                0x1234_5678,
+            ],
         };
 
         let sk_be = t8_to_be32(&secret_key);
         let pk_coords = cheetah_pub_from_sk(sk_be);
         let public_key = SchnorrPubkey {
-            x: F6LT { values: pk_coords[0] },
-            y: F6LT { values: pk_coords[1] },
+            x: F6LT {
+                values: pk_coords[0],
+            },
+            y: F6LT {
+                values: pk_coords[1],
+            },
             inf: false,
         };
 
-        let message = Hash { values: [1, 2, 3, 4, 5] };
+        let message = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
         let (chal, mut sig) = schnorr_sign_digest(secret_key, public_key.clone(), message.clone());
 
         // Modify the signature
@@ -226,20 +250,32 @@ mod tests {
         // Create and sign a message
         let secret_key = T8 {
             values: [
-                0xbbbb_cccc, 0x9999_aaaa, 0x7777_8888, 0x5555_6666,
-                0x3333_4444, 0x1111_2222, 0x9abc_def0, 0x1234_5678,
-            ]
+                0xbbbb_cccc,
+                0x9999_aaaa,
+                0x7777_8888,
+                0x5555_6666,
+                0x3333_4444,
+                0x1111_2222,
+                0x9abc_def0,
+                0x1234_5678,
+            ],
         };
 
         let sk_be = t8_to_be32(&secret_key);
         let pk_coords = cheetah_pub_from_sk(sk_be);
         let public_key = SchnorrPubkey {
-            x: F6LT { values: pk_coords[0] },
-            y: F6LT { values: pk_coords[1] },
+            x: F6LT {
+                values: pk_coords[0],
+            },
+            y: F6LT {
+                values: pk_coords[1],
+            },
             inf: false,
         };
 
-        let message = Hash { values: [1, 2, 3, 4, 5] };
+        let message = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
         let (chal, sig) = schnorr_sign_digest(secret_key, public_key.clone(), message.clone());
 
         let signature = SchnorrSignature {
@@ -248,7 +284,9 @@ mod tests {
         };
 
         // Verify with different message
-        let wrong_message = Hash { values: [1, 2, 3, 4, 6] }; // Changed last element
+        let wrong_message = Hash {
+            values: [1, 2, 3, 4, 6],
+        }; // Changed last element
 
         let is_valid = schnorr_verify_digest(public_key, wrong_message, signature);
         assert!(!is_valid, "Wrong message should fail verification");
@@ -261,20 +299,32 @@ mod tests {
         // Create and sign a message
         let secret_key = T8 {
             values: [
-                0xbbbb_cccc, 0x9999_aaaa, 0x7777_8888, 0x5555_6666,
-                0x3333_4444, 0x1111_2222, 0x9abc_def0, 0x1234_5678,
-            ]
+                0xbbbb_cccc,
+                0x9999_aaaa,
+                0x7777_8888,
+                0x5555_6666,
+                0x3333_4444,
+                0x1111_2222,
+                0x9abc_def0,
+                0x1234_5678,
+            ],
         };
 
         let sk_be = t8_to_be32(&secret_key);
         let pk_coords = cheetah_pub_from_sk(sk_be);
         let public_key = SchnorrPubkey {
-            x: F6LT { values: pk_coords[0] },
-            y: F6LT { values: pk_coords[1] },
+            x: F6LT {
+                values: pk_coords[0],
+            },
+            y: F6LT {
+                values: pk_coords[1],
+            },
             inf: false,
         };
 
-        let message = Hash { values: [1, 2, 3, 4, 5] };
+        let message = Hash {
+            values: [1, 2, 3, 4, 5],
+        };
         let (chal, sig) = schnorr_sign_digest(secret_key, public_key.clone(), message.clone());
 
         let signature = SchnorrSignature {
@@ -285,15 +335,25 @@ mod tests {
         // Create a different public key
         let wrong_secret_key = T8 {
             values: [
-                0x1234_5678, 0x9abc_def0, 0x1111_2222, 0x3333_4444,
-                0x5555_6666, 0x7777_8888, 0x9999_aaaa, 0xbbbb_cccc,
-            ]
+                0x1234_5678,
+                0x9abc_def0,
+                0x1111_2222,
+                0x3333_4444,
+                0x5555_6666,
+                0x7777_8888,
+                0x9999_aaaa,
+                0xbbbb_cccc,
+            ],
         };
         let wrong_sk_be = t8_to_be32(&wrong_secret_key);
         let wrong_pk_coords = cheetah_pub_from_sk(wrong_sk_be);
         let wrong_public_key = SchnorrPubkey {
-            x: F6LT { values: wrong_pk_coords[0] },
-            y: F6LT { values: wrong_pk_coords[1] },
+            x: F6LT {
+                values: wrong_pk_coords[0],
+            },
+            y: F6LT {
+                values: wrong_pk_coords[1],
+            },
             inf: false,
         };
 

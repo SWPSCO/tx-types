@@ -4,8 +4,337 @@ use crate::collections::zset::DorTip as ZSetDorTip;
 use crate::collections::{ZMap, ZSet};
 use crate::generic_noun::UntypedNoun;
 use crate::transaction_types::*;
+use nockapp::noun::slab::{CueError, NounSlab};
+use nockapp::utils::make_tas;
+use nockapp::Bytes;
+use nockvm::noun::{Atom, Noun, D};
+use once_cell::sync::Lazy;
 
 use crate::hashing::hashable::Hashable;
+use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
+use crate::hashing::raw::{
+    compute_tx_id_v1_from_raw_noun, hashable_note_data_from_raw, hashable_pkh_signature_direct,
+    hashable_pkh_signature_from_raw, hashable_seeds_from_raw, hashable_spend_from_raw,
+    hashable_spends_from_raw, hashable_witness_from_raw,
+};
+use crate::hashing::tip5::Tip5Hasher;
+
+static LOCK_MERKLE_AXIS_HASH: Lazy<Hash> = Lazy::new(|| {
+    Hash::from_b58("6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A")
+        .expect("valid lock merkle proof axis hash constant")
+});
+
+fn hashable_from_noun_recursive(noun: nockvm::noun::Noun) -> Hashable {
+    if let Ok(cell) = noun.as_cell() {
+        Hashable::cell(
+            hashable_from_noun_recursive(cell.head()),
+            hashable_from_noun_recursive(cell.tail()),
+        )
+    } else {
+        let atom = noun
+            .as_atom()
+            .expect("hashable_from_noun_recursive: expected atom or cell");
+        match atom.as_u64() {
+            Ok(val) => Hashable::leaf_from_atom(&val.to_le_bytes()),
+            Err(_) => {
+                let mut slab: NounSlab = NounSlab::new();
+                slab.copy_into(atom.as_noun());
+                Hashable::Leaf(slab.jam().to_vec())
+            }
+        }
+    }
+}
+
+fn hashable_from_untyped_noun(untyped: &UntypedNoun) -> Hashable {
+    let mut slab: NounSlab = NounSlab::new();
+    let noun = match slab.cue_into(untyped.p.clone()) {
+        Ok(noun) => noun,
+        Err(_) => return Hashable::Leaf(untyped.p.to_vec()),
+    };
+
+    hashable_from_noun_recursive(noun)
+}
+
+fn hashable_leaf_from_noun(noun: Noun) -> Hashable {
+    let mut slab: NounSlab = NounSlab::new();
+    let copy = slab.copy_into(noun);
+    slab.set_root(copy);
+    Hashable::Leaf(slab.jam().to_vec())
+}
+
+fn hashable_note_data_from_zmap(noun: Noun) -> Hashable {
+    if let Ok(atom) = noun.as_atom() {
+        if atom.as_u64().unwrap_or(1) == 0 {
+            return Hashable::null();
+        }
+    }
+
+    let cell = noun.as_cell().expect("note-data node should be a cell");
+    let node = cell.head();
+    let children = cell
+        .tail()
+        .as_cell()
+        .expect("note-data child tuple should be a cell");
+    let left = children.head();
+    let right = match children.tail().as_cell() {
+        Ok(right_cell) => right_cell.head(),
+        Err(_) => children.tail(),
+    };
+
+    let pair = node
+        .as_cell()
+        .expect("note-data key/value node should be a cell");
+    let key_noun = pair.head();
+    let value_noun = pair.tail();
+
+    let key_leaf = hashable_leaf_from_noun(key_noun);
+    let value_hashable = hashable_from_noun_recursive(value_noun);
+    let node_hashable = Hashable::cell(key_leaf, value_hashable);
+
+    Hashable::triple(
+        node_hashable,
+        hashable_note_data_from_zmap(left),
+        hashable_note_data_from_zmap(right),
+    )
+}
+
+pub fn hashable_spends_from_zmap(noun: Noun) -> Hashable {
+    if noun_is_null(noun) {
+        return Hashable::null();
+    }
+
+    let (node, left, right) = decompose_map(noun);
+    let (name_noun, spend_noun) = decompose_pair(node);
+
+    let name = NName::from_noun(&name_noun).expect("failed to decode spend name");
+    let spend = Spend::from_noun(&spend_noun).expect("failed to decode spend entry");
+
+    let node_hashable = Hashable::cell(name.to_hashable(), spend.to_hashable());
+
+    Hashable::triple(
+        node_hashable,
+        hashable_spends_from_zmap(left),
+        hashable_spends_from_zmap(right),
+    )
+}
+
+fn noun_is_null(noun: Noun) -> bool {
+    unsafe { noun.raw_equals(&D(0)) }
+}
+
+fn atom_trimmed_be(atom: Atom) -> Vec<u8> {
+    let mut bytes = atom.to_be_bytes();
+    let first_non_zero = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    if first_non_zero == bytes.len() {
+        vec![0]
+    } else {
+        bytes.split_off(first_non_zero)
+    }
+}
+
+fn nouns_equal(a: Noun, b: Noun) -> bool {
+    if unsafe { a.raw_equals(&b) } {
+        return true;
+    }
+
+    match (a.as_cell(), b.as_cell()) {
+        (Ok(ac), Ok(bc)) => nouns_equal(ac.head(), bc.head()) && nouns_equal(ac.tail(), bc.tail()),
+        (Err(_), Err(_)) => {
+            let a_atom = a.as_atom().expect("noun should be atom");
+            let b_atom = b.as_atom().expect("noun should be atom");
+            atom_trimmed_be(a_atom) == atom_trimmed_be(b_atom)
+        }
+        _ => false,
+    }
+}
+
+fn atom_less_than(a: Atom, b: Atom) -> bool {
+    let a_bytes = atom_trimmed_be(a);
+    let b_bytes = atom_trimmed_be(b);
+    match a_bytes.len().cmp(&b_bytes.len()) {
+        std::cmp::Ordering::Less => true,
+        std::cmp::Ordering::Greater => false,
+        std::cmp::Ordering::Equal => a_bytes < b_bytes,
+    }
+}
+
+fn less_than_hash(a: &[u64; 5], b: &[u64; 5]) -> bool {
+    for i in (0..=4).rev() {
+        if a[i] < b[i] {
+            return true;
+        } else if a[i] > b[i] {
+            return false;
+        }
+    }
+    false
+}
+
+fn tip_hash(noun: Noun) -> [u64; 5] {
+    Tip5Hasher::hash_noun_varlen(noun)
+        .map(|hash| hash.values)
+        .unwrap_or([0; 5])
+}
+
+fn double_tip_hash(noun: Noun) -> [u64; 5] {
+    let tip = tip_hash(noun);
+    let hash = Hash { values: tip };
+    hash_ten_cell(hash.clone(), hash).values
+}
+
+fn dor_tip_compare(a: Noun, b: Noun) -> bool {
+    if nouns_equal(a, b) {
+        return true;
+    }
+
+    match (a.as_cell(), b.as_cell()) {
+        (Ok(ac), Ok(bc)) => {
+            if nouns_equal(ac.head(), bc.head()) {
+                dor_tip_compare(ac.tail(), bc.tail())
+            } else {
+                dor_tip_compare(ac.head(), bc.head())
+            }
+        }
+        (Ok(_), Err(_)) => false,
+        (Err(_), Ok(_)) => false,
+        (Err(_), Err(_)) => {
+            let a_atom = a.as_atom().expect("noun should be atom");
+            let b_atom = b.as_atom().expect("noun should be atom");
+            atom_less_than(a_atom, b_atom)
+        }
+    }
+}
+
+fn gor_tip_compare(a: Noun, b: Noun) -> bool {
+    let a_tip = tip_hash(a);
+    let b_tip = tip_hash(b);
+    if a_tip == b_tip {
+        dor_tip_compare(a, b)
+    } else {
+        less_than_hash(&a_tip, &b_tip)
+    }
+}
+
+fn mor_tip_compare(a: Noun, b: Noun) -> bool {
+    let a_tip = double_tip_hash(a);
+    let b_tip = double_tip_hash(b);
+    if a_tip == b_tip {
+        dor_tip_compare(a, b)
+    } else {
+        less_than_hash(&a_tip, &b_tip)
+    }
+}
+
+fn decompose_map(noun: Noun) -> (Noun, Noun, Noun) {
+    let cell = noun.as_cell().expect("map node should be a cell");
+    let node = cell.head();
+    let tail = cell.tail();
+
+    if let Ok(children) = tail.as_cell() {
+        let left = children.head();
+        let right = children.tail();
+        (node, left, right)
+    } else {
+        (node, tail, D(0))
+    }
+}
+
+fn decompose_pair(noun: Noun) -> (Noun, Noun) {
+    let cell = noun.as_cell().expect("pair should be a cell");
+    let key = cell.head();
+    let value = cell.tail();
+    (key, value)
+}
+
+fn canonical_zmap_put<A: nockvm::noun::NounAllocator>(
+    alloc: &mut A,
+    map: Noun,
+    key: Noun,
+    value: Noun,
+) -> Noun {
+    if noun_is_null(map) {
+        let kv = nockvm::noun::T(alloc, &[key, value]);
+        return nockvm::noun::T(alloc, &[kv, D(0), D(0)]);
+    }
+
+    let (node, left, right) = decompose_map(map);
+    let (node_key, node_value) = decompose_pair(node);
+
+    if nouns_equal(key, node_key) {
+        if nouns_equal(value, node_value) {
+            map
+        } else {
+            let new_node = nockvm::noun::T(alloc, &[key, value]);
+            nockvm::noun::T(alloc, &[new_node, left, right])
+        }
+    } else if gor_tip_compare(key, node_key) {
+        let new_left = canonical_zmap_put(alloc, left, key, value);
+        let (new_left_node, new_left_left, new_left_right) = decompose_map(new_left);
+        let (new_left_key, _) = decompose_pair(new_left_node);
+
+        if mor_tip_compare(node_key, new_left_key) {
+            nockvm::noun::T(alloc, &[node, new_left, right])
+        } else {
+            let new_right_branch = nockvm::noun::T(alloc, &[node, new_left_right, right]);
+            nockvm::noun::T(alloc, &[new_left_node, new_left_left, new_right_branch])
+        }
+    } else {
+        let new_right = canonical_zmap_put(alloc, right, key, value);
+        let (new_right_node, new_right_left, new_right_right) = decompose_map(new_right);
+        let (new_right_key, _) = decompose_pair(new_right_node);
+
+        if mor_tip_compare(node_key, new_right_key) {
+            nockvm::noun::T(alloc, &[node, left, new_right])
+        } else {
+            let new_left_branch = nockvm::noun::T(alloc, &[node, left, new_right_left]);
+            nockvm::noun::T(alloc, &[new_right_node, new_left_branch, new_right_right])
+        }
+    }
+}
+
+fn build_canonical_zmap_from_pairs<A, I, K, V, KF, VF>(
+    alloc: &mut A,
+    entries: I,
+    mut key_fn: KF,
+    mut value_fn: VF,
+) -> Noun
+where
+    A: nockvm::noun::NounAllocator,
+    I: IntoIterator<Item = (K, V)>,
+    KF: FnMut(&mut A, K) -> Noun,
+    VF: FnMut(&mut A, V) -> Noun,
+{
+    let mut root = D(0);
+    for (key, value) in entries {
+        let key_noun = key_fn(alloc, key);
+        let value_noun = value_fn(alloc, value);
+        root = canonical_zmap_put(alloc, root, key_noun, value_noun);
+    }
+    root
+}
+
+fn build_canonical_note_data_noun<A: nockvm::noun::NounAllocator>(
+    alloc: &mut A,
+    map: &ZMap<String, UntypedNoun>,
+) -> Noun {
+    build_canonical_zmap_from_pairs(
+        alloc,
+        map.tap().into_iter(),
+        |alloc, key: String| make_tas(alloc, &key).as_noun(),
+        |alloc, value: UntypedNoun| value.to_noun(alloc),
+    )
+}
+
+fn build_canonical_spends_noun<A: nockvm::noun::NounAllocator>(
+    alloc: &mut A,
+    map: &ZMap<NName, Spend>,
+) -> Noun {
+    build_canonical_zmap_from_pairs(
+        alloc,
+        map.tap().into_iter(),
+        |alloc, key: NName| key.to_noun(alloc),
+        |alloc, value: Spend| value.to_noun(alloc),
+    )
+}
 
 /*
 #[derive(Debug, Clone, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -38,19 +367,13 @@ impl NNoteV1 {
                 leaf+assets.form
             ==
         */
-        Hashable::cell(
+        Hashable::cell_chain([
             Hashable::leaf_from_atom(&self.version.to_le_bytes()),
-            Hashable::cell(
-                self.origin_page.to_hashable(), 
-                Hashable::cell(
-                    Hashable::Hash(self.name.to_hash()),
-                    Hashable::cell(
-                        Hashable::Hash(self.note_data.to_hash()),
-                        self.assets.to_hashable()
-                    )
-                )
-            )
-        )
+            self.origin_page.to_hashable(),
+            Hashable::Hash(self.name.to_hash()),
+            Hashable::Hash(self.note_data.to_hash()),
+            self.assets.to_hashable(),
+        ])
     }
 }
 
@@ -61,7 +384,7 @@ pub struct NoteData {
 
 impl NounEncode for NoteData {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        // Simply delegate to ZMap's to_noun implementation
+        // Preserve the exact ZMap layout so the jam matches tx-engine's molds.
         self.map.to_noun(alloc)
     }
 }
@@ -76,23 +399,17 @@ impl NoteData {
     ///
     /// From Hoon, note-data is a z-map of @tas to *
     pub fn to_hashable(&self) -> Hashable {
-        // Use ZMap's to_hashable which properly traverses the tree
-        self.map.to_hashable(
-            |key| {
-                // Convert the string key to a tas atom and create a leaf
-                use nockapp::noun::slab::NounSlab;
-                use nockapp::utils::make_tas;
+        let mut slab: NounSlab = NounSlab::new();
+        let map = build_canonical_note_data_noun(&mut slab, &self.map);
+        hashable_note_data_from_zmap(map)
+    }
 
-                let mut slab: NounSlab = NounSlab::new();
-                let tas_atom = make_tas(&mut slab, key);
-                slab.set_root(tas_atom.as_noun());
-                Hashable::Leaf(slab.jam().to_vec())
-            },
-            |untyped_noun| {
-                // The UntypedNoun already contains jammed bytes
-                Hashable::Leaf(untyped_noun.p.to_vec())
-            },
-        )
+    /// Return the canonical note-data noun jam used for hashing/debugging.
+    pub fn jam_canonical(&self) -> Vec<u8> {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = build_canonical_note_data_noun(&mut slab, &self.map);
+        slab.set_root(noun);
+        slab.jam().to_vec()
     }
 }
 
@@ -126,7 +443,7 @@ impl SeedV1 {
         // Compute output_source hashable
         let output_source_hashable = match &self.output_source {
             None => Hashable::null(),
-            Some(source) => Hashable::cell(Hashable::null(), source.to_hashable()),
+            Some(source) => Hashable::cell_chain([Hashable::null(), source.to_hashable()]),
         };
 
         // Hash the note_data
@@ -134,19 +451,13 @@ impl SeedV1 {
 
         // Build the 5-element structure (quint)
         // Using nested cells: [a [b [c [d e]]]]
-        Hashable::cell(
+        Hashable::cell_chain([
             output_source_hashable,
-            Hashable::cell(
-                Hashable::Hash(self.lock_root.clone()),
-                Hashable::cell(
-                    Hashable::Hash(note_data_hash),
-                    Hashable::cell(
-                        self.gift.to_hashable(),
-                        Hashable::Hash(self.parent_hash.clone()),
-                    ),
-                ),
-            ),
-        )
+            Hashable::Hash(self.lock_root.clone()),
+            Hashable::Hash(note_data_hash),
+            self.gift.to_hashable(),
+            Hashable::Hash(self.parent_hash.clone()),
+        ])
     }
 
     /// Compute the regular hashable for a V1 seed (used in spend hashable, not signatures)
@@ -269,8 +580,9 @@ impl SpendsV1 {
     ///   $(form r.form)
     /// ```
     pub fn to_hashable(&self) -> Hashable {
-        self.map
-            .to_hashable(|nname| nname.to_hashable(), |spend| spend.to_hashable())
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = build_canonical_spends_noun(&mut slab, &self.map);
+        hashable_spends_from_raw(noun).expect("invalid spends noun")
     }
 
     /// Compute hash of spends
@@ -286,6 +598,42 @@ impl SpendsV1 {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
     }
+
+    /// Return the raw spends noun jam used for hashing/debugging.
+    pub fn jam_canonical(&self) -> Vec<u8> {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = build_canonical_spends_noun(&mut slab, &self.map);
+        slab.set_root(noun);
+        slab.jam().to_vec()
+    }
+}
+
+fn version_leaf_hashable() -> Hashable {
+    Hashable::leaf_from_atom(1u64.to_le_bytes())
+}
+
+/// Compute a tx-id from an already computed spends hashable structure.
+fn compute_tx_id_from_spends_hashable(spends_hashable: Hashable) -> Hash {
+    let hashable = Hashable::cell(version_leaf_hashable(), spends_hashable);
+    hash_hashable(&hashable)
+}
+
+/// Compute the tx-id from an in-memory spends map.
+pub fn compute_tx_id_v1(spends: &SpendsV1) -> Hash {
+    compute_tx_id_from_spends_hashable(spends.to_hashable())
+}
+
+/// Compute the tx-id from the raw noun representation of the spends map.
+pub fn compute_tx_id_v1_from_noun(spends_noun: Noun) -> Hash {
+    let spends = SpendsV1::from_noun(&spends_noun).expect("invalid spends noun");
+    compute_tx_id_v1(&spends)
+}
+
+/// Compute the tx-id directly from the jammed noun bytes of the spends map.
+pub fn compute_tx_id_v1_from_jam(spends_jam: &[u8]) -> Result<Hash, CueError> {
+    let mut slab: NounSlab = NounSlab::new();
+    let noun = slab.cue_into(Bytes::copy_from_slice(spends_jam))?;
+    Ok(compute_tx_id_v1_from_noun(noun))
 }
 
 #[derive(Debug, Clone, NounDecode, NounEncode)]
@@ -526,18 +874,12 @@ impl Witness {
         let hax_hashable = self.hashable_hax();
         let hax_hash = hash_hashable(&hax_hashable);
 
-        // Build the 4-element structure (quad)
-        // Using nested cells: [a [b [c d]]]
-        Hashable::cell(
+        Hashable::cell_chain([
             Hashable::Hash(lmp_hash),
-            Hashable::cell(
-                Hashable::Hash(pkh_hash),
-                Hashable::cell(
-                    Hashable::Hash(hax_hash),
-                    Hashable::leaf_from_atom(&self.tim.to_le_bytes()),
-                ),
-            ),
-        )
+            Hashable::Hash(pkh_hash),
+            Hashable::Hash(hax_hash),
+            Hashable::leaf_from_atom(&self.tim.to_le_bytes()),
+        ])
     }
 
     /// Compute hashable for hax map
@@ -558,25 +900,9 @@ impl Witness {
             |untyped_noun| {
                 // hashable-noun recursively builds cells for cells, leaves for atoms
                 // But since UntypedNoun is just jammed bytes, we treat it as a leaf
-                self.hashable_noun_from_untyped(untyped_noun)
+                hashable_from_untyped_noun(untyped_noun)
             },
         )
-    }
-
-    /// Compute hashable for a noun (represented as UntypedNoun)
-    ///
-    /// From Hoon (tx-engine-1.hoon lines ~1200-1203):
-    /// ```hoon
-    /// ++  hashable-noun
-    ///   |=  n=*
-    ///   ^-  hashable:tip5
-    ///   ?^  n  [$(n -.n) $(n +.n)]
-    ///   leaf+n
-    /// ```
-    fn hashable_noun_from_untyped(&self, untyped: &UntypedNoun) -> Hashable {
-        // The UntypedNoun contains jammed bytes, which we need to unjam and traverse
-        // For now, we'll just use it as a leaf since we don't have easy access to the noun structure
-        Hashable::Leaf(untyped.p.to_vec())
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -602,7 +928,7 @@ impl LockMerkleProof {
     ///   ^-  hashable:tip5
     ///   |^
     ///   :+  hash+(hash:spend-condition spend-condition.form)
-    ///     leaf+axis
+    ///     hash+(from-b58:^hash '6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A')
     ///   (hashable-merk-proof merk-proof.form)
     /// ```
     pub fn to_hashable(&self) -> Hashable {
@@ -610,11 +936,10 @@ impl LockMerkleProof {
 
         // Hash the spend condition
         let spend_condition_hash = hash_hashable(&self.spend_condition.to_hashable());
-
-        // Build the triple: [hash+(spend-condition) leaf+axis merkle-proof-hashable]
+        // Build the triple: [hash+(spend-condition) axis-constant merkle-proof-hashable]
         Hashable::triple(
             Hashable::Hash(spend_condition_hash),
-            Hashable::leaf_from_atom(&self.axis.to_le_bytes()),
+            Hashable::Hash(LOCK_MERKLE_AXIS_HASH.clone()),
             self.merkle_proof.to_hashable(),
         )
     }
@@ -632,12 +957,27 @@ pub struct SpendCondition {
 
 impl SpendCondition {
     pub fn to_hashable(&self) -> Hashable {
-        // Start with the required terminator
-        let base = Hashable::leaf_from_atom(&[0]);
-        // Build: cell(item_1, cell(item_2, cell(..., leaf([0]))))
+        // From Hoon (tx-engine-1.hoon lines 1145-1150):
+        // ```hoon
+        // ++  hashable
+        //   |=  =form
+        //   ^-  hashable:tip5
+        //   ?~  form  leaf+~
+        //   :-  (hashable:lock-primitive i.form)
+        //   $(form t.form)
+        // ```
+        // This builds: [hash(first), [hash(second), [hash(third), ... leaf(~)]]]
+        // WITHOUT reversing
+
+        // Start with the terminator (empty list = leaf+~)
+        let base = Hashable::null();
+
+        // Build from RIGHT to LEFT (so we DON'T reverse the iterator)
+        // fold processes left-to-right, but we want [first [second [third ...]]]
+        // So we need to fold from the right
         self.p
             .iter()
-            .rev()
+            .rev() // reverse to process from end
             .fold(base, |acc, lp| Hashable::cell(lp.to_hashable(), acc))
     }
 
@@ -665,7 +1005,7 @@ impl Pkh {
     pub fn to_hashable(&self) -> Hashable {
         let hash_hashable = self.h.to_hashable(|h| Hashable::Hash(h.clone()));
         Hashable::cell(
-            Hashable::leaf_from_atom(b"pkh"),
+            Hashable::leaf_from_tas("pkh"),
             Hashable::cell(
                 Hashable::leaf_from_atom(&self.m.to_le_bytes()),
                 hash_hashable,
@@ -684,7 +1024,7 @@ pub struct Tim {
 impl Tim {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"tim"),
+            Hashable::leaf_from_tas("tim"),
             Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable()),
         )
     }
@@ -698,8 +1038,8 @@ pub struct Hax {
 impl Hax {
     pub fn to_hashable(&self) -> Hashable {
         Hashable::cell(
-            Hashable::leaf_from_atom(b"hax"),
-            Hashable::leaf_from_atom(b"fake"), // TODO
+            Hashable::leaf_from_tas("hax"),
+            Hashable::leaf_from_tas("fake"), // TODO
         )
     }
 }
@@ -711,7 +1051,7 @@ pub struct Brn {
 
 impl Brn {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(Hashable::leaf_from_atom(b"brn"), Hashable::null())
+        Hashable::cell(Hashable::leaf_from_tas("brn"), Hashable::null())
     }
 }
 

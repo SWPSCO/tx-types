@@ -1,12 +1,12 @@
-/// Extended key structure and child key derivation
-use hmac::{Hmac, Mac};
-use sha2::Sha512;
-use ibig::UBig;
-use num_traits::Zero;
-use zeroize::Zeroize;
-use crate::crypto::cheetah::point::{CheetahPoint, cheetah_order};
+use crate::crypto::cheetah::point::{cheetah_order, CheetahPoint};
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
+/// Extended key structure and child key derivation
+use hmac::{Hmac, Mac};
+use ibig::UBig;
+use num_traits::Zero;
+use sha2::Sha512;
+use zeroize::Zeroize;
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -45,7 +45,7 @@ impl ExtendedKey {
     /// Create a new master key
     pub fn new_master(private_key: [u8; 32], chain_code: [u8; 32]) -> Self {
         let public_key = CheetahPoint::from_private_key(&private_key);
-        
+
         ExtendedKey {
             private_key: Some(private_key),
             public_key,
@@ -55,11 +55,11 @@ impl ExtendedKey {
             parent_fingerprint: [0u8; 4],
         }
     }
-    
+
     /// Create extended key from just a private key
     pub fn from_private_key(private_key: [u8; 32]) -> Self {
         let public_key = CheetahPoint::from_private_key(&private_key);
-        
+
         ExtendedKey {
             private_key: Some(private_key),
             public_key,
@@ -69,17 +69,17 @@ impl ExtendedKey {
             parent_fingerprint: [0u8; 4],
         }
     }
-    
+
     /// Check if this is a hardened derivation index
     fn is_hardened(index: u32) -> bool {
         index >= (1 << 31)
     }
-    
+
     /// Serialize a 32-bit integer as big-endian bytes
     fn serialize_u32(value: u32) -> [u8; 4] {
         value.to_be_bytes()
     }
-    
+
     /// Derive a child key at the given index
     pub fn derive_child(&self, index: u32) -> Result<Self> {
         let n = cheetah_order();
@@ -137,16 +137,16 @@ impl ExtendedKey {
             }
             current_input = i.to_vec();
         };
-        
+
         // Derive child private key if parent has private key
         let child_private_key = if let Some(parent_private) = self.private_key {
             let parent_sk = UBig::from_be_bytes(&parent_private);
             let child_sk = (il_int.clone() + parent_sk) % &n;
-            
+
             if child_sk.is_zero() {
                 return Err(CryptoError::DerivationFailed);
             }
-            
+
             let mut child_sk_bytes = [0u8; 32];
             let sk_bytes = child_sk.to_be_bytes();
             if sk_bytes.len() <= 32 {
@@ -154,12 +154,12 @@ impl ExtendedKey {
             } else {
                 child_sk_bytes.copy_from_slice(&sk_bytes[sk_bytes.len() - 32..]);
             }
-            
+
             Some(child_sk_bytes)
         } else {
             None
         };
-        
+
         // Derive child public key
         let child_public_key = if let Some(child_sk) = child_private_key {
             CheetahPoint::from_private_key(&child_sk)
@@ -168,10 +168,10 @@ impl ExtendedKey {
             let il_point = CheetahPoint::generator().scalar_mul(&il_int);
             self.public_key.add(&il_point)
         };
-        
+
         // Compute parent fingerprint (simplified)
         let parent_fingerprint = [0u8; 4]; // TODO: Implement proper fingerprinting
-        
+
         Ok(ExtendedKey {
             private_key: child_private_key,
             public_key: child_public_key,
@@ -181,7 +181,7 @@ impl ExtendedKey {
             parent_fingerprint,
         })
     }
-    
+
     /// Derive a key at the given derivation path
     pub fn derive_path(&self, path: &[u32]) -> Result<Self> {
         let mut current = self.clone();
@@ -190,12 +190,12 @@ impl ExtendedKey {
         }
         Ok(current)
     }
-    
+
     /// Convert to SchnorrPubkey format
     pub fn to_schnorr_pubkey(&self) -> SchnorrPubkey {
         self.public_key.to_schnorr_pubkey()
     }
-    
+
     /// Get the private key if available
     pub fn private_key_bytes(&self) -> Option<[u8; 32]> {
         self.private_key
@@ -220,33 +220,33 @@ impl Drop for ExtendedKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_hardened_derivation() {
         let master_sk = [1u8; 32];
         let chain_code = [2u8; 32];
         let master = ExtendedKey::new_master(master_sk, chain_code);
-        
+
         // Test hardened derivation
         let child = master.derive_child(0x80000000).unwrap();
         assert_eq!(child.depth, 1);
         assert_eq!(child.index, 0x80000000);
         assert!(child.private_key.is_some());
     }
-    
+
     #[test]
     fn test_normal_derivation() {
         let master_sk = [1u8; 32];
         let chain_code = [2u8; 32];
         let master = ExtendedKey::new_master(master_sk, chain_code);
-        
+
         // Test normal derivation
         let child = master.derive_child(0).unwrap();
         assert_eq!(child.depth, 1);
         assert_eq!(child.index, 0);
         assert!(child.private_key.is_some());
     }
-    
+
     #[test]
     fn test_derivation_path() {
         let master_sk = [1u8; 32];

@@ -85,11 +85,15 @@ pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMe
     // alias
     let hashable_form = Hashable::Hash(form.to_hash());
     let hashable_index = leaf_number;
-    let (axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
+    let (_computed_axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
     let spend_condition = traverse_lock(form);
     LockMerkleProof {
         spend_condition,
-        axis,
+        // Temporary compatibility: chain currently hardcodes the axis contribution
+        // to a fixed hash (see tx-engine-1.hoon lock-merkle-proof hashable).
+        // Keep emitting axis=1 until the protocol upgrade that reintroduces
+        // full-axis commitments lands on both Hoon and Rust implementations.
+        axis: 1,
         merkle_proof,
     }
 }
@@ -372,16 +376,19 @@ pub struct Pow {
 impl NounDecode for Pow {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         if noun.is_atom() {
-            return Ok(Pow { p: None })
+            return Ok(Pow { p: None });
         }
-        let proof = noun.as_cell()
+        let proof = noun
+            .as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?
             .tail();
 
         let mut slab: NounSlab = NounSlab::new();
         slab.copy_into(proof);
         let noun_bytes: Bytes = slab.jam();
-        Ok(Pow { p: Some(noun_bytes) })
+        Ok(Pow {
+            p: Some(noun_bytes),
+        })
     }
 }
 
@@ -539,31 +546,17 @@ impl PageV0 {
     pub fn to_hashable_block_commitment(&self) -> Hashable {
         // Build the structure using nested cells for the Hoon tuple
         // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
-        Hashable::cell(
+        Hashable::cell_chain([
             Hashable::Hash(self.parent.clone()),
-            Hashable::cell(
-                Hashable::Hash(self.tx_ids.to_hash()),
-                Hashable::cell(
-                    Hashable::Hash(self.coinbase.to_hash()),
-                    Hashable::cell(
-                        self.timestamp.to_hashable(),
-                        Hashable::cell(
-                            self.epoch_counter.to_hashable(),
-                            Hashable::cell(
-                                self.target.to_hashable(),
-                                Hashable::cell(
-                                    self.accumulated_work.to_hashable(),
-                                    Hashable::cell(
-                                        self.height.to_hashable(),
-                                        self.msg.to_hashable(),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        )
+            Hashable::Hash(self.tx_ids.to_hash()),
+            Hashable::Hash(self.coinbase.to_hash()),
+            self.timestamp.to_hashable(),
+            self.epoch_counter.to_hashable(),
+            self.target.to_hashable(),
+            self.accumulated_work.to_hashable(),
+            self.height.to_hashable(),
+            self.msg.to_hashable(),
+        ])
     }
 
     /// Hash the block commitment to produce the commitment hash
@@ -757,8 +750,5 @@ mod tests {
             "Block commitment hash should match Hoon output.\nGot:      {:x?}\nExpected: {:x?}",
             commitment_hash.values, expected_hash.values
         );
-
-        println!("✓ Block commitment hash matches Hoon output!");
-        println!("  Hash: {:x?}", commitment_hash.values);
     }
 }
