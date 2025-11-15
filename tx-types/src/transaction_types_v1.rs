@@ -384,8 +384,8 @@ pub struct NoteData {
 
 impl NounEncode for NoteData {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        // Preserve the exact ZMap layout so the jam matches tx-engine's molds.
-        self.map.to_noun(alloc)
+        // Preserve the canonical ZMap layout so the jam matches tx-engine's molds.
+        build_canonical_note_data_noun(alloc, &self.map)
     }
 }
 
@@ -560,7 +560,7 @@ pub struct RawTransactionV1 {
     pub spends: SpendsV1,
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+#[derive(Debug, Clone, NounDecode)]
 pub struct SpendsV1 {
     pub map: ZMap<NName, Spend>,
 }
@@ -605,6 +605,12 @@ impl SpendsV1 {
         let noun = build_canonical_spends_noun(&mut slab, &self.map);
         slab.set_root(noun);
         slab.jam().to_vec()
+    }
+}
+
+impl NounEncode for SpendsV1 {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> Noun {
+        build_canonical_spends_noun(alloc, &self.map)
     }
 }
 
