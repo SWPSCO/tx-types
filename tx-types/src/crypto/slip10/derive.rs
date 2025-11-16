@@ -7,6 +7,8 @@ use ibig::UBig;
 use num_traits::Zero;
 use sha2::Sha512;
 use zeroize::Zeroize;
+use bs58;
+use std::convert::TryInto;
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -39,6 +41,7 @@ pub struct ExtendedKey {
     pub depth: u8,
     pub index: u32,
     pub parent_fingerprint: [u8; 4],
+    pub version: u8,
 }
 
 impl ExtendedKey {
@@ -53,6 +56,7 @@ impl ExtendedKey {
             depth: 0,
             index: 0,
             parent_fingerprint: [0u8; 4],
+            version: 0,
         }
     }
 
@@ -67,7 +71,69 @@ impl ExtendedKey {
             depth: 0,
             index: 0,
             parent_fingerprint: [0u8; 4],
+            version: 0,
         }
+    }
+
+    pub fn from_extended_key_string(key: &str) -> Result<Self> {
+        let (key_size, is_private) = {
+            let prefix: String = key.chars().take(4).collect();
+            match prefix.as_str() {
+                "zprv" => (33, true),
+                "zpub" => (97, false),
+                _ => return Err(CryptoError::InvalidExtendedKeyString),
+            }
+        };
+
+        let payload = bs58::decode(key)
+            .with_check(None)
+            .into_vec()
+            .map_err(|e| CryptoError::Base58DecodeError(e.to_string()))?;
+
+        let version = if payload.len() >= (key_size + 46) {
+            cut(&payload, key_size + 41, 1)?[0]
+        } else {
+            0
+        };
+
+        //  metadata layout: [key-data][chain-code][index][parent-fp][depth][ver][typ]
+
+        // (cut 3 [(add key-size 40) 1] payload)
+        let depth = cut(&payload, key_size + 40, 1)?[0];
+
+        // (cut 3 [(add key-size 36) 4] payload)
+        let parent_fingerprint = slice_to_array::<4>(cut(&payload, key_size + 36, 4)?)?;
+
+        // (cut 3 [(add key-size 32) 4] payload)
+        let index = u32::from_be_bytes(slice_to_array::<4>(cut(&payload, key_size + 32, 4)?)?);
+
+        // (cut 3 [key-size 32] payload)
+        let chain_code = slice_to_array::<32>(cut(&payload, key_size, 32)?)?;
+
+        // (cut 3 [0 key-size] payload)
+        let key_data = cut(&payload, 0, key_size)?.to_vec();
+
+        let private_key = if is_private {
+            Some(slice_to_array::<32>(cut(&key_data, 0, 32)?)?)
+        } else {
+            None
+        };
+
+        let public_key = if let Some(ref sk) = private_key {
+            CheetahPoint::from_private_key(sk)
+        } else {
+            CheetahPoint::from_public_key_bytes(&key_data)?
+        };
+
+        Ok(ExtendedKey {
+            private_key,
+            public_key,
+            chain_code,
+            depth,
+            index,
+            parent_fingerprint,
+            version,
+        })
     }
 
     /// Check if this is a hardened derivation index
@@ -179,6 +245,7 @@ impl ExtendedKey {
             depth: self.depth.saturating_add(1),
             index,
             parent_fingerprint,
+            version: 0,
         })
     }
 
@@ -215,6 +282,22 @@ impl Drop for ExtendedKey {
     fn drop(&mut self) {
         self.zeroize();
     }
+}
+
+fn slice_to_array<const N: usize>(slice: &[u8]) -> Result<[u8; N]> {
+    slice
+        .try_into()
+        .map_err(|_| CryptoError::InvalidExtendedKeyString)
+}
+
+// Cut helper
+fn cut<'a>(payload: &'a [u8], offset_from_end: usize, len: usize) -> Result<&'a [u8]> {
+  let total = payload.len();
+  let start = total
+      .checked_sub(offset_from_end + len)
+      .ok_or(CryptoError::Other("failed to cut payload".to_string()))?;
+  let end = start + len;
+  Ok(&payload[start..end])
 }
 
 #[cfg(test)]
