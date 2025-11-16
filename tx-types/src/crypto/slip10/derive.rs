@@ -12,6 +12,12 @@ use std::convert::TryInto;
 
 type HmacSha512 = Hmac<Sha512>;
 
+/// Prefix constants used to match the Hoon `serialize-extended` arm.
+const ZPRV_TYPE: u32 = 0x0110_6331;
+const ZPUB_TYPE: u32 = 0x0c0e_bb09;
+const PRIVATE_KEY_TAG: u8 = 0x00;
+const PUBLIC_KEY_TAG: u8 = 0x01;
+
 /// Errors that can occur during key derivation
 #[derive(Debug, Clone)]
 pub enum DerivationError {
@@ -258,6 +264,49 @@ impl ExtendedKey {
         Ok(current)
     }
 
+    /// convert into zpub bs58 string
+    pub fn to_zpub_string(&self) -> Result<String> {
+        let mut payload = Vec::with_capacity(4 + 1 + 1 + 4 + 4 + 32 + 97);
+        payload.extend_from_slice(&ZPUB_TYPE.to_be_bytes());
+        payload.push(self.version);
+        payload.push(self.depth);
+        payload.extend_from_slice(&self.parent_fingerprint);
+        payload.extend_from_slice(&self.index.to_be_bytes());
+        payload.extend_from_slice(&self.chain_code);
+
+        let coords = self.public_key.to_coordinates();
+        let x_coords = coords[0];
+        let y_coords = coords[1];
+
+        payload.push(PUBLIC_KEY_TAG);
+        for limb in y_coords.into_iter().rev() {
+            payload.extend_from_slice(&limb.to_be_bytes());
+        }
+        for limb in x_coords.into_iter().rev() {
+            payload.extend_from_slice(&limb.to_be_bytes());
+        }
+
+        Ok(bs58::encode(payload).with_check().into_string())
+    }
+
+    pub fn to_zprv_string(&self) -> Result<String> {
+        let private_key = self
+            .private_key
+            .ok_or(CryptoError::InvalidPrivateKey)?;
+
+        let mut payload = Vec::with_capacity(4 + 1 + 1 + 4 + 4 + 32 + 33);
+        payload.extend_from_slice(&ZPRV_TYPE.to_be_bytes());
+        payload.push(self.version);
+        payload.push(self.depth);
+        payload.extend_from_slice(&self.parent_fingerprint);
+        payload.extend_from_slice(&self.index.to_be_bytes());
+        payload.extend_from_slice(&self.chain_code);
+        payload.push(PRIVATE_KEY_TAG);
+        payload.extend_from_slice(&private_key);
+
+        Ok(bs58::encode(payload).with_check().into_string())
+    }
+
     /// Convert to SchnorrPubkey format
     pub fn to_schnorr_pubkey(&self) -> SchnorrPubkey {
         self.public_key.to_schnorr_pubkey()
@@ -340,5 +389,28 @@ mod tests {
         let path = [0x8000002C, 0x80000000, 0x80000000, 0, 0];
         let derived = master.derive_path(&path).unwrap();
         assert_eq!(derived.depth, 5);
+    }
+
+    #[test]
+    fn test_zkey_serialization_roundtrip() {
+        // Known-good vectors from nockchain_zorp/scripts/fakenet-wallet-0.txt
+        let zprv = concat!(
+            "zprvLxxkCBq3s5HYzjsmivdvYRD8KtW3cbuwDtAPmpZvFQyicQzWqKCL9sQpna2x",
+            "4vgmNBF3cw1urezrhA7MNMbVVRt5GeXrBdg4qQ8QpKBt92Re"
+        );
+        let zpub = concat!(
+            "zpub2kRJ7D6VCvzVfDgydtAWpzxgDR7dQyJnmfEuwVM9LS7oJFb1vb7gTSBrfMvZ",
+            "X8dTs73sYq2UMGTYJg5kEgVZh23xiU7CWhW4Gkqztq8G856akEgyafdddnu6aKEqt",
+            "i2t9jufYWDR1Mj9RCo62bMNAyegCxNGShqexbhnMwGudSqwSNgDpgxzRU7gvUxioS",
+            "JyGtMW"
+        );
+
+        let private_key = ExtendedKey::from_extended_key_string(zprv).unwrap();
+        assert_eq!(private_key.to_zprv_string().unwrap(), zprv);
+        assert_eq!(private_key.to_zpub_string().unwrap(), zpub);
+
+        let public_key = ExtendedKey::from_extended_key_string(zpub).unwrap();
+        assert!(public_key.private_key.is_none());
+        assert_eq!(public_key.to_zpub_string().unwrap(), zpub);
     }
 }
