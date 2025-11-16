@@ -201,25 +201,35 @@ impl AsMut<[u8]> for Memory {
 }
 
 impl Memory {
+    #[inline]
+    fn allocate_with_malloc(size: usize) -> Self {
+        let layout =
+            Layout::from_size_align(size << 3, std::mem::size_of::<u64>()).expect("Invalid layout");
+        let alloc = unsafe { std::alloc::alloc(layout) };
+        if alloc.is_null() {
+            // std promises that std::alloc::handle_alloc_error will diverge
+            std::alloc::handle_alloc_error(layout);
+        }
+        Self::Malloc(alloc, size)
+    }
+
     /// Layout and MmapMut::map_anon take their sizes/lengths in bytes but we speak in terms
     /// of machine words which are u64 for our purposes so we're 8x'ing them with a cutesy shift.
     pub(crate) fn allocate(alloc_type: AllocType, size: usize) -> Result<Self, NewStackError> {
         let memory = match alloc_type {
             AllocType::Mmap => {
-                let mmap_mut = MmapMut::map_anon(size << 3)?;
-                Self::Mmap(mmap_mut)
-            }
-            AllocType::Malloc => {
-                // Align is in terms of bytes so I'm aligning it to 64-bits / 8 bytes, word size.
-                let layout = Layout::from_size_align(size << 3, std::mem::size_of::<u64>())
-                    .expect("Invalid layout");
-                let alloc = unsafe { std::alloc::alloc(layout) };
-                if alloc.is_null() {
-                    // std promises that std::alloc::handle_alloc_error will diverge
-                    std::alloc::handle_alloc_error(layout);
+                #[cfg(target_family = "wasm")]
+                {
+                    // wasm targets do not support mmap, fall back to malloc-based allocation.
+                    Self::allocate_with_malloc(size)
                 }
-                Self::Malloc(alloc, size)
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let mmap_mut = MmapMut::map_anon(size << 3)?;
+                    Self::Mmap(mmap_mut)
+                }
             }
+            AllocType::Malloc => Self::allocate_with_malloc(size),
         };
         Ok(memory)
     }
