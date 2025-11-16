@@ -328,8 +328,13 @@ pub mod util {
             }
         }
 
+        #[cfg(target_family = "wasm")]
+        const TEST_STACK_WORDS: usize = 1 << 20; // 8 MiB on wasm (words -> bytes)
+        #[cfg(not(target_family = "wasm"))]
+        const TEST_STACK_WORDS: usize = 8 << 10 << 10; // 64 MiB on native targets
+
         pub fn init_context() -> Context {
-            let mut stack = NockStack::new(8 << 10 << 10, 0);
+            let mut stack = NockStack::new(TEST_STACK_WORDS, 0);
             let cold = Cold::new(&mut stack);
             let warm = Warm::new(&mut stack);
             let hot = Hot::init(&mut stack, URBIT_HOT_STATE);
