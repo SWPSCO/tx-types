@@ -1,4 +1,5 @@
 use crate::crypto::cheetah::point::{cheetah_order, CheetahPoint};
+use crate::crypto::slip10::bip39_to_seed;
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
 /// Extended key structure and child key derivation
@@ -11,6 +12,7 @@ use bs58;
 use std::convert::TryInto;
 
 type HmacSha512 = Hmac<Sha512>;
+const NOCKCHAIN_SLIP10_KEY: &[u8] = b"Nockchain seed";
 
 /// Prefix constants used to match the Hoon `serialize-extended` arm.
 const ZPRV_TYPE: u32 = 0x0110_6331;
@@ -51,6 +53,42 @@ pub struct ExtendedKey {
 }
 
 impl ExtendedKey {
+    /// Construct a master extended key from a 512-bit seed and protocol version.
+    pub fn from_seed(seed: &[u8], version: u8) -> Result<Self> {
+        Self::validate_version(version)?;
+
+        let n = cheetah_order();
+        let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY)
+            .map_err(|_| CryptoError::InvalidSeed)?;
+        mac.update(seed);
+        let mut i = mac.finalize().into_bytes().to_vec();
+
+        loop {
+            let mut left = [0u8; 32];
+            let mut right = [0u8; 32];
+            left.copy_from_slice(&i[..32]);
+            right.copy_from_slice(&i[32..]);
+
+            let sk = UBig::from_be_bytes(&left);
+            if !sk.is_zero() && sk < n {
+                let mut key = ExtendedKey::new_master(left, right);
+                key.version = version;
+                return Ok(key);
+            }
+
+            let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY)
+                .map_err(|_| CryptoError::InvalidSeed)?;
+            mac.update(&i);
+            i = mac.finalize().into_bytes().to_vec();
+        }
+    }
+
+    /// Construct a master extended key directly from a BIP39 mnemonic seed phrase.
+    pub fn from_seed_phrase(seed_phrase: &str, version: u8) -> Result<Self> {
+        let seed = bip39_to_seed(seed_phrase, "")?;
+        Self::from_seed(&seed, version)
+    }
+
     /// Create a new master key
     pub fn new_master(private_key: [u8; 32], chain_code: [u8; 32]) -> Self {
         let public_key = CheetahPoint::from_private_key(&private_key);
@@ -316,6 +354,25 @@ impl ExtendedKey {
     pub fn private_key_bytes(&self) -> Option<[u8; 32]> {
         self.private_key
     }
+
+    /// Seed phrases cannot be reconstructed from an extended key.
+    pub fn seed_phrase(&self) -> Result<Vec<String>> {
+        Err(CryptoError::Other(
+            "Seed phrases are only available when originally provided; they \
+            cannot be reconstructed from an extended key."
+                .to_string(),
+        ))
+    }
+
+    fn validate_version(version: u8) -> Result<()> {
+        match version {
+            0 | 1 => Ok(()),
+            _ => Err(CryptoError::Other(format!(
+                "unsupported slip10 protocol version {}",
+                version
+            ))),
+        }
+    }
 }
 
 impl Zeroize for ExtendedKey {
@@ -412,5 +469,28 @@ mod tests {
         let public_key = ExtendedKey::from_extended_key_string(zpub).unwrap();
         assert!(public_key.private_key.is_none());
         assert_eq!(public_key.to_zpub_string().unwrap(), zpub);
+    }
+
+    #[test]
+    fn test_seed_phrase_import_matches_expected_keys() {
+        let seed_phrase = concat!(
+            "shoot stomach scare love entire arch session boy insect media slide magnet ",
+            "shuffle olympic thing agree grid give grit debate series alter myself axis"
+        );
+        let expected_zprv = concat!(
+            "zprvLxxkCBq3s5HYzjsmivdvYRD8KtW3cbuwDtAPmpZvFQyicQzWqKCL9sQpna2x",
+            "4vgmNBF3cw1urezrhA7MNMbVVRt5GeXrBdg4qQ8QpKBt92Re"
+        );
+        let expected_zpub = concat!(
+            "zpub2kRJ7D6VCvzVfDgydtAWpzxgDR7dQyJnmfEuwVM9LS7oJFb1vb7gTSBrfMvZ",
+            "X8dTs73sYq2UMGTYJg5kEgVZh23xiU7CWhW4Gkqztq8G856akEgyafdddnu6aKEqt",
+            "i2t9jufYWDR1Mj9RCo62bMNAyegCxNGShqexbhnMwGudSqwSNgDpgxzRU7gvUxioS",
+            "JyGtMW"
+        );
+
+        let key = ExtendedKey::from_seed_phrase(seed_phrase, 1).unwrap();
+        assert_eq!(key.version, 1);
+        assert_eq!(key.to_zprv_string().unwrap(), expected_zprv);
+        assert_eq!(key.to_zpub_string().unwrap(), expected_zpub);
     }
 }
