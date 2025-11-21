@@ -23,6 +23,9 @@ pub enum CryptoError {
     DerivationFailed,
     Bip39Error(String),
     Pbkdf2Error,
+    InvalidExtendedKeyString,
+    Base58DecodeError(String),
+    Other(String),
 }
 
 impl std::fmt::Display for CryptoError {
@@ -35,6 +38,9 @@ impl std::fmt::Display for CryptoError {
             CryptoError::DerivationFailed => write!(f, "Key derivation failed"),
             CryptoError::Bip39Error(s) => write!(f, "BIP39 error: {}", s),
             CryptoError::Pbkdf2Error => write!(f, "PBKDF2 error"),
+            CryptoError::InvalidExtendedKeyString => write!(f, "Invalid extended key string"),
+            CryptoError::Base58DecodeError(s) => write!(f, "Base58 decode error: {}", s),
+            CryptoError::Other(s) => write!(f, "{s}"),
         }
     }
 }

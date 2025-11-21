@@ -1,5 +1,6 @@
 /// Cheetah elliptic curve point operations (copied from working siger-esp implementation)
 use super::field::{F6Element, F6_ONE, F6_ZERO};
+use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::{SchnorrPubkey, F6LT};
 use ibig::UBig;
 use zkvm_jetpack::form::math::belt::Belt;
@@ -167,6 +168,22 @@ impl CheetahPoint {
         Self::generator().scalar_mul(&scalar)
     }
 
+    /// Deserialize the `[0x01 | y | x]` representation used by zpub strings
+    pub fn from_public_key_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 97 {
+            return Err(CryptoError::InvalidExtendedKeyString);
+        }
+        if bytes[0] != 0x01 {
+            return Err(CryptoError::InvalidExtendedKeyString);
+        }
+
+        let mut rd = &bytes[1..];
+        let y = Self::read_field_element(&mut rd)?;
+        let x = Self::read_field_element(&mut rd)?;
+
+        Ok(CheetahPoint::from_coordinates([x, y]))
+    }
+
     /// Convert to SchnorrPubkey format
     pub fn to_schnorr_pubkey(&self) -> SchnorrPubkey {
         if self.inf {
@@ -213,6 +230,25 @@ impl CheetahPoint {
             y: F6Element::from_u64_array(coords[1]),
             inf: false,
         }
+    }
+
+    fn read_field_element(rd: &mut &[u8]) -> Result<[u64; 6]> {
+        let mut out = [0u64; 6];
+        for limb in (0..6).rev() {
+            out[limb] = Self::read_u64_be(rd)?;
+        }
+        Ok(out)
+    }
+
+    fn read_u64_be(rd: &mut &[u8]) -> Result<u64> {
+        if rd.len() < 8 {
+            return Err(CryptoError::InvalidExtendedKeyString);
+        }
+        let (head, tail) = rd.split_at(8);
+        *rd = tail;
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(head);
+        Ok(u64::from_be_bytes(bytes))
     }
 }
 

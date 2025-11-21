@@ -1,14 +1,24 @@
 use crate::crypto::cheetah::point::{cheetah_order, CheetahPoint};
+use crate::crypto::slip10::bip39_to_seed;
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
+use bs58;
 /// Extended key structure and child key derivation
 use hmac::{Hmac, Mac};
 use ibig::UBig;
 use num_traits::Zero;
 use sha2::Sha512;
+use std::convert::TryInto;
 use zeroize::Zeroize;
 
 type HmacSha512 = Hmac<Sha512>;
+const NOCKCHAIN_SLIP10_KEY: &[u8] = b"Nockchain seed";
+
+/// Prefix constants used to match the Hoon `serialize-extended` arm.
+const ZPRV_TYPE: u32 = 0x0110_6331;
+const ZPUB_TYPE: u32 = 0x0c0e_bb09;
+const PRIVATE_KEY_TAG: u8 = 0x00;
+const PUBLIC_KEY_TAG: u8 = 0x01;
 
 /// Errors that can occur during key derivation
 #[derive(Debug, Clone)]
@@ -39,9 +49,46 @@ pub struct ExtendedKey {
     pub depth: u8,
     pub index: u32,
     pub parent_fingerprint: [u8; 4],
+    pub version: u8,
 }
 
 impl ExtendedKey {
+    /// Construct a master extended key from a 512-bit seed and protocol version.
+    pub fn from_seed(seed: &[u8], version: u8) -> Result<Self> {
+        Self::validate_version(version)?;
+
+        let n = cheetah_order();
+        let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY)
+            .map_err(|_| CryptoError::InvalidSeed)?;
+        mac.update(seed);
+        let mut i = mac.finalize().into_bytes().to_vec();
+
+        loop {
+            let mut left = [0u8; 32];
+            let mut right = [0u8; 32];
+            left.copy_from_slice(&i[..32]);
+            right.copy_from_slice(&i[32..]);
+
+            let sk = UBig::from_be_bytes(&left);
+            if !sk.is_zero() && sk < n {
+                let mut key = ExtendedKey::new_master(left, right);
+                key.version = version;
+                return Ok(key);
+            }
+
+            let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY)
+                .map_err(|_| CryptoError::InvalidSeed)?;
+            mac.update(&i);
+            i = mac.finalize().into_bytes().to_vec();
+        }
+    }
+
+    /// Construct a master extended key directly from a BIP39 mnemonic seed phrase.
+    pub fn from_seed_phrase(seed_phrase: &str, version: u8) -> Result<Self> {
+        let seed = bip39_to_seed(seed_phrase, "")?;
+        Self::from_seed(&seed, version)
+    }
+
     /// Create a new master key
     pub fn new_master(private_key: [u8; 32], chain_code: [u8; 32]) -> Self {
         let public_key = CheetahPoint::from_private_key(&private_key);
@@ -53,6 +100,7 @@ impl ExtendedKey {
             depth: 0,
             index: 0,
             parent_fingerprint: [0u8; 4],
+            version: 0,
         }
     }
 
@@ -67,7 +115,69 @@ impl ExtendedKey {
             depth: 0,
             index: 0,
             parent_fingerprint: [0u8; 4],
+            version: 0,
         }
+    }
+
+    pub fn from_extended_key_string(key: &str) -> Result<Self> {
+        let (key_size, is_private) = {
+            let prefix: String = key.chars().take(4).collect();
+            match prefix.as_str() {
+                "zprv" => (33, true),
+                "zpub" => (97, false),
+                _ => return Err(CryptoError::InvalidExtendedKeyString),
+            }
+        };
+
+        let payload = bs58::decode(key)
+            .with_check(None)
+            .into_vec()
+            .map_err(|e| CryptoError::Base58DecodeError(e.to_string()))?;
+
+        let version = if payload.len() >= (key_size + 46) {
+            cut(&payload, key_size + 41, 1)?[0]
+        } else {
+            0
+        };
+
+        //  metadata layout: [key-data][chain-code][index][parent-fp][depth][ver][typ]
+
+        // (cut 3 [(add key-size 40) 1] payload)
+        let depth = cut(&payload, key_size + 40, 1)?[0];
+
+        // (cut 3 [(add key-size 36) 4] payload)
+        let parent_fingerprint = slice_to_array::<4>(cut(&payload, key_size + 36, 4)?)?;
+
+        // (cut 3 [(add key-size 32) 4] payload)
+        let index = u32::from_be_bytes(slice_to_array::<4>(cut(&payload, key_size + 32, 4)?)?);
+
+        // (cut 3 [key-size 32] payload)
+        let chain_code = slice_to_array::<32>(cut(&payload, key_size, 32)?)?;
+
+        // (cut 3 [0 key-size] payload)
+        let key_data = cut(&payload, 0, key_size)?.to_vec();
+
+        let private_key = if is_private {
+            Some(slice_to_array::<32>(cut(&key_data, 0, 32)?)?)
+        } else {
+            None
+        };
+
+        let public_key = if let Some(ref sk) = private_key {
+            CheetahPoint::from_private_key(sk)
+        } else {
+            CheetahPoint::from_public_key_bytes(&key_data)?
+        };
+
+        Ok(ExtendedKey {
+            private_key,
+            public_key,
+            chain_code,
+            depth,
+            index,
+            parent_fingerprint,
+            version,
+        })
     }
 
     /// Check if this is a hardened derivation index
@@ -179,6 +289,7 @@ impl ExtendedKey {
             depth: self.depth.saturating_add(1),
             index,
             parent_fingerprint,
+            version: 0,
         })
     }
 
@@ -191,6 +302,47 @@ impl ExtendedKey {
         Ok(current)
     }
 
+    /// convert into zpub bs58 string
+    pub fn to_zpub_string(&self) -> Result<String> {
+        let mut payload = Vec::with_capacity(4 + 1 + 1 + 4 + 4 + 32 + 97);
+        payload.extend_from_slice(&ZPUB_TYPE.to_be_bytes());
+        payload.push(self.version);
+        payload.push(self.depth);
+        payload.extend_from_slice(&self.parent_fingerprint);
+        payload.extend_from_slice(&self.index.to_be_bytes());
+        payload.extend_from_slice(&self.chain_code);
+
+        let coords = self.public_key.to_coordinates();
+        let x_coords = coords[0];
+        let y_coords = coords[1];
+
+        payload.push(PUBLIC_KEY_TAG);
+        for limb in y_coords.into_iter().rev() {
+            payload.extend_from_slice(&limb.to_be_bytes());
+        }
+        for limb in x_coords.into_iter().rev() {
+            payload.extend_from_slice(&limb.to_be_bytes());
+        }
+
+        Ok(bs58::encode(payload).with_check().into_string())
+    }
+
+    pub fn to_zprv_string(&self) -> Result<String> {
+        let private_key = self.private_key.ok_or(CryptoError::InvalidPrivateKey)?;
+
+        let mut payload = Vec::with_capacity(4 + 1 + 1 + 4 + 4 + 32 + 33);
+        payload.extend_from_slice(&ZPRV_TYPE.to_be_bytes());
+        payload.push(self.version);
+        payload.push(self.depth);
+        payload.extend_from_slice(&self.parent_fingerprint);
+        payload.extend_from_slice(&self.index.to_be_bytes());
+        payload.extend_from_slice(&self.chain_code);
+        payload.push(PRIVATE_KEY_TAG);
+        payload.extend_from_slice(&private_key);
+
+        Ok(bs58::encode(payload).with_check().into_string())
+    }
+
     /// Convert to SchnorrPubkey format
     pub fn to_schnorr_pubkey(&self) -> SchnorrPubkey {
         self.public_key.to_schnorr_pubkey()
@@ -199,6 +351,25 @@ impl ExtendedKey {
     /// Get the private key if available
     pub fn private_key_bytes(&self) -> Option<[u8; 32]> {
         self.private_key
+    }
+
+    /// Seed phrases cannot be reconstructed from an extended key.
+    pub fn seed_phrase(&self) -> Result<Vec<String>> {
+        Err(CryptoError::Other(
+            "Seed phrases are only available when originally provided; they \
+            cannot be reconstructed from an extended key."
+                .to_string(),
+        ))
+    }
+
+    fn validate_version(version: u8) -> Result<()> {
+        match version {
+            0 | 1 => Ok(()),
+            _ => Err(CryptoError::Other(format!(
+                "unsupported slip10 protocol version {}",
+                version
+            ))),
+        }
     }
 }
 
@@ -215,6 +386,22 @@ impl Drop for ExtendedKey {
     fn drop(&mut self) {
         self.zeroize();
     }
+}
+
+fn slice_to_array<const N: usize>(slice: &[u8]) -> Result<[u8; N]> {
+    slice
+        .try_into()
+        .map_err(|_| CryptoError::InvalidExtendedKeyString)
+}
+
+// Cut helper
+fn cut<'a>(payload: &'a [u8], offset_from_end: usize, len: usize) -> Result<&'a [u8]> {
+    let total = payload.len();
+    let start = total
+        .checked_sub(offset_from_end + len)
+        .ok_or(CryptoError::Other("failed to cut payload".to_string()))?;
+    let end = start + len;
+    Ok(&payload[start..end])
 }
 
 #[cfg(test)]
@@ -257,5 +444,51 @@ mod tests {
         let path = [0x8000002C, 0x80000000, 0x80000000, 0, 0];
         let derived = master.derive_path(&path).unwrap();
         assert_eq!(derived.depth, 5);
+    }
+
+    #[test]
+    fn test_zkey_serialization_roundtrip() {
+        // Known-good vectors from nockchain_zorp/scripts/fakenet-wallet-0.txt
+        let zprv = concat!(
+            "zprvLxxkCBq3s5HYzjsmivdvYRD8KtW3cbuwDtAPmpZvFQyicQzWqKCL9sQpna2x",
+            "4vgmNBF3cw1urezrhA7MNMbVVRt5GeXrBdg4qQ8QpKBt92Re"
+        );
+        let zpub = concat!(
+            "zpub2kRJ7D6VCvzVfDgydtAWpzxgDR7dQyJnmfEuwVM9LS7oJFb1vb7gTSBrfMvZ",
+            "X8dTs73sYq2UMGTYJg5kEgVZh23xiU7CWhW4Gkqztq8G856akEgyafdddnu6aKEqt",
+            "i2t9jufYWDR1Mj9RCo62bMNAyegCxNGShqexbhnMwGudSqwSNgDpgxzRU7gvUxioS",
+            "JyGtMW"
+        );
+
+        let private_key = ExtendedKey::from_extended_key_string(zprv).unwrap();
+        assert_eq!(private_key.to_zprv_string().unwrap(), zprv);
+        assert_eq!(private_key.to_zpub_string().unwrap(), zpub);
+
+        let public_key = ExtendedKey::from_extended_key_string(zpub).unwrap();
+        assert!(public_key.private_key.is_none());
+        assert_eq!(public_key.to_zpub_string().unwrap(), zpub);
+    }
+
+    #[test]
+    fn test_seed_phrase_import_matches_expected_keys() {
+        let seed_phrase = concat!(
+            "shoot stomach scare love entire arch session boy insect media slide magnet ",
+            "shuffle olympic thing agree grid give grit debate series alter myself axis"
+        );
+        let expected_zprv = concat!(
+            "zprvLxxkCBq3s5HYzjsmivdvYRD8KtW3cbuwDtAPmpZvFQyicQzWqKCL9sQpna2x",
+            "4vgmNBF3cw1urezrhA7MNMbVVRt5GeXrBdg4qQ8QpKBt92Re"
+        );
+        let expected_zpub = concat!(
+            "zpub2kRJ7D6VCvzVfDgydtAWpzxgDR7dQyJnmfEuwVM9LS7oJFb1vb7gTSBrfMvZ",
+            "X8dTs73sYq2UMGTYJg5kEgVZh23xiU7CWhW4Gkqztq8G856akEgyafdddnu6aKEqt",
+            "i2t9jufYWDR1Mj9RCo62bMNAyegCxNGShqexbhnMwGudSqwSNgDpgxzRU7gvUxioS",
+            "JyGtMW"
+        );
+
+        let key = ExtendedKey::from_seed_phrase(seed_phrase, 1).unwrap();
+        assert_eq!(key.version, 1);
+        assert_eq!(key.to_zprv_string().unwrap(), expected_zprv);
+        assert_eq!(key.to_zpub_string().unwrap(), expected_zpub);
     }
 }
