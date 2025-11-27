@@ -213,7 +213,7 @@ pub fn traverse_lock(spend_condition: SpendCondition) -> SpendCondition {
 }
 
 /// Wrapper for transaction ID set
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+#[derive(Debug, Clone, PartialEq, Eq, NounDecode, NounEncode)]
 pub struct TransactionIds {
     pub set: ZSet<Hash>,
 }
@@ -628,6 +628,34 @@ impl PageV1 {
         */
 
         notes
+    }
+
+    pub fn construct_candidate(&self) -> Self {
+        // should take:
+        // TransactionIds
+        // ConbaseV1
+        // Timestamp
+        // PageMsg
+
+        // todo: increment the epoch counter based on the constant
+        // todo: target logic
+        // todo: accumulated work logic
+        Self {
+            version: self.version,
+            digest: Hash { values: [0; 5]},
+            // everything below this is what is hashed for the digest: +.page
+            pow: Pow { p: None },
+            // everything below this is what is hashed for the block commitment: +>.page
+            parent: self.digest.clone(),
+            tx_ids: self.tx_ids.clone(),
+            coinbase: self.coinbase.clone(),
+            timestamp: self.timestamp.clone(),
+            epoch_counter: self.epoch_counter,
+            target: self.target.clone(),
+            accumulated_work: self.accumulated_work.clone(),
+            height: PageNumber { value: self.height.value + 1 },
+            msg: self.msg.clone(),
+        }
     }
 }
 
