@@ -11,6 +11,8 @@ use nockapp::noun::slab::NounSlab;
 use nockvm::noun::Noun;
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use num_bigint::BigUint;
+use num_traits::{One, Zero};
+
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -265,6 +267,39 @@ impl PageMsg {
         PageMsg { values: Vec::new() }
     }
 
+    /// Build a PageMsg from a UTF-8 string using 5-bit limbs (belt prime encoding)
+    pub fn from_string(msg: String) -> Self {
+        const PRIME_U64: u64 = 18_446_744_069_414_584_321; // belt prime
+
+        let bytes = msg.as_bytes();
+        let total_bits = bytes.len() * 8;
+
+        // rip-correct: ensure at least one limb
+        if total_bits == 0 {
+            return PageMsg { values: vec![0] };
+        }
+
+        let mut values = Vec::with_capacity((total_bits + 4) / 5);
+        for chunk_start in (0..total_bits).step_by(5) {
+            let mut limb = 0u64;
+            for offset in 0..5 {
+                let bit_index = chunk_start + offset;
+                if bit_index >= total_bits {
+                    break;
+                }
+                let byte_index = bit_index / 8;
+                let bit_in_byte = bit_index % 8;
+                if (bytes[byte_index] >> bit_in_byte) & 1 == 1 {
+                    limb |= 1 << offset;
+                }
+            }
+            assert!(limb < PRIME_U64, "page-msg limb exceeds belt prime");
+            values.push(limb);
+        }
+
+        PageMsg { values }
+    }
+
     pub fn to_hashable(&self) -> Hashable {
         let mut slab: NounSlab = NounSlab::new();
         use nockvm::noun::{Atom, Cell};
@@ -346,6 +381,39 @@ impl NounDecode for Page {
     }
 }
 
+  // Convert BigNum <-> BigUint
+  fn big_num_to_biguint(n: &BigNum) -> BigUint {
+      let bytes: Vec<u8> = n.body.iter().flat_map(|w| w.to_le_bytes()).collect();
+      BigUint::from_bytes_le(&bytes)
+  }
+
+  fn biguint_to_big_num(n: &BigUint) -> BigNum {
+      let bytes = n.to_bytes_le();
+      let mut body = Vec::with_capacity((bytes.len() + 3) / 4);
+      for chunk in bytes.chunks(4) {
+          let mut arr = [0u8; 4];
+          arr[..chunk.len()].copy_from_slice(chunk);
+          body.push(u32::from_le_bytes(arr));
+      }
+      if body.is_empty() {
+          body.push(0);
+      }
+      BigNum { header: "bn".to_string(), body }
+  }
+
+  // 320-bit all-ones (tip5 max target: 2^320 - 1)
+  fn max_target_atom() -> BigUint {
+      BigUint::from_bytes_be(&[0xff; 40])
+  }
+
+  // compute-work = max_target_atom / (target + 1)
+  pub fn compute_work(target: BigNum) -> BigNum {
+      let t = big_num_to_biguint(&target);
+      let denom = if t.is_zero() { BigUint::one() } else { &t + BigUint::one() };
+      let work = max_target_atom() / denom;
+      biguint_to_big_num(&work)
+  }
+
 impl Page {
     pub fn coinbase_notes(&self) -> Vec<NNote> {
         match self {
@@ -416,6 +484,29 @@ impl BigNum {
         let noun = self.to_noun(&mut slab);
         slab.set_root(noun);
         Hashable::Leaf(slab.jam().to_vec())
+    }
+
+    pub fn add(&self, other: &BigNum) -> BigNum {
+        fn to_biguint(n: &BigNum) -> BigUint {
+            let bytes: Vec<u8> = n.body.iter().flat_map(|w| w.to_le_bytes()).collect();
+            BigUint::from_bytes_le(&bytes)
+        }
+        fn from_biguint(n: &BigUint) -> BigNum {
+            let bytes = n.to_bytes_le();
+            let mut body = Vec::with_capacity((bytes.len() + 3) / 4);
+            for chunk in bytes.chunks(4) {
+                let mut arr = [0u8; 4];
+                arr[..chunk.len()].copy_from_slice(chunk);
+                body.push(u32::from_le_bytes(arr));
+            }
+            if body.is_empty() {
+                body.push(0);
+            }
+            BigNum { header: "bn".to_string(), body }
+        }
+
+        let sum = to_biguint(self) + to_biguint(other);
+        from_biguint(&sum)
     }
 }
 
@@ -629,34 +720,12 @@ impl PageV1 {
 
         notes
     }
+}
 
-    pub fn construct_candidate(&self) -> Self {
-        // should take:
-        // TransactionIds
-        // ConbaseV1
-        // Timestamp
-        // PageMsg
-
-        // todo: increment the epoch counter based on the constant
-        // todo: target logic
-        // todo: accumulated work logic
-        Self {
-            version: self.version,
-            digest: Hash { values: [0; 5]},
-            // everything below this is what is hashed for the digest: +.page
-            pow: Pow { p: None },
-            // everything below this is what is hashed for the block commitment: +>.page
-            parent: self.digest.clone(),
-            tx_ids: self.tx_ids.clone(),
-            coinbase: self.coinbase.clone(),
-            timestamp: self.timestamp.clone(),
-            epoch_counter: self.epoch_counter,
-            target: self.target.clone(),
-            accumulated_work: self.accumulated_work.clone(),
-            height: PageNumber { value: self.height.value + 1 },
-            msg: self.msg.clone(),
-        }
-    }
+// helper
+pub struct CoinbaseAcct {
+    pub pkh: Hash,
+    pub share: u64,
 }
 
 #[cfg(test)]
