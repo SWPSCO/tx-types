@@ -47,6 +47,17 @@ pub struct CoinbaseV1 {
     pub map: ZMap<Hash, Coins>,
 }
 
+impl CoinbaseV1 {
+    pub fn to_hashable(&self) -> Hashable {
+        self.map
+            .to_hashable(|hash| Hashable::Hash(hash.clone()), |coins| coins.to_hashable())
+    }
+
+    pub fn to_hash(&self) -> Hash {
+        hash_hashable(&self.to_hashable())
+    }
+}
+
 pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
     let m = pkh_hashes.len() as u64;
 
@@ -719,6 +730,30 @@ impl PageV1 {
         */
 
         notes
+    }
+
+    pub fn to_hashable_block_commitment(&self) -> Hashable {
+        // Build the structure using nested cells for the Hoon tuple
+        // :* a b c d e f g h i == creates [a [b [c [d [e [f [g [h i]]]]]]]]
+        Hashable::cell_chain([
+            Hashable::Hash(self.parent.clone()),
+            Hashable::Hash(self.tx_ids.to_hash()),
+            Hashable::Hash(self.coinbase.to_hash()),
+            self.timestamp.to_hashable(),
+            self.epoch_counter.to_hashable(),
+            self.target.to_hashable(),
+            self.accumulated_work.to_hashable(),
+            self.height.to_hashable(),
+            self.msg.to_hashable(),
+        ])
+    }
+
+    /// Hash the block commitment to produce the commitment hash
+    ///
+    /// Corresponds to ++ block-commitment on line 502 of tx-engine.hoon
+    /// This is the hash of the block commitment structure (everything after PoW)
+    pub fn hash_block_commitment(&self) -> Hash {
+        hash_hashable(&self.to_hashable_block_commitment())
     }
 }
 
