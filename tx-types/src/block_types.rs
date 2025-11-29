@@ -381,38 +381,38 @@ impl NounDecode for Page {
     }
 }
 
-  // Convert BigNum <-> BigUint
-  fn big_num_to_biguint(n: &BigNum) -> BigUint {
-      let bytes: Vec<u8> = n.body.iter().flat_map(|w| w.to_le_bytes()).collect();
-      BigUint::from_bytes_le(&bytes)
-  }
+// Convert BigNum <-> BigUint
+fn big_num_to_biguint(n: &BigNum) -> BigUint {
+  let bytes: Vec<u8> = n.body.iter().flat_map(|w| w.to_le_bytes()).collect();
+  BigUint::from_bytes_le(&bytes)
+}
 
-  fn biguint_to_big_num(n: &BigUint) -> BigNum {
-      let bytes = n.to_bytes_le();
-      let mut body = Vec::with_capacity((bytes.len() + 3) / 4);
-      for chunk in bytes.chunks(4) {
-          let mut arr = [0u8; 4];
-          arr[..chunk.len()].copy_from_slice(chunk);
-          body.push(u32::from_le_bytes(arr));
-      }
-      if body.is_empty() {
-          body.push(0);
-      }
-      BigNum { header: "bn".to_string(), body }
+fn biguint_to_big_num(n: &BigUint) -> BigNum {
+  let bytes = n.to_bytes_le();
+  let mut body = Vec::with_capacity((bytes.len() + 3) / 4);
+  for chunk in bytes.chunks(4) {
+      let mut arr = [0u8; 4];
+      arr[..chunk.len()].copy_from_slice(chunk);
+      body.push(u32::from_le_bytes(arr));
   }
+  if body.is_empty() {
+      body.push(0);
+  }
+  BigNum { header: "bn".to_string(), body }
+}
 
-  // 320-bit all-ones (tip5 max target: 2^320 - 1)
-  fn max_target_atom() -> BigUint {
-      BigUint::from_bytes_be(&[0xff; 40])
-  }
+// 320-bit all-ones (tip5 max target: 2^320 - 1)
+fn max_target_atom() -> BigUint {
+  BigUint::from_bytes_be(&[0xff; 40])
+}
 
-  // compute-work = max_target_atom / (target + 1)
-  pub fn compute_work(target: BigNum) -> BigNum {
-      let t = big_num_to_biguint(&target);
-      let denom = if t.is_zero() { BigUint::one() } else { &t + BigUint::one() };
-      let work = max_target_atom() / denom;
-      biguint_to_big_num(&work)
-  }
+// compute-work = max_target_atom / (target + 1)
+pub fn compute_work(target: BigNum) -> BigNum {
+  let t = big_num_to_biguint(&target);
+  let denom = if t.is_zero() { BigUint::one() } else { &t + BigUint::one() };
+  let work = max_target_atom() / denom;
+  biguint_to_big_num(&work)
+}
 
 impl Page {
     pub fn coinbase_notes(&self) -> Vec<NNote> {
