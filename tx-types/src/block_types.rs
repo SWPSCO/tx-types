@@ -412,16 +412,21 @@ fn biguint_to_big_num(n: &BigUint) -> BigNum {
   BigNum { header: "bn".to_string(), body }
 }
 
-// 320-bit all-ones (tip5 max target: 2^320 - 1)
-fn max_target_atom() -> BigUint {
-  BigUint::from_bytes_be(&[0xff; 40])
+// Goldilocks prime used by tip5 so we can mirror Hoon's max-target-atom (p^5 - 1).
+const TIP5_PRIME: u64 = 0xffffffff00000001;
+
+// Expose the exact tip5 max-target-atom so all consumers share the Hoon constant.
+pub fn max_target_atom() -> BigUint {
+  // max-tip5-atom = sum_{i=0..4} (p - 1) * p^i = p^5 - 1 in Hoon; match it exactly.
+  let p = BigUint::from(TIP5_PRIME);
+  p.pow(5u32) - BigUint::one()
 }
 
 // compute-work = max_target_atom / (target + 1)
 pub fn compute_work(target: BigNum) -> BigNum {
   let t = big_num_to_biguint(&target);
   let denom = if t.is_zero() { BigUint::one() } else { &t + BigUint::one() };
-  let work = max_target_atom() / denom;
+  let work = max_target_atom() / denom; // Use the same tip5 max target as Hoon so chainwork matches.
   biguint_to_big_num(&work)
 }
 
