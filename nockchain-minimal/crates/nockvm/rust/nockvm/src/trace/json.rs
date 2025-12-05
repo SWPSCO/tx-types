@@ -41,12 +41,13 @@ impl TraceBackend for JsonBackend {
         let now = Instant::now();
 
         while !trace_stack.is_null() {
-            let ts = (*trace_stack)
+            let current = &*trace_stack;
+            let ts = current
                 .start
                 .saturating_duration_since(self.process_start)
                 .as_micros() as f64;
             let dur = now
-                .saturating_duration_since((*trace_stack).start)
+                .saturating_duration_since(current.start)
                 .as_micros() as f64;
 
             // Don't write out traces less than 33us
@@ -56,7 +57,7 @@ impl TraceBackend for JsonBackend {
                 continue;
             }
 
-            let pc = path_to_cord(stack, (*trace_stack).path);
+            let pc = path_to_cord(stack, current.path);
             let pc_len = met3_usize(pc);
             let pc_bytes = &pc.as_ne_bytes()[0..pc_len];
             let pc_str = match std::str::from_utf8(pc_bytes) {
@@ -79,7 +80,7 @@ impl TraceBackend for JsonBackend {
             obj.write(&mut self.file)?;
             self.file.write_all(",\n".as_bytes())?;
 
-            trace_stack = (*trace_stack).next;
+            trace_stack = current.next;
         }
 
         Ok(())

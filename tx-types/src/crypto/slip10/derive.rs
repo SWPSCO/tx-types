@@ -2,11 +2,13 @@ use crate::crypto::cheetah::point::{cheetah_order, CheetahPoint};
 use crate::crypto::slip10::bip39_to_seed;
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
+use bs58;
 /// Extended key structure and child key derivation
 use hmac::{Hmac, Mac};
 use ibig::UBig;
 use num_traits::Zero;
 use sha2::Sha512;
+use std::convert::TryInto;
 use zeroize::Zeroize;
 use bs58;
 use std::convert::TryInto;
@@ -328,9 +330,7 @@ impl ExtendedKey {
     }
 
     pub fn to_zprv_string(&self) -> Result<String> {
-        let private_key = self
-            .private_key
-            .ok_or(CryptoError::InvalidPrivateKey)?;
+        let private_key = self.private_key.ok_or(CryptoError::InvalidPrivateKey)?;
 
         let mut payload = Vec::with_capacity(4 + 1 + 1 + 4 + 4 + 32 + 33);
         payload.extend_from_slice(&ZPRV_TYPE.to_be_bytes());
@@ -398,12 +398,12 @@ fn slice_to_array<const N: usize>(slice: &[u8]) -> Result<[u8; N]> {
 
 // Cut helper
 fn cut<'a>(payload: &'a [u8], offset_from_end: usize, len: usize) -> Result<&'a [u8]> {
-  let total = payload.len();
-  let start = total
-      .checked_sub(offset_from_end + len)
-      .ok_or(CryptoError::Other("failed to cut payload".to_string()))?;
-  let end = start + len;
-  Ok(&payload[start..end])
+    let total = payload.len();
+    let start = total
+        .checked_sub(offset_from_end + len)
+        .ok_or(CryptoError::Other("failed to cut payload".to_string()))?;
+    let end = start + len;
+    Ok(&payload[start..end])
 }
 
 #[cfg(test)]

@@ -27,7 +27,11 @@ extern crate alloc;
 
 use crate::collections::ZMap;
 use crate::hashing::hashable::Hashable;
-use crate::transaction_types::{Coins, NName, Spend};
+use crate::transaction_types::{Coins, NName, Spend, SpendBody};
+use crate::transaction_types_v1::{NoteData, SeedV1, SeedsV1, SpendV1, Witness};
+use nockapp::noun::slab::{NockJammer, NounSlab};
+use nockvm::noun::Noun;
+use noun_serde::NounEncode;
 
 /// Base fee per word for witness and note-data storage
 /// From blockchain-constants: base-fee=(bex 15) = 2^15 = 32,768
@@ -64,18 +68,30 @@ pub fn calculate_min_fee(spends: &ZMap<NName, Spend>) -> Coins {
 
 /// Count total words for a single spend (seeds + witness)
 fn count_spend_words(spend: &Spend) -> u64 {
-    // For now, we convert the spend to a hashable and count leaves
-    // This is a conservative approximation until we implement proper
-    // word counting for each spend type
+    match &spend.body {
+        SpendBody::V1(body) => count_v1_spend_words(body),
+        SpendBody::V0ToV1(_) | SpendBody::V0(_) => count_leaves(&spend.to_hashable()),
+    }
+}
 
-    // TODO: Implement proper counting that matches Hoon:
-    // - count_seed_words: iterate seeds, sum leaves in each note-data
-    // - count_witness_words: count leaves in witness/signature structure
+fn count_v1_spend_words(spend: &SpendV1) -> u64 {
+    count_seeds_v1_words(&spend.seeds) + count_witness_words(&spend.witness)
+}
 
-    // For now, use a placeholder that returns a reasonable default
-    // This ensures the fee calculation doesn't break existing code
-    let spend_tree = spend.body.to_hashable();
-    count_leaves(&spend_tree)
+fn count_seeds_v1_words(seeds: &SeedsV1) -> u64 {
+    seeds
+        .set
+        .iter()
+        .map(|seed| count_note_data_words(&seed.note_data))
+        .sum()
+}
+
+fn count_note_data_words(note_data: &NoteData) -> u64 {
+    count_leaves_from_encoder(|slab| note_data.to_noun(slab))
+}
+
+fn count_witness_words(witness: &Witness) -> u64 {
+    count_leaves_from_encoder(|slab| witness.to_noun(slab))
 }
 
 /// Count the number of leaves in a Hashable tree
@@ -89,6 +105,23 @@ fn count_leaves(h: &Hashable) -> u64 {
         Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => 1,
         // Cell case: sum of left and right subtrees
         Hashable::Cell(left, right) => count_leaves(left) + count_leaves(right),
+    }
+}
+
+fn count_leaves_from_encoder<F>(build: F) -> u64
+where
+    F: Fn(&mut NounSlab<NockJammer>) -> Noun,
+{
+    let mut slab = NounSlab::<NockJammer>::new();
+    let noun = build(&mut slab);
+    count_leaves_from_noun(noun)
+}
+
+fn count_leaves_from_noun(noun: Noun) -> u64 {
+    if let Ok(cell) = noun.as_cell() {
+        count_leaves_from_noun(cell.head()) + count_leaves_from_noun(cell.tail())
+    } else {
+        1
     }
 }
 
