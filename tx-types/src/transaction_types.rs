@@ -1153,6 +1153,11 @@ pub enum RawTransaction {
 
 impl NounDecode for RawTransaction {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        // Try V1 first (has version field)
+        if let Ok(v1) = RawTransactionV1::from_noun(noun) {
+            return Ok(RawTransaction::V1(v1));
+        }
+        // Fall back to V0
         if let Ok(v0) = RawTransactionV0::from_noun(noun) {
             return Ok(RawTransaction::V0(v0));
         }
