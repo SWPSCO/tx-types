@@ -37,24 +37,28 @@ pub fn hash_noun_varlen(data: &[u8]) -> Hash {
 }
 
 /// Hash two digests together (hash-ten-cell in Hoon).
+///
+/// The hash_10 jet expects a proper Hoon list of 10 belts: [a [b [c ... [j 0]...]]]
+/// This is created by flattening the ten-cell [[l0 l1 l2 l3 l4] [r0 r1 r2 r3 r4]]
+/// into a list [l0 l1 l2 l3 l4 r0 r1 r2 r3 r4].
 pub fn hash_ten_cell(left: Hash, right: Hash) -> Hash {
     use super::tip5::Tip5Hasher;
-    use nockvm::noun::Cell;
 
-    let mut slab: NounSlab = NounSlab::new();
-    let mut list = Atom::new(&mut slab, 0).as_noun();
+    // Flatten left and right hash values into a single array
+    let values: [u64; 10] = [
+        left.values[0],
+        left.values[1],
+        left.values[2],
+        left.values[3],
+        left.values[4],
+        right.values[0],
+        right.values[1],
+        right.values[2],
+        right.values[3],
+        right.values[4],
+    ];
 
-    for value in right.values.iter().rev() {
-        let atom = Atom::new(&mut slab, *value).as_noun();
-        list = Cell::new(&mut slab, atom, list).as_noun();
-    }
-
-    for value in left.values.iter().rev() {
-        let atom = Atom::new(&mut slab, *value).as_noun();
-        list = Cell::new(&mut slab, atom, list).as_noun();
-    }
-
-    Tip5Hasher::hash_10(list).unwrap_or_else(|_| Hash { values: [0; 5] })
+    Tip5Hasher::hash_10_from_values(&values).unwrap_or_else(|_| Hash { values: [0; 5] })
 }
 
 /// Recursively hash a Hashable structure

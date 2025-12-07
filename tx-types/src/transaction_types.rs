@@ -62,21 +62,25 @@ impl Ord for Hash {
 
 impl Hash {
     /// Convert the Hash to a UBig integer for comparison
-    /// This treats the hash as a 320-bit integer (5 * 64 bits)
-    /// values[0] is least significant, values[4] is most significant
+    /// This uses the Goldilocks prime as the polynomial base, matching Hoon's digest-to-atom:
+    ///   a + p*b + p²*c + p³*d + p⁴*e
+    /// where p = 2^64 - 2^32 + 1 (Goldilocks prime)
     pub fn to_ubig(&self) -> ibig::UBig {
         use ibig::UBig;
 
-        // Build the UBig from bytes in little-endian order
-        let mut bytes = Vec::with_capacity(40); // 5 * 8 bytes
+        // Goldilocks prime: 2^64 - 2^32 + 1
+        let p = UBig::from(18446744069414584321u64);
 
-        // Add each u64 in little-endian byte order
-        for value in &self.values {
-            bytes.extend_from_slice(&value.to_le_bytes());
+        // Compute: values[0] + p*values[1] + p²*values[2] + p³*values[3] + p⁴*values[4]
+        let mut result = UBig::from(self.values[0]);
+        let mut p_power = p.clone();
+
+        for &value in &self.values[1..] {
+            result += &p_power * UBig::from(value);
+            p_power *= &p;
         }
 
-        // Create UBig from little-endian bytes
-        UBig::from_le_bytes(&bytes)
+        result
     }
 
     /// Create a Hash from a UBig integer (inverse of to_ubig)
