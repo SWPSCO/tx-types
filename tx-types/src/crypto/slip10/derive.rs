@@ -10,8 +10,6 @@ use num_traits::Zero;
 use sha2::Sha512;
 use std::convert::TryInto;
 use zeroize::Zeroize;
-use bs58;
-use std::convert::TryInto;
 
 type HmacSha512 = Hmac<Sha512>;
 const NOCKCHAIN_SLIP10_KEY: &[u8] = b"Nockchain seed";
