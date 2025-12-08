@@ -2,7 +2,6 @@ use crate::crypto::cheetah::point::{cheetah_order, CheetahPoint};
 use crate::crypto::slip10::bip39_to_seed;
 use crate::crypto::{CryptoError, Result};
 use crate::transaction_types::SchnorrPubkey;
-use bs58;
 /// Extended key structure and child key derivation
 use hmac::{Hmac, Mac};
 use ibig::UBig;
@@ -10,6 +9,7 @@ use num_traits::Zero;
 use sha2::Sha512;
 use std::convert::TryInto;
 use zeroize::Zeroize;
+use bs58;
 
 type HmacSha512 = Hmac<Sha512>;
 const NOCKCHAIN_SLIP10_KEY: &[u8] = b"Nockchain seed";
@@ -132,7 +132,7 @@ impl ExtendedKey {
         let payload = bs58::decode(key)
             .with_check(None)
             .into_vec()
-            .map_err(|e| CryptoError::Base58DecodeError(e.to_string()))?;
+            .map_err(|e: bs58::decode::Error| CryptoError::Base58DecodeError(e.to_string()))?;
 
         let version = if payload.len() >= (key_size + 46) {
             cut(&payload, key_size + 41, 1)?[0]

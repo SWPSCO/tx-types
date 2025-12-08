@@ -46,10 +46,14 @@ impl From<JetErr> for Tip5Error {
 pub struct Tip5Hasher;
 
 impl Tip5Hasher {
+    /// Parse a hash noun which can be either:
+    /// - A 5-tuple: [a [b [c [d e]]]] (from digest_to_noundigest)
+    /// - A Hoon list with terminator: [a [b [c [d [e 0]]]]] (from vec_to_hoon_list)
     fn digest_from_noun(hash_noun: Noun) -> Result<Hash, Tip5Error> {
         let mut values = [0u64; 5];
         let mut current = hash_noun;
 
+        // Parse first 4 elements (always in cells)
         for i in 0..4 {
             let cell = current
                 .as_cell()
@@ -67,13 +71,28 @@ impl Tip5Hasher {
             current = cell.tail();
         }
 
-        let atom = current
-            .as_atom()
-            .map_err(|_| Tip5Error::HashingError("Expected atom at position 4".to_string()))?;
-
-        values[4] = atom
-            .as_u64()
-            .map_err(|_| Tip5Error::HashingError("Atom too large at position 4".to_string()))?;
+        // The 5th element: could be either:
+        // - An atom (5-tuple format: [a [b [c [d e]]]])
+        // - A cell [e 0] (Hoon list format: [a [b [c [d [e 0]]]]])
+        if let Ok(atom) = current.as_atom() {
+            // 5-tuple format - current is already the 5th element
+            values[4] = atom.as_u64().map_err(|_| {
+                Tip5Error::HashingError("Atom too large at position 4".to_string())
+            })?;
+        } else if let Ok(cell) = current.as_cell() {
+            // Hoon list format - extract head of [e 0]
+            let atom = cell
+                .head()
+                .as_atom()
+                .map_err(|_| Tip5Error::HashingError("Expected atom at position 4".to_string()))?;
+            values[4] = atom.as_u64().map_err(|_| {
+                Tip5Error::HashingError("Atom too large at position 4".to_string())
+            })?;
+        } else {
+            return Err(Tip5Error::HashingError(
+                "Invalid hash noun structure at position 4".to_string(),
+            ));
+        }
 
         Ok(Hash { values })
     }
@@ -119,6 +138,40 @@ impl Tip5Hasher {
         // Create the proper subject structure for jets: [formula sample payload]
         // The jet expects the sample at slot 6, so we need [0 sample 0]
         let subject = T(&mut context.stack, &[D(0), ten_list, D(0)]);
+
+        let hash_noun = hash_10_jet(context, subject)
+            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_10 failed: {:?}", e)))?;
+
+        Self::digest_from_noun(hash_noun)
+    }
+
+    /// Hash 10 u64 values using the TIP5 hash_10 algorithm
+    ///
+    /// This builds the list directly in the NockStack to avoid memory issues.
+    ///
+    /// # Arguments
+    /// * `values` - Array of 10 u64 values to hash
+    ///
+    /// # Returns
+    /// * `Result<Hash, Tip5Error>` - The hash as a Hash struct or an error
+    pub fn hash_10_from_values(values: &[u64; 10]) -> Result<Hash, Tip5Error> {
+        use nockvm::noun::Atom;
+
+        // Create a test context (includes NockStack and other needed components)
+        let context = &mut init_context();
+        let stack = &mut context.stack;
+
+        // Build a proper Hoon list directly in the NockStack
+        // [v0 [v1 [v2 [v3 [v4 [v5 [v6 [v7 [v8 [v9 0]]]]]]]]]]
+        let mut list = D(0);
+        for &val in values.iter().rev() {
+            // Use Atom::new to handle large values that exceed DIRECT_MAX
+            let atom = Atom::new(stack, val).as_noun();
+            list = T(stack, &[atom, list]);
+        }
+
+        // Create the proper subject structure for jets: [formula sample payload]
+        let subject = T(stack, &[D(0), list, D(0)]);
 
         let hash_noun = hash_10_jet(context, subject)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_10 failed: {:?}", e)))?;

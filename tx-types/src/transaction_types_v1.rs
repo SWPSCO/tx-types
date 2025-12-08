@@ -159,14 +159,12 @@ fn atom_less_than(a: Atom, b: Atom) -> bool {
 }
 
 fn less_than_hash(a: &[u64; 5], b: &[u64; 5]) -> bool {
-    for i in (0..=4).rev() {
-        if a[i] < b[i] {
-            return true;
-        } else if a[i] > b[i] {
-            return false;
-        }
-    }
-    false
+    // Compare using Goldilocks polynomial representation, matching Hoon's lth-tip:
+    //   digest-to-atom: a + p*b + p²*c + p³*d + p⁴*e
+    // where p = 2^64 - 2^32 + 1 (Goldilocks prime)
+    let hash_a = Hash { values: *a };
+    let hash_b = Hash { values: *b };
+    hash_a.to_ubig() < hash_b.to_ubig()
 }
 
 fn tip_hash(noun: Noun) -> [u64; 5] {
