@@ -9,16 +9,16 @@ version = "0.1.0"
 [workspace.dependencies]
 # Nockchain dependencies - by default from git
 # temporarily using nockpool/hoon
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56", default-features = false }
-nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
-nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "07a0e56" }
+noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
+nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
+nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
 
 # Standard dependencies (matching nockchain-minimal workspace)
 aes = { version = "0.8.3", default-features = false }
