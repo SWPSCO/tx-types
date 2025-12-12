@@ -8,28 +8,53 @@ repository = "https://github.com/SWPSCO/tx-types"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-noun-serde = { workspace = true }
-nockapp = { workspace = true }
-nockvm = { workspace = true }
-nockchain-libp2p-io = { workspace = true }
-zkvm-jetpack = { workspace = true }
-nockchain-math = { workspace = true }
-ibig = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-either = { workspace = true }
-num-bigint = { workspace = true }
-num-traits = { workspace = true }
-bs58 = { workspace = true, features = ["check"] }
-anyhow = { workspace = true }
-chrono = { workspace = true, features = ["serde"] }
-bip39 = { workspace = true }
+# Core no_std dependencies - always required
 hmac = { workspace = true }
-pbkdf2 = { workspace = true }
-zeroize = { workspace = true }
 sha2 = { workspace = true }
-bytes = { workspace = true }
-once_cell = { workspace = true }
+zeroize = { workspace = true }
+ibig = { workspace = true }
+
+# Optional std dependencies
+noun-serde = { workspace = true, optional = true }
+nockapp = { workspace = true, optional = true }
+nockvm = { workspace = true, optional = true }
+nockchain-libp2p-io = { workspace = true, optional = true }
+zkvm-jetpack = { workspace = true, optional = true }
+nockchain-math = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+either = { workspace = true, optional = true }
+num-bigint = { workspace = true, optional = true }
+num-traits = { workspace = true, optional = true }
+bs58 = { workspace = true, features = ["check"], optional = true }
+anyhow = { workspace = true, optional = true }
+chrono = { workspace = true, features = ["serde"], optional = true }
+bip39 = { workspace = true, optional = true }
+pbkdf2 = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
 
 [features]
+default = ["std"]
+std = [
+    "ibig/std",
+    "dep:noun-serde",
+    "dep:nockapp",
+    "dep:nockvm",
+    "dep:nockchain-libp2p-io",
+    "dep:zkvm-jetpack",
+    "dep:nockchain-math",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:either",
+    "dep:num-bigint",
+    "dep:num-traits",
+    "dep:bs58",
+    "dep:anyhow",
+    "dep:chrono",
+    "dep:bip39",
+    "dep:pbkdf2",
+    "dep:bytes",
+    "dep:once_cell",
+]
 tracy = []
