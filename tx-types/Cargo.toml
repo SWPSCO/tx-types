@@ -37,7 +37,6 @@ once_cell = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
-    "ibig/std",
     "dep:noun-serde",
     "dep:nockapp",
     "dep:nockvm",
