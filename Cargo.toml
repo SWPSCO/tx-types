@@ -8,17 +8,17 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Nockchain dependencies - by default from git
-# temporarily using nockpool/hoon
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
-nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+# temporarily using nockpool/hoon-v1
+noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf", default-features = false }
+nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf", default-features = false }
+nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
+nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "9eb98e9324e3101f16f38346cd5ace73d7e30adf" }
 
 # Standard dependencies (matching nockchain-minimal workspace)
 aes = { version = "0.8.3", default-features = false }
