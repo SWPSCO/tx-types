@@ -1,0 +1,9 @@
+[package]
+name = "pokenoun"
+version.workspace = true
+edition.workspace = true
+description = "no_std noun arena + jam/cue + TIP5 + canonical z-map utilities"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+

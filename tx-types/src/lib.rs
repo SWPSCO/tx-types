@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+pub use pokenoun;
+
 // Crypto module is always available (no_std compatible)
 pub mod crypto;
 

@@ -13,6 +13,7 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
 ibig = { workspace = true }
+pokenoun = { workspace = true }
 
 # Optional std dependencies
 noun-serde = { workspace = true, optional = true }
