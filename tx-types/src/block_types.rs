@@ -45,17 +45,6 @@ pub struct CoinbaseV1 {
     pub map: ZMap<Hash, Coins>,
 }
 
-/// Build a V1 coinbase note name from a precomputed lock root.
-pub fn coinbase_name_from_lock_root(lock_root: Hash, parent_hash: Hash) -> NName {
-    NName::new_v1(
-        lock_root,
-        Source {
-            p: parent_hash,
-            is_coinbase: true,
-        },
-    )
-}
-
 pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
     let m = pkh_hashes.len() as u64;
 
@@ -582,18 +571,61 @@ impl PageV0 {
 impl PageV1 {
     pub fn coinbase_notes(&self) -> Vec<NNote> {
         let mut notes: Vec<NNote> = Vec::new();
+        // =/  cb-split=coinbase-split  ~(coinbase get:^page page)
+        let cb = self.coinbase.map.tap().into_iter();
+        /*
+        %+  turn  ~(tap z-in ~(key z-by +.cb))
+        |=  h=hash:t
+        (new:coinbase:t pag (~(put z-in *(z-set hash:t)) h))
+        */
+        let pkh_hashes: Vec<Hash> = cb.clone().map(|(hash, _)| hash).collect();
+        for h in pkh_hashes.clone() {
+            let vec_wrapped_hash = vec![h];
+            // sum rewards for all provided hashes
+            /*
+            =/  reward=coins
+            %+  roll  ~(tap z-in pkh-hashes)
+            |=  [h=hash acc=coins]
+            (add acc (~(got z-by +.cb-split) h))
+            */
 
-        // Each coinbase map entry key is the lock root for that recipient
-        for (lock_root, reward) in self.coinbase.map.tap().into_iter() {
-            let name = coinbase_name_from_lock_root(lock_root.clone(), self.parent.clone());
+            let mut reward_sum: u64 = 0;
+
+            for hash in vec_wrapped_hash.clone() {
+                for (key, value) in cb.clone() {
+                    if key == hash {
+                        reward_sum += value.value;
+                    }
+                }
+            }
+
+            let assets = Coins { value: reward_sum };
+
+            let mut name_hashes = ZSet::new();
+            for hash in vec_wrapped_hash.clone() {
+                name_hashes.put(hash);
+            }
+
+            let name = make_name(name_hashes, self.parent.clone());
+
             notes.push(NNote::V1(NNoteV1 {
                 version: 1,
                 origin_page: self.height,
                 name,
                 note_data: NoteData { map: ZMap::new() },
-                assets: reward,
+                assets,
             }));
         }
+        /*
+        %*  .  *nnote-1:v1
+        version      %1
+        origin-page  ~(height get:^page page)
+        name         (make-name pkh-hashes ~(parent get:^page page))
+        note-data    *(z-map @tas *)
+        assets       reward
+        ==
+
+        */
 
         notes
     }

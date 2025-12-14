@@ -1,5 +1,5 @@
 [workspace]
-members = ["tx-types"]
+members = ["tx-types", "pokenoun"]
 resolver = "2"
 
 [workspace.package]
@@ -76,6 +76,7 @@ bip39 = { version = "2.0", default-features = false, features = ["std"] }
 hmac = "0.12"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 zeroize = { version = "1.0", default-features = false, features = ["alloc"] }
+pokenoun = { path = "./pokenoun" }
 
 [patch.crates-io]
 tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }

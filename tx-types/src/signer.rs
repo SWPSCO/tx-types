@@ -47,12 +47,14 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
         panic!("Secret key must be less than curve order");
     }
 
-    // 1) Generate nonce using TIP5(pubkey || message) - matches Hoon line 1639-1642
-    // Create transcript list: [x.pubkey y.pubkey message ~]
+    // 1) Generate nonce using TIP5(pubkey || message || sk) - matches Hoon line 1639-1642
+    // Hoon: [(f6lt-to-list x.pubkey) (f6lt-to-list y.pubkey) m-list sk-as-32-bit-belts ~]
+    // Create transcript list: [x.pubkey y.pubkey message sk ~]
     let nonce_digest = hash_transcript_list(&[
         &public_key.x.values[..], // 6 elements
         &public_key.y.values[..], // 6 elements
         &message.values[..],      // 5 elements
+        &secret_key.values[..],   // 8 elements (T8 format secret key)
     ])
     .unwrap_or_else(|_| Hash { values: [0; 5] });
 
