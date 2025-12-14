@@ -1013,13 +1013,18 @@ pub struct Pkh {
 
 impl Pkh {
     pub fn to_hashable(&self) -> Hashable {
+        // From Hoon (tx-engine-1.hoon lines 1442-1455):
+        // ++  hashable
+        //   |=  =form
+        //   |^
+        //   [leaf+m.form (hashable-hashes h.form)]
+        //
+        // NOTE: The tag (%pkh) is NOT included here - it's added by
+        // LockPrimitive::to_hashable() which wraps this with [leaf+%pkh ...]
         let hash_hashable = self.h.to_hashable(|h| Hashable::Hash(h.clone()));
         Hashable::cell(
-            Hashable::leaf_from_tas("pkh"),
-            Hashable::cell(
-                Hashable::leaf_from_atom(&self.m.to_le_bytes()),
-                hash_hashable,
-            ),
+            Hashable::leaf_from_atom(&self.m.to_le_bytes()),
+            hash_hashable,
         )
     }
 }
@@ -1033,10 +1038,18 @@ pub struct Tim {
 
 impl Tim {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(
-            Hashable::leaf_from_tas("tim"),
-            Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable()),
-        )
+        // From Hoon (tx-engine-1.hoon lines 1534-1540):
+        // ++  hashable
+        //   |=  =form
+        //   :-  :-  ?~(min.rel.form %leaf^~ [%leaf^~ leaf+u.min.rel.form])
+        //           ?~(max.rel.form %leaf^~ [%leaf^~ leaf+u.max.rel.form])
+        //       :-  ?~(min.abs.form %leaf^~ [%leaf^~ leaf+u.min.abs.form])
+        //           ?~(max.abs.form %leaf^~ [%leaf^~ leaf+u.max.abs.form])
+        //
+        // This produces: [[min-rel max-rel] [min-abs max-abs]]
+        // NOTE: The tag (%tim) is NOT included here - it's added by
+        // LockPrimitive::to_hashable() which wraps this with [leaf+%tim ...]
+        Hashable::cell(self.rel.to_hashable(), self.abs.to_hashable())
     }
 }
 
@@ -1047,10 +1060,19 @@ pub struct Hax {
 
 impl Hax {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(
-            Hashable::leaf_from_tas("hax"),
-            Hashable::leaf_from_tas("fake"), // TODO
-        )
+        // From Hoon (tx-engine-1.hoon lines 1490-1496):
+        // ++  hashable
+        //   |=  =form
+        //   ?~  form  leaf+~
+        //   :*  hash+n.form
+        //       $(form l.form)
+        //       $(form r.form)
+        //   ==
+        //
+        // This produces a tree of hashes without a tag.
+        // NOTE: The tag (%hax) is NOT included here - it's added by
+        // LockPrimitive::to_hashable() which wraps this with [leaf+%hax ...]
+        self.set.to_hashable(|h| Hashable::Hash(h.clone()))
     }
 }
 
@@ -1061,7 +1083,13 @@ pub struct Brn {
 
 impl Brn {
     pub fn to_hashable(&self) -> Hashable {
-        Hashable::cell(Hashable::leaf_from_tas("brn"), Hashable::null())
+        // From Hoon (tx-engine-1.hoon lines 1108-1109):
+        // %brn  [leaf+%brn leaf+~]
+        //
+        // The brn primitive just produces leaf+~ (null).
+        // NOTE: The tag (%brn) is NOT included here - it's added by
+        // LockPrimitive::to_hashable() which wraps this with [leaf+%brn ...]
+        Hashable::null()
     }
 }
 
