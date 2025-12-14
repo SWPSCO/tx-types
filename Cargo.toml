@@ -16,7 +16,7 @@ nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970
 nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
 nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
 zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
 murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
 nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
 

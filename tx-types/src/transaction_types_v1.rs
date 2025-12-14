@@ -1110,12 +1110,24 @@ impl NounDecode for LockPrimitive {
 
 impl LockPrimitive {
     pub fn to_hashable(&self) -> Hashable {
-        match &self.body {
-            LockPrimitiveBody::Pkh(pkh) => pkh.to_hashable(),
-            LockPrimitiveBody::Tim(tim) => tim.to_hashable(),
-            LockPrimitiveBody::Hax(hax) => hax.to_hashable(),
-            LockPrimitiveBody::Brn(brn) => brn.to_hashable(),
-        }
+        // From Hoon (tx-engine-1.hoon lines 1102-1110):
+        // ++  hashable
+        //   |=  =form
+        //   ^-  hashable:tip5
+        //   ?-  -.form
+        //       %tim  [leaf+%tim (hashable:tim +.form)]
+        //       %hax  [leaf+%hax (hashable:hax +.form)]
+        //       %pkh  [leaf+%pkh (hashable:pkh +.form)]
+        //       %brn  [leaf+%brn leaf+~]
+        //   ==
+        // The tag is included as a leaf!
+        let (tag, body_hashable) = match &self.body {
+            LockPrimitiveBody::Pkh(pkh) => ("pkh", pkh.to_hashable()),
+            LockPrimitiveBody::Tim(tim) => ("tim", tim.to_hashable()),
+            LockPrimitiveBody::Hax(hax) => ("hax", hax.to_hashable()),
+            LockPrimitiveBody::Brn(brn) => ("brn", brn.to_hashable()),
+        };
+        Hashable::cell(Hashable::leaf_from_tas(tag), body_hashable)
     }
 }
 
