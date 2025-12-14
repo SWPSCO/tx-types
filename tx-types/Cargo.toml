@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
-ibig = { workspace = true }
+ibig = { workspace = true, default-features = false }
 pokenoun = { workspace = true }
 
 # Optional std dependencies
@@ -38,6 +38,8 @@ once_cell = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
+    "ibig/std",
+    "ibig/num-traits",
     "dep:noun-serde",
     "dep:nockapp",
     "dep:nockvm",
