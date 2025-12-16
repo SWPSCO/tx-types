@@ -263,14 +263,18 @@ impl NName {
     }
 
     pub fn first_v1(lock: Hash) -> Hash {
-        let true_leaf = Hashable::leaf_from_atom([1u8]);
-        hash_hashable(&Hashable::cell(true_leaf, Hashable::Hash(lock)))
+        // In Hoon: (hash-hashable:tip5 [leaf+& hash+lock])
+        // & (loobean true/yes) = 0, so leaf+& = leaf+0 = Hashable::null()
+        let loobean_yes = Hashable::null();
+        hash_hashable(&Hashable::cell(loobean_yes, Hashable::Hash(lock)))
     }
 
     pub fn last_v1(source: Source) -> Hash {
-        let true_leaf = Hashable::leaf_from_atom([1u8]);
+        // In Hoon: (hash-hashable:tip5 :* leaf+& (hashable:source source) leaf+~ ==)
+        // & (loobean true/yes) = 0, so leaf+& = leaf+0 = Hashable::null()
+        let loobean_yes = Hashable::null();
         hash_hashable(&Hashable::cell_chain([
-            true_leaf,
+            loobean_yes,
             source.to_hashable(),
             Hashable::null(),
         ]))
