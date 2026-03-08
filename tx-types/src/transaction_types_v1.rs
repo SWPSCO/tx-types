@@ -921,7 +921,39 @@ impl Witness {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+fn decode_hoon_list<T, F>(
+    noun: &Noun,
+    context: &'static str,
+    mut decode_item: F,
+) -> Result<Vec<T>, noun_serde::NounDecodeError>
+where
+    F: FnMut(&Noun) -> Result<T, noun_serde::NounDecodeError>,
+{
+    let mut items = Vec::new();
+    let mut current = *noun;
+
+    loop {
+        if let Ok(cell) = current.as_cell() {
+            items.push(decode_item(&cell.head())?);
+            current = cell.tail();
+            continue;
+        }
+
+        let atom = current
+            .as_atom()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;
+        match atom.as_u64()? {
+            0 => return Ok(items),
+            _ => {
+                return Err(noun_serde::NounDecodeError::Custom(
+                    format!("{context} must be a list").into(),
+                ))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, NounEncode)]
 pub struct LockMerkleProof {
     pub spend_condition: SpendCondition,
     pub axis: u64,
@@ -960,7 +992,51 @@ impl LockMerkleProof {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+impl NounDecode for LockMerkleProof {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        let cell = noun
+            .as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+
+        if let Ok(version_atom) = cell.head().as_atom() {
+            if version_atom.into_string()? == "full" {
+                let rest = cell
+                    .tail()
+                    .as_cell()
+                    .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+                let spend_condition = SpendCondition::from_noun(&rest.head())?;
+                let rest_tail = rest
+                    .tail()
+                    .as_cell()
+                    .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+                let axis = u64::from_noun(&rest_tail.head())?;
+                let merkle_proof = MerkleProof::from_noun(&rest_tail.tail())?;
+
+                return Ok(Self {
+                    spend_condition,
+                    axis,
+                    merkle_proof,
+                });
+            }
+        }
+
+        let spend_condition = SpendCondition::from_noun(&cell.head())?;
+        let tail = cell
+            .tail()
+            .as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+        let axis = u64::from_noun(&tail.head())?;
+        let merkle_proof = MerkleProof::from_noun(&tail.tail())?;
+
+        Ok(Self {
+            spend_condition,
+            axis,
+            merkle_proof,
+        })
+    }
+}
+
+#[derive(Debug, Clone, NounEncode)]
 pub struct SpendCondition {
     pub p: Vec<LockPrimitive>,
 }
@@ -994,6 +1070,14 @@ impl SpendCondition {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+impl NounDecode for SpendCondition {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        Ok(Self {
+            p: decode_hoon_list(noun, "spend-condition", LockPrimitive::from_noun)?,
+        })
     }
 }
 
@@ -1176,7 +1260,7 @@ impl NounEncode for LockPrimitive {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+#[derive(Debug, Clone, NounEncode)]
 pub struct MerkleProof {
     pub root: Hash,
     pub path: Vec<Hash>,
@@ -1214,6 +1298,17 @@ impl MerkleProof {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+impl NounDecode for MerkleProof {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        let cell = noun
+            .as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+        let root = Hash::from_noun(&cell.head())?;
+        let path = decode_hoon_list(&cell.tail(), "merkle proof path", Hash::from_noun)?;
+        Ok(Self { root, path })
     }
 }
 
@@ -1277,5 +1372,86 @@ impl PkhSignatureValue {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nockvm::noun::{D, T};
+    use noun_serde::NounEncode;
+
+    #[test]
+    fn lock_merkle_proof_decodes_full_format() {
+        let mut slab = NounSlab::new();
+        let primitive = LockPrimitive {
+            header: "brn".to_string(),
+            body: LockPrimitiveBody::Brn(Brn { value: 0 }),
+        };
+        let spend_condition_noun = T(&mut slab, &[primitive.to_noun(&mut slab), D(0)]);
+        let merkle_proof = MerkleProof {
+            root: Hash {
+                values: [1, 2, 3, 4, 5],
+            },
+            path: vec![Hash {
+                values: [6, 7, 8, 9, 10],
+            }],
+        };
+        let full_lmp = T(
+            &mut slab,
+            &[
+                make_tas(&mut slab, "full").as_noun(),
+                spend_condition_noun,
+                D(7),
+                merkle_proof.to_noun(&mut slab),
+            ],
+        );
+
+        let decoded = LockMerkleProof::from_noun(&full_lmp).expect("full lmp should decode");
+
+        assert_eq!(decoded.axis, 7);
+        assert_eq!(decoded.spend_condition.p.len(), 1);
+        match &decoded.spend_condition.p[0].body {
+            LockPrimitiveBody::Brn(brn) => assert_eq!(brn.value, 0),
+            other => panic!("expected burn primitive, got {:?}", other),
+        }
+        assert_eq!(decoded.merkle_proof.root.values, [1, 2, 3, 4, 5]);
+        assert_eq!(decoded.merkle_proof.path.len(), 1);
+        assert_eq!(decoded.merkle_proof.path[0].values, [6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn spend_condition_rejects_improper_list_without_panicking() {
+        let mut slab = NounSlab::new();
+        let primitive = LockPrimitive {
+            header: "brn".to_string(),
+            body: LockPrimitiveBody::Brn(Brn { value: 0 }),
+        };
+        let malformed_list = T(&mut slab, &[primitive.to_noun(&mut slab), D(1)]);
+
+        let err = SpendCondition::from_noun(&malformed_list)
+            .expect_err("spend-condition decode should reject improper list");
+
+        assert!(err.to_string().contains("spend-condition must be a list"));
+    }
+
+    #[test]
+    fn merkle_proof_rejects_improper_path_without_panicking() {
+        let mut slab = NounSlab::new();
+        let malformed = T(
+            &mut slab,
+            &[
+                Hash {
+                    values: [1, 2, 3, 4, 5],
+                }
+                .to_noun(&mut slab),
+                D(1),
+            ],
+        );
+
+        let err =
+            MerkleProof::from_noun(&malformed).expect_err("merkle proof path should reject atom");
+
+        assert!(err.to_string().contains("merkle proof path must be a list"));
     }
 }
