@@ -101,12 +101,17 @@ fn witness_to_json(witness: &Witness) -> Value {
 }
 
 fn lock_merkle_proof_to_json(lmp: &LockMerkleProof) -> Value {
+    let proof = lmp.proof();
     json!({
-        "spend_condition": spend_condition_to_json(&lmp.spend_condition),
-        "axis": lmp.axis,
+        "format": match lmp {
+            LockMerkleProof::Full(_) => "full",
+            LockMerkleProof::Stub(_) => "stub",
+        },
+        "spend_condition": spend_condition_to_json(lmp.spend_condition()),
+        "axis": lmp.axis(),
         "merkle_proof": {
-            "root": lmp.merkle_proof.root.to_b58(),
-            "path": lmp.merkle_proof.path.iter().map(|h| h.to_b58()).collect::<Vec<_>>(),
+            "root": proof.root.to_b58(),
+            "path": proof.path.iter().map(|h| h.to_b58()).collect::<Vec<_>>(),
         }
     })
 }

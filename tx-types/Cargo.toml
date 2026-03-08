@@ -19,6 +19,7 @@ pokenoun = { workspace = true }
 noun-serde = { workspace = true, optional = true }
 nockapp = { workspace = true, optional = true }
 nockvm = { workspace = true, optional = true }
+nockvm_macros = { workspace = true, optional = true }
 nockchain-libp2p-io = { workspace = true, optional = true }
 zkvm-jetpack = { workspace = true, optional = true }
 nockchain-math = { workspace = true, optional = true }
@@ -44,6 +45,7 @@ std = [
     "dep:noun-serde",
     "dep:nockapp",
     "dep:nockvm",
+    "dep:nockvm_macros",
     "dep:nockchain-libp2p-io",
     "dep:zkvm-jetpack",
     "dep:nockchain-math",
