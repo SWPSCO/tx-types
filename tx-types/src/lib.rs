@@ -70,7 +70,10 @@ pub use tx_builder_v1::{
 pub use tx_builder_batch::{build_batch_spends, BatchOrder};
 
 #[cfg(feature = "std")]
-pub use fee_calculator::{calculate_min_fee, BASE_FEE, MIN_FEE};
+pub use fee_calculator::{
+    calculate_min_fee, calculate_min_fee_for_page, BASE_FEE, BYTHOS_PHASE, INPUT_FEE_DIVISOR,
+    MIN_FEE,
+};
 
 #[cfg(feature = "std")]
 pub use transaction_types::*;
