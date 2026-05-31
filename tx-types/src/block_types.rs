@@ -713,12 +713,12 @@ mod tests {
         let msg = PageMsg::new();
 
         // Create the page with all fields
-        let page = Page {
+        let page = PageV0 {
             digest: Hash {
                 values: [0xa, 0xb, 0xc, 0xd, 0xe],
             },
             pow: Pow {
-                p: bytes::Bytes::new(),
+                p: Some(bytes::Bytes::new()),
             },
             parent,
             tx_ids,

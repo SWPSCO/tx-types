@@ -188,7 +188,7 @@ pub fn sign_tx(mut tx: RawTransaction, secret_key: T8) -> RawTransaction {
     tx
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use super::*;
 

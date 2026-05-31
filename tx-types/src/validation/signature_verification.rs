@@ -30,7 +30,7 @@ use ibig::UBig;
 /// 5. Verify that e' == e (constant-time comparison)
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// use tx_types::validation::schnorr_verify_digest;
 /// use tx_types::{SchnorrPubkey, SchnorrSignature, Hash};
 ///

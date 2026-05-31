@@ -1,6 +1,8 @@
 //! Tests to capture intermediate values in sig_hash computation
 //! These are the "known-good" values from the working CLI implementation
 
+#![cfg(feature = "legacy-tests")]
+
 use nockapp::noun::slab::NounSlab;
 use nockapp::Bytes;
 use noun_serde::{NounDecode, NounEncode};

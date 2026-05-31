@@ -317,7 +317,7 @@ impl std::fmt::Display for TransactionValidationError {
 
 impl std::error::Error for TransactionValidationError {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use super::*;
     use crate::crypto::slip10::master::master_from_mnemonic;

@@ -1454,16 +1454,14 @@ mod tests {
     fn lock_merkle_proof_decodes_full_format() {
         let mut slab: NounSlab = NounSlab::new();
         let primitive = sample_primitive();
-        let spend_condition_noun = T(&mut slab, &[primitive.to_noun(&mut slab), D(0)]);
+        let primitive_noun = primitive.to_noun(&mut slab);
+        let spend_condition_noun = T(&mut slab, &[primitive_noun, D(0)]);
         let merkle_proof = sample_merkle_proof();
+        let version_noun = make_tas(&mut slab, "full").as_noun();
+        let merkle_proof_noun = merkle_proof.to_noun(&mut slab);
         let full_lmp = T(
             &mut slab,
-            &[
-                make_tas(&mut slab, "full").as_noun(),
-                spend_condition_noun,
-                D(7),
-                merkle_proof.to_noun(&mut slab),
-            ],
+            &[version_noun, spend_condition_noun, D(7), merkle_proof_noun],
         );
 
         let decoded = LockMerkleProof::from_noun(&full_lmp).expect("full lmp should decode");
@@ -1530,7 +1528,8 @@ mod tests {
     fn spend_condition_rejects_improper_list_without_panicking() {
         let mut slab: NounSlab = NounSlab::new();
         let primitive = sample_primitive();
-        let malformed_list = T(&mut slab, &[primitive.to_noun(&mut slab), D(1)]);
+        let primitive_noun = primitive.to_noun(&mut slab);
+        let malformed_list = T(&mut slab, &[primitive_noun, D(1)]);
 
         let err = SpendCondition::from_noun(&malformed_list)
             .expect_err("spend-condition decode should reject improper list");
@@ -1541,15 +1540,13 @@ mod tests {
     #[test]
     fn merkle_proof_rejects_improper_path_without_panicking() {
         let mut slab: NounSlab = NounSlab::new();
+        let hash_noun = Hash {
+            values: [1, 2, 3, 4, 5],
+        }
+        .to_noun(&mut slab);
         let malformed = T(
             &mut slab,
-            &[
-                Hash {
-                    values: [1, 2, 3, 4, 5],
-                }
-                .to_noun(&mut slab),
-                D(1),
-            ],
+            &[hash_noun, D(1)],
         );
 
         let err =

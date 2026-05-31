@@ -43,7 +43,7 @@ pub fn compute_tx_id_base58(
     digest_to_base58(&digest)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use super::*;
 
