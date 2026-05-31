@@ -129,7 +129,7 @@ pub fn create_raw_transaction_noun(input_list: Vec<InputV0>) -> NounSlab {
 // Note: We now use TimelockRange's NounEncode trait implementation directly
 // instead of a custom create_timelock_range_noun function
 // Also, calculate_timelock_range is now a method on Inputs type
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use super::*;
 

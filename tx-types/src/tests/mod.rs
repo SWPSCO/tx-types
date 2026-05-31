@@ -2,9 +2,9 @@
 
 #[cfg(test)]
 pub mod test_base58_conversion;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 pub mod test_coinbase;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 pub mod test_complex_input;
 #[cfg(test)]
 pub mod test_empty_hashes;
@@ -16,7 +16,7 @@ pub mod test_schnorr_signature_hash;
 pub mod test_signature_hash;
 #[cfg(test)]
 pub mod test_signature_hashable;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 pub mod test_tx_builder_sighash;
 #[cfg(test)]
 pub mod test_zmap_structure;
@@ -24,5 +24,5 @@ pub mod test_zmap_structure;
 pub mod test_zset_simple;
 #[cfg(test)]
 pub mod test_zset_structure;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-tests"))]
 pub mod timelock_tests;

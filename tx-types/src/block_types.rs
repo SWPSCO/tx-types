@@ -70,7 +70,7 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
     let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
 
     let lmp = build_lock_merkle_proof(lk, 1);
-    let root = lmp.merkle_proof.root;
+    let root = lmp.proof().root.clone();
 
     NName::new_v1(
         root,
@@ -82,20 +82,20 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 }
 
 pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
-    // alias
+    build_lock_merkle_proof_full(form, leaf_number)
+}
+
+pub fn build_lock_merkle_proof_stub(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
     let hashable_form = Hashable::Hash(form.to_hash());
-    let hashable_index = leaf_number;
-    let (_computed_axis, merkle_proof) = prove_hashable_by_index(hashable_form, hashable_index);
+    let (axis, merkle_proof) = prove_hashable_by_index(hashable_form, leaf_number);
     let spend_condition = traverse_lock(form);
-    LockMerkleProof {
-        spend_condition,
-        // Temporary compatibility: chain currently hardcodes the axis contribution
-        // to a fixed hash (see tx-engine-1.hoon lock-merkle-proof hashable).
-        // Keep emitting axis=1 until the protocol upgrade that reintroduces
-        // full-axis commitments lands on both Hoon and Rust implementations.
-        axis: 1,
-        merkle_proof,
-    }
+    LockMerkleProof::new_stub(spend_condition, axis, merkle_proof)
+}
+
+pub fn build_lock_merkle_proof_full(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
+    let (spend_condition, axis, merkle_proof) =
+        build_lock_merkle_proof_stub(form, leaf_number).into_parts();
+    LockMerkleProof::new_full(spend_condition, axis, merkle_proof)
 }
 
 /// Tree address composition (peg) - combines two axes into a single address
@@ -713,12 +713,12 @@ mod tests {
         let msg = PageMsg::new();
 
         // Create the page with all fields
-        let page = Page {
+        let page = PageV0 {
             digest: Hash {
                 values: [0xa, 0xb, 0xc, 0xd, 0xe],
             },
             pow: Pow {
-                p: bytes::Bytes::new(),
+                p: Some(bytes::Bytes::new()),
             },
             parent,
             tx_ids,

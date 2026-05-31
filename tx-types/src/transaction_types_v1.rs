@@ -921,37 +921,135 @@ impl Witness {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
-pub struct LockMerkleProof {
+fn decode_hoon_list<T, F>(
+    noun: &Noun,
+    context: &'static str,
+    mut decode_item: F,
+) -> Result<Vec<T>, noun_serde::NounDecodeError>
+where
+    F: FnMut(&Noun) -> Result<T, noun_serde::NounDecodeError>,
+{
+    let mut items = Vec::new();
+    let mut current = *noun;
+
+    loop {
+        if let Ok(cell) = current.as_cell() {
+            items.push(decode_item(&cell.head())?);
+            current = cell.tail();
+            continue;
+        }
+
+        let atom = current
+            .as_atom()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;
+        match atom.as_u64()? {
+            0 => return Ok(items),
+            _ => {
+                return Err(noun_serde::NounDecodeError::Custom(
+                    format!("{context} must be a list").into(),
+                ))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, NounDecode)]
+pub struct LockMerkleProofStub {
     pub spend_condition: SpendCondition,
     pub axis: u64,
     pub merkle_proof: MerkleProof,
 }
 
+#[derive(Debug, Clone, NounDecode)]
+pub struct LockMerkleProofFull {
+    pub version: u64,
+    pub spend_condition: SpendCondition,
+    pub axis: u64,
+    pub merkle_proof: MerkleProof,
+}
+
+#[derive(Debug, Clone)]
+pub enum LockMerkleProof {
+    Full(LockMerkleProofFull),
+    Stub(LockMerkleProofStub),
+}
+
 impl LockMerkleProof {
-    /// Compute hashable for lock-merkle-proof
-    ///
-    /// From Hoon (tx-engine-1.hoon lines ~1392-1403):
-    /// ```hoon
-    /// ++  hashable
-    ///   |=  =form
-    ///   ^-  hashable:tip5
-    ///   |^
-    ///   :+  hash+(hash:spend-condition spend-condition.form)
-    ///     hash+(from-b58:^hash '6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A')
-    ///   (hashable-merk-proof merk-proof.form)
-    /// ```
+    pub fn new_full(spend_condition: SpendCondition, axis: u64, merkle_proof: MerkleProof) -> Self {
+        Self::Full(LockMerkleProofFull {
+            version: nockvm_macros::tas!(b"full"),
+            spend_condition,
+            axis,
+            merkle_proof,
+        })
+    }
+
+    pub fn new_stub(spend_condition: SpendCondition, axis: u64, merkle_proof: MerkleProof) -> Self {
+        Self::Stub(LockMerkleProofStub {
+            spend_condition,
+            axis,
+            merkle_proof,
+        })
+    }
+
+    pub fn spend_condition(&self) -> &SpendCondition {
+        match self {
+            Self::Full(proof) => &proof.spend_condition,
+            Self::Stub(proof) => &proof.spend_condition,
+        }
+    }
+
+    pub fn axis(&self) -> u64 {
+        match self {
+            Self::Full(proof) => proof.axis,
+            Self::Stub(proof) => proof.axis,
+        }
+    }
+
+    pub fn proof(&self) -> &MerkleProof {
+        match self {
+            Self::Full(proof) => &proof.merkle_proof,
+            Self::Stub(proof) => &proof.merkle_proof,
+        }
+    }
+
+    pub fn merkle_proof(&self) -> &MerkleProof {
+        self.proof()
+    }
+
+    pub fn version(&self) -> Option<u64> {
+        match self {
+            Self::Full(proof) => Some(proof.version),
+            Self::Stub(_) => None,
+        }
+    }
+
+    pub fn into_parts(self) -> (SpendCondition, u64, MerkleProof) {
+        match self {
+            Self::Full(proof) => (proof.spend_condition, proof.axis, proof.merkle_proof),
+            Self::Stub(proof) => (proof.spend_condition, proof.axis, proof.merkle_proof),
+        }
+    }
+
+    /// Compute hashable for lock-merkle-proof using the correct stub/full semantics.
     pub fn to_hashable(&self) -> Hashable {
         use crate::hashing::hasher::hash_hashable;
 
-        // Hash the spend condition
-        let spend_condition_hash = hash_hashable(&self.spend_condition.to_hashable());
-        // Build the triple: [hash+(spend-condition) axis-constant merkle-proof-hashable]
-        Hashable::triple(
-            Hashable::Hash(spend_condition_hash),
-            Hashable::Hash(LOCK_MERKLE_AXIS_HASH.clone()),
-            self.merkle_proof.to_hashable(),
-        )
+        let spend_condition_hash = hash_hashable(&self.spend_condition().to_hashable());
+
+        match self {
+            Self::Full(proof) => Hashable::cell_chain([
+                Hashable::leaf_from_atom(&proof.version.to_le_bytes()),
+                Hashable::Hash(spend_condition_hash),
+                Hashable::leaf_from_atom(&proof.axis.to_le_bytes()),
+                proof.merkle_proof.to_hashable(),
+            ]),
+            Self::Stub(proof) => Hashable::triple(
+                Hashable::Hash(spend_condition_hash),
+                Hashable::Hash(LOCK_MERKLE_AXIS_HASH.clone()),
+                proof.merkle_proof.to_hashable(),
+            ),
+        }
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -960,7 +1058,50 @@ impl LockMerkleProof {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+impl NounDecode for LockMerkleProof {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        if let Ok(full) = LockMerkleProofFull::from_noun(noun) {
+            if full.version != nockvm_macros::tas!(b"full") {
+                return Err(noun_serde::NounDecodeError::Custom(
+                    "lock-merkle-proof version must be %full".into(),
+                ));
+            }
+            return Ok(Self::Full(full));
+        }
+
+        Ok(Self::Stub(LockMerkleProofStub::from_noun(noun)?))
+    }
+}
+
+impl NounEncode for LockMerkleProofStub {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        let spend_condition = self.spend_condition.to_noun(alloc);
+        let axis = self.axis.to_noun(alloc);
+        let merkle_proof = self.merkle_proof.to_noun(alloc);
+        nockvm::noun::T(alloc, &[spend_condition, axis, merkle_proof])
+    }
+}
+
+impl NounEncode for LockMerkleProofFull {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        let version = self.version.to_noun(alloc);
+        let spend_condition = self.spend_condition.to_noun(alloc);
+        let axis = self.axis.to_noun(alloc);
+        let merkle_proof = self.merkle_proof.to_noun(alloc);
+        nockvm::noun::T(alloc, &[version, spend_condition, axis, merkle_proof])
+    }
+}
+
+impl NounEncode for LockMerkleProof {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        match self {
+            Self::Full(proof) => proof.to_noun(alloc),
+            Self::Stub(proof) => proof.to_noun(alloc),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SpendCondition {
     pub p: Vec<LockPrimitive>,
 }
@@ -994,6 +1135,23 @@ impl SpendCondition {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+impl NounDecode for SpendCondition {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        Ok(Self {
+            p: decode_hoon_list(noun, "spend-condition", LockPrimitive::from_noun)?,
+        })
+    }
+}
+
+impl NounEncode for SpendCondition {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        self.p.iter().rev().fold(D(0), |acc, primitive| {
+            let head = primitive.to_noun(alloc);
+            nockvm::noun::T(alloc, &[head, acc])
+        })
     }
 }
 
@@ -1176,7 +1334,7 @@ impl NounEncode for LockPrimitive {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+#[derive(Debug, Clone)]
 pub struct MerkleProof {
     pub root: Hash,
     pub path: Vec<Hash>,
@@ -1214,6 +1372,28 @@ impl MerkleProof {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+impl NounDecode for MerkleProof {
+    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+        let cell = noun
+            .as_cell()
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+        let root = Hash::from_noun(&cell.head())?;
+        let path = decode_hoon_list(&cell.tail(), "merkle proof path", Hash::from_noun)?;
+        Ok(Self { root, path })
+    }
+}
+
+impl NounEncode for MerkleProof {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        let root = self.root.to_noun(alloc);
+        let path = self.path.iter().rev().fold(D(0), |acc, hash| {
+            let head = hash.to_noun(alloc);
+            nockvm::noun::T(alloc, &[head, acc])
+        });
+        nockvm::noun::T(alloc, &[root, path])
     }
 }
 
@@ -1277,5 +1457,138 @@ impl PkhSignatureValue {
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
         hash_hashable(&self.to_hashable())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nockvm::noun::{D, T};
+    use noun_serde::NounEncode;
+
+    fn sample_primitive() -> LockPrimitive {
+        LockPrimitive {
+            header: "brn".to_string(),
+            body: LockPrimitiveBody::Brn(Brn { value: 0 }),
+        }
+    }
+
+    fn sample_spend_condition() -> SpendCondition {
+        SpendCondition {
+            p: vec![sample_primitive()],
+        }
+    }
+
+    fn sample_merkle_proof() -> MerkleProof {
+        MerkleProof {
+            root: Hash {
+                values: [1, 2, 3, 4, 5],
+            },
+            path: vec![Hash {
+                values: [6, 7, 8, 9, 10],
+            }],
+        }
+    }
+
+    #[test]
+    fn lock_merkle_proof_decodes_full_format() {
+        let mut slab: NounSlab = NounSlab::new();
+        let primitive = sample_primitive();
+        let primitive_noun = primitive.to_noun(&mut slab);
+        let spend_condition_noun = T(&mut slab, &[primitive_noun, D(0)]);
+        let merkle_proof = sample_merkle_proof();
+        let version_noun = make_tas(&mut slab, "full").as_noun();
+        let merkle_proof_noun = merkle_proof.to_noun(&mut slab);
+        let full_lmp = T(
+            &mut slab,
+            &[version_noun, spend_condition_noun, D(7), merkle_proof_noun],
+        );
+
+        let decoded = LockMerkleProof::from_noun(&full_lmp).expect("full lmp should decode");
+
+        match decoded {
+            LockMerkleProof::Full(full) => {
+                assert_eq!(full.version, nockvm_macros::tas!(b"full"));
+                assert_eq!(full.axis, 7);
+                assert_eq!(full.spend_condition.p.len(), 1);
+                match &full.spend_condition.p[0].body {
+                    LockPrimitiveBody::Brn(brn) => assert_eq!(brn.value, 0),
+                    other => panic!("expected burn primitive, got {:?}", other),
+                }
+                assert_eq!(full.merkle_proof.root.values, [1, 2, 3, 4, 5]);
+                assert_eq!(full.merkle_proof.path.len(), 1);
+                assert_eq!(full.merkle_proof.path[0].values, [6, 7, 8, 9, 10]);
+            }
+            LockMerkleProof::Stub(_) => panic!("expected full lock merkle proof"),
+        }
+    }
+
+    #[test]
+    fn lock_merkle_proof_round_trips_full_format() {
+        let full = LockMerkleProof::new_full(sample_spend_condition(), 7, sample_merkle_proof());
+        let mut slab: NounSlab = NounSlab::new();
+        let encoded = full.to_noun(&mut slab);
+
+        let decoded = LockMerkleProof::from_noun(&encoded).expect("full lmp should round-trip");
+
+        match decoded {
+            LockMerkleProof::Full(full) => {
+                assert_eq!(full.version, nockvm_macros::tas!(b"full"));
+                assert_eq!(full.axis, 7);
+                assert_eq!(full.spend_condition.p.len(), 1);
+                assert_eq!(full.merkle_proof.root.values, [1, 2, 3, 4, 5]);
+                assert_eq!(full.merkle_proof.path.len(), 1);
+                assert_eq!(full.merkle_proof.path[0].values, [6, 7, 8, 9, 10]);
+            }
+            LockMerkleProof::Stub(_) => panic!("expected full lock merkle proof"),
+        }
+    }
+
+    #[test]
+    fn lock_merkle_proof_round_trips_stub_format() {
+        let stub = LockMerkleProof::new_stub(sample_spend_condition(), 7, sample_merkle_proof());
+        let mut slab: NounSlab = NounSlab::new();
+        let encoded = stub.to_noun(&mut slab);
+
+        let decoded = LockMerkleProof::from_noun(&encoded).expect("stub lmp should round-trip");
+
+        match decoded {
+            LockMerkleProof::Stub(stub) => {
+                assert_eq!(stub.axis, 7);
+                assert_eq!(stub.spend_condition.p.len(), 1);
+                assert_eq!(stub.merkle_proof.root.values, [1, 2, 3, 4, 5]);
+                assert_eq!(stub.merkle_proof.path.len(), 1);
+                assert_eq!(stub.merkle_proof.path[0].values, [6, 7, 8, 9, 10]);
+            }
+            LockMerkleProof::Full(_) => panic!("expected stub lock merkle proof"),
+        }
+    }
+
+    #[test]
+    fn spend_condition_rejects_improper_list_without_panicking() {
+        let mut slab: NounSlab = NounSlab::new();
+        let primitive = sample_primitive();
+        let primitive_noun = primitive.to_noun(&mut slab);
+        let malformed_list = T(&mut slab, &[primitive_noun, D(1)]);
+
+        let err = SpendCondition::from_noun(&malformed_list)
+            .expect_err("spend-condition decode should reject improper list");
+
+        assert!(err.to_string().contains("spend-condition must be a list"));
+    }
+
+    #[test]
+    fn merkle_proof_rejects_improper_path_without_panicking() {
+        let mut slab: NounSlab = NounSlab::new();
+        let hash_noun = Hash {
+            values: [1, 2, 3, 4, 5],
+        }
+        .to_noun(&mut slab);
+        let malformed = T(&mut slab, &[hash_noun, D(1)]);
+
+        let err =
+            MerkleProof::from_noun(&malformed).expect_err("merkle proof path should reject atom");
+
+        assert!(err.to_string().contains("merkle proof path must be a list"));
     }
 }
