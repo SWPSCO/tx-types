@@ -52,6 +52,24 @@ pub struct ExtendedKey {
     pub version: u8,
 }
 
+
+/// Serialize an affine point as the Hoon `ser-p` octet stream, identical to
+/// `crypto::cheetah_nostd::ser_a_pt` (which is cfg'd out of std builds):
+/// 0x01 sentinel, then Y then X limbs, most-significant limb first, each limb
+/// big-endian. This is the byte string both the Hoon slip10 and the firmware
+/// feed to the CKD HMAC for unhardened derivation.
+fn ser_a_pt_bytes(point: &CheetahPoint) -> [u8; 97] {
+    let coords = point.to_coordinates();
+    let mut out = [0u8; 97];
+    out[0] = 0x01;
+    let mut off = 1;
+    for &limb in coords[1].iter().rev().chain(coords[0].iter().rev()) {
+        out[off..off + 8].copy_from_slice(&limb.to_be_bytes());
+        off += 8;
+    }
+    out
+}
+
 impl ExtendedKey {
     /// Construct a master extended key from a 512-bit seed and protocol version.
     pub fn from_seed(seed: &[u8], version: u8) -> Result<Self> {
@@ -198,76 +216,80 @@ impl ExtendedKey {
             return Err(CryptoError::DerivationFailed);
         }
 
-        // Prepare base HMAC input
-        let mut hmac_input = Vec::with_capacity(37);
-
+        // Prepare base HMAC input. Byte layout must match the Hoon slip10
+        // implementation (and `crypto::cheetah_nostd::xprv_derive_child`):
+        //   hardened:   0x00 || ser256(prv)  || ser32(i)
+        //   unhardened: ser-p(P) (97 bytes)  || ser32(i)
+        let mut hmac_input = Vec::with_capacity(97 + 4);
         if Self::is_hardened(index) {
-            // Hardened derivation: HMAC(chain_code, 0x00 || private_key || index)
             hmac_input.push(0x00);
             hmac_input.extend_from_slice(&self.private_key.unwrap());
         } else {
-            // Non-hardened derivation: HMAC(chain_code, public_key || index)
-            let pubkey_coords = self.public_key.to_coordinates();
-            // Serialize public key (simplified - would need proper compression in real implementation)
-            for coord in &pubkey_coords {
-                for &limb in coord {
-                    hmac_input.extend_from_slice(&limb.to_be_bytes());
-                }
-            }
+            hmac_input.extend_from_slice(&ser_a_pt_bytes(&self.public_key));
         }
         hmac_input.extend_from_slice(&Self::serialize_u32(index));
 
-        // SLIP-10 retry logic: if IL is invalid (zero or >= curve_order), retry with hash of previous output
-        const MAX_RETRIES: u32 = 100;
-        let mut current_input = hmac_input.clone();
-        let (il, ir, il_int) = loop {
-            // Compute HMAC-SHA512
+        // Retry rule, also Hoon parity: an invalid IL (zero or >= curve
+        // order, or a zero child key) re-derives from 0x01 || IR || ser32(i).
+        const MAX_RETRIES: u32 = 1024;
+        let mut current_input = hmac_input;
+        let mut attempts = 0u32;
+        let (child_private_key, il_int, ir) = loop {
+            attempts += 1;
+            if attempts > MAX_RETRIES {
+                return Err(CryptoError::DerivationFailed);
+            }
+
             let mut mac = HmacSha512::new_from_slice(&self.chain_code)
                 .map_err(|_| CryptoError::DerivationFailed)?;
             mac.update(&current_input);
             let i = mac.finalize().into_bytes();
 
-            // Split result
             let mut il_temp = [0u8; 32];
             let mut ir_temp = [0u8; 32];
             il_temp.copy_from_slice(&i[..32]);
             ir_temp.copy_from_slice(&i[32..]);
 
-            // Check if il is valid
+            let retry_input = |ir_bytes: &[u8; 32]| {
+                let mut red = Vec::with_capacity(1 + 32 + 4);
+                red.push(0x01);
+                red.extend_from_slice(ir_bytes);
+                red.extend_from_slice(&Self::serialize_u32(index));
+                red
+            };
+
             let il_int_temp = UBig::from_be_bytes(&il_temp);
-            if !il_int_temp.is_zero() && il_int_temp < n {
-                // Valid IL found
-                break (il_temp, ir_temp, il_int_temp);
+            if il_int_temp.is_zero() || il_int_temp >= n {
+                current_input = retry_input(&ir_temp);
+                continue;
             }
 
-            // Invalid IL, retry per SLIP-10: use I (the entire 64-byte HMAC output) as new input
-            if current_input.len() >= MAX_RETRIES as usize * 64 {
-                // Safety limit to prevent infinite loops
-                return Err(CryptoError::DerivationFailed);
-            }
-            current_input = i.to_vec();
-        };
-
-        // Derive child private key if parent has private key
-        let child_private_key = if let Some(parent_private) = self.private_key {
-            let parent_sk = UBig::from_be_bytes(&parent_private);
-            let child_sk = (il_int.clone() + parent_sk) % &n;
-
-            if child_sk.is_zero() {
-                return Err(CryptoError::DerivationFailed);
-            }
-
-            let mut child_sk_bytes = [0u8; 32];
-            let sk_bytes = child_sk.to_be_bytes();
-            if sk_bytes.len() <= 32 {
-                child_sk_bytes[32 - sk_bytes.len()..].copy_from_slice(&sk_bytes);
-            } else {
-                child_sk_bytes.copy_from_slice(&sk_bytes[sk_bytes.len() - 32..]);
+            if let Some(parent_private) = self.private_key {
+                let parent_sk = UBig::from_be_bytes(&parent_private);
+                let child_sk = (il_int_temp.clone() + parent_sk) % &n;
+                if child_sk.is_zero() {
+                    current_input = retry_input(&ir_temp);
+                    continue;
+                }
+                let mut child_sk_bytes = [0u8; 32];
+                let sk_bytes = child_sk.to_be_bytes();
+                if sk_bytes.len() <= 32 {
+                    child_sk_bytes[32 - sk_bytes.len()..].copy_from_slice(&sk_bytes);
+                } else {
+                    child_sk_bytes.copy_from_slice(&sk_bytes[sk_bytes.len() - 32..]);
+                }
+                break (Some(child_sk_bytes), il_int_temp, ir_temp);
             }
 
-            Some(child_sk_bytes)
-        } else {
-            None
+            // Public-only derivation: reject a child at the identity point
+            // (Hoon derive-public retries on a-id).
+            let il_point = CheetahPoint::generator().scalar_mul(&il_int_temp);
+            let candidate = self.public_key.add(&il_point);
+            if candidate.is_identity() {
+                current_input = retry_input(&ir_temp);
+                continue;
+            }
+            break (None, il_int_temp, ir_temp);
         };
 
         // Derive child public key

@@ -865,8 +865,10 @@ pub fn xprv_derive_child(parent: &XKey, i: u32) -> XKey {
 pub fn xpub_derive_child(parent: &XKey, i: u32) -> XKey {
     assert_eq!(i & 0x8000_0000, 0);
 
-    let mut data = Vec::with_capacity(104 + 4);
-    data.extend_from_slice(&ser_a_pt_rep104(parent.pk.as_ref().unwrap()));
+    // Same input as unhardened private derivation and the Hoon
+    // derive-public: 97-byte ser-p, not the 104-byte rep form.
+    let mut data = Vec::with_capacity(97 + 4);
+    data.extend_from_slice(&ser_a_pt(parent.pk.as_ref().unwrap()));
     data.extend_from_slice(&ser32_be(i));
 
     let (mut left, mut right) = hmac_split_512(&parent.chain_code, &data);
