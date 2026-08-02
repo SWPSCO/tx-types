@@ -8,17 +8,17 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Nockchain dependencies - by default from git
-# temporarily using nockpool/hoon
-noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
-nockvm = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockchain-libp2p-io = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
-nockchain-math = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-zkvm-jetpack = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-ibig = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3", default-features = false }
-murmur3 = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
-nockvm_macros = { git = "https://github.com/SWPSCO/nockchain.git", rev = "7d94458a9e970fb5d24b24461ea69b44a398dee3" }
+# temporarily using nockpool/hoon-v1
+noun-serde = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+noun-serde-derive = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+nockapp = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
+nockvm = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+nockchain-libp2p-io = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
+nockchain-math = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+zkvm-jetpack = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+ibig = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
+murmur3 = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+nockvm_macros = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
 
 # Standard dependencies (matching nockchain-minimal workspace)
 aes = { version = "0.8.3", default-features = false }
@@ -84,7 +84,7 @@ tracy-client = { path = "./dummy-tracy/tracy-client" }
 tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }
 
 # Use local nockchain dependencies for WASM compilation
-[patch."https://github.com/SWPSCO/nockchain.git"]
+[patch."https://github.com/swpsco/nockchain.git"]
 noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
 noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
 nockapp = { path = "./nockchain-minimal/crates/nockapp" }

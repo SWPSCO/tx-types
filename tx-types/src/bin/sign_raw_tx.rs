@@ -18,13 +18,12 @@ use tx_types::signer::schnorr_sign_digest;
 use tx_types::transaction_types_v1::compute_tx_id_v1;
 #[cfg(feature = "std")]
 use tx_types::{
-    Chal, F6LT, Hash, LockPrimitiveBody, PkhSignatureValue, RawTransactionV1, SchnorrPubkey,
-    SchnorrSignature, Sig, Spend, SpendBody, SpendsV1, T8, ZMap,
+    Chal, Hash, LockPrimitiveBody, PkhSignatureValue, RawTransactionV1, SchnorrPubkey,
+    SchnorrSignature, Sig, Spend, SpendBody, SpendsV1, ZMap, F6LT, T8,
 };
 
 #[cfg(feature = "std")]
 fn main() {
-
     fn usage(bin_name: &str) -> ! {
         eprintln!("usage: {bin_name} [zprv...] <input.jam|-> [out.jam|-]");
         eprintln!("  input.jam may be jammed `RawTransactionV1`, `SpendsV1`, or `Spend`.");
@@ -84,8 +83,12 @@ fn main() {
     let signing_key: T8 = be32_atom_to_t8_le(&sk_be);
     let pk_coords = cheetah_pub_from_sk(sk_be);
     let schnorr_pubkey = SchnorrPubkey {
-        x: F6LT { values: pk_coords[0] },
-        y: F6LT { values: pk_coords[1] },
+        x: F6LT {
+            values: pk_coords[0],
+        },
+        y: F6LT {
+            values: pk_coords[1],
+        },
         inf: false,
     };
     let pubkey_hash = schnorr_pubkey.to_hash();
@@ -109,10 +112,12 @@ fn main() {
     };
 
     let mut slab = NounSlab::<NockJammer>::new();
-    let noun = slab.cue_into(Bytes::from(input_bytes)).unwrap_or_else(|err| {
-        eprintln!("error: failed to cue jammed noun: {err}");
-        std::process::exit(1);
-    });
+    let noun = slab
+        .cue_into(Bytes::from(input_bytes))
+        .unwrap_or_else(|err| {
+            eprintln!("error: failed to cue jammed noun: {err}");
+            std::process::exit(1);
+        });
 
     let (out_bytes, report_lines) = if let Ok(mut raw_tx) = RawTransactionV1::from_noun(&noun) {
         let (signed_spends, spends_signed) =
@@ -143,7 +148,8 @@ fn main() {
         ];
         (out_bytes, report)
     } else if let Ok(mut spend) = Spend::from_noun(&noun) {
-        let spend_signed = sign_spend_in_place(&mut spend, &signing_key, &schnorr_pubkey, &pubkey_hash);
+        let spend_signed =
+            sign_spend_in_place(&mut spend, &signing_key, &schnorr_pubkey, &pubkey_hash);
         let out_bytes = jam_to_vec(&spend);
         let report = vec![
             format!("format: spend"),

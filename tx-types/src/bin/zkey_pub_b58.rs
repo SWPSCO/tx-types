@@ -11,7 +11,9 @@ fn main() {
     fn usage(bin_name: &str) -> ! {
         eprintln!("usage: {bin_name} [--my-nock-key|--nock-pubkey] <zprv|zpub>");
         eprintln!();
-        eprintln!("  --my-nock-key  Outputs base58 secret key bytes (for bridge `my_nock_key`) [default]");
+        eprintln!(
+            "  --my-nock-key  Outputs base58 secret key bytes (for bridge `my_nock_key`) [default]"
+        );
         eprintln!("  --nock-pubkey  Outputs base58 pubkey bytes (for bridge `nock_pubkey`)");
         std::process::exit(2);
     }
