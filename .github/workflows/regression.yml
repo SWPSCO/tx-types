@@ -26,10 +26,10 @@ jobs:
         run: rustup toolchain install nightly-2025-02-14 --profile minimal --target thumbv7em-none-eabihf
 
       - name: Compile the production no-std library
-        run: cargo check --locked -p tx-types --no-default-features --lib --target thumbv7em-none-eabihf
+        run: cargo check -p tx-types --no-default-features --lib --target thumbv7em-none-eabihf
 
       - name: Run no-std regression tests
-        run: cargo test --locked -p tx-types --no-default-features
+        run: cargo test -p tx-types --no-default-features
 
       - name: Run hosted regression tests
-        run: cargo test --locked -p tx-types
+        run: cargo test -p tx-types
