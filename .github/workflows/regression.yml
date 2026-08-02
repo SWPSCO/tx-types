@@ -1,0 +1,35 @@
+name: Regression tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tx-types:
+    name: Hosted and no-std regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install nightly-2025-02-14 --profile minimal --target thumbv7em-none-eabihf
+
+      - name: Compile the production no-std library
+        run: cargo check -p tx-types --no-default-features --lib --target thumbv7em-none-eabihf
+
+      - name: Run no-std regression tests
+        run: cargo test -p tx-types --no-default-features
+
+      - name: Run hosted regression tests
+        run: cargo test -p tx-types
