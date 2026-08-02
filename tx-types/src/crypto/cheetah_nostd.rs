@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use hmac::{Hmac, Mac};
-use sha2::{Sha256, Sha512};
+use sha2::Sha512;
 
 use crate::crypto::goldilocks::{bpegcd_full, tip5_permute, Belt, GOLDILOCKS_P};
 use crate::crypto::utils_nostd::{add_mod_n, mul_mod_n};
@@ -543,23 +543,6 @@ fn mod_n_from_be_bytes(bytes_be: &[u8]) -> [u8; 32] {
     rem
 }
 
-// ---- deterministic k (HMAC-SHA256) -----------------------------
-
-fn rfc6979_k(sk_be: &[u8; 32], personalization: &[u8]) -> [u8; 32] {
-    // k = HMAC-SHA256(sk, personalization) mod n, reject 0
-    let mut mac = Hmac::<Sha256>::new_from_slice(sk_be).expect("hmac key");
-    mac.update(personalization);
-    let digest = mac.finalize().into_bytes(); // 32
-    let mut k = [0u8; 32];
-    k.copy_from_slice(&digest);
-    let k = mod_n_from_be_bytes(&k);
-    if is_zero32(&k) {
-        [1u8; 32]
-    } else {
-        k
-    }
-}
-
 // ---- HMAC split for SLIP-10 ----------------------------------------------
 
 pub fn hmac_split_512(key: &[u8], data: &[u8]) -> ([u8; 32], [u8; 32]) {
@@ -649,7 +632,7 @@ pub fn cheetah_pub_from_sk(sk_be: [u8; 32]) -> ([u64; 6], [u64; 6]) {
 }
 
 /// Sign a TIP-5 digest m (5×u64) with Schnorr over Cheetah, Hoon-compatible:
-/// - R = k·G  (k from TIP5 hash)
+/// - R = k·G  (k from TIP5([xP,yP,m,sk]))
 /// - chal = trunc_g_order( TIP5([xR,yR,xP,yP,m]) )
 /// - s = (k + chal*sk) mod n
 /// - return chal/s as T8 (little-endian limbs), padded to 8 u64.
@@ -679,12 +662,17 @@ pub fn schnorr_sign_digest(sk_be: [u8; 32], pk: ([u64; 6], [u64; 6]), m5: [u64; 
         panic!("Secret key must be less than curve order");
     }
 
-    // 1) Generate nonce using TIP5(pubkey || message) - matches Hoon line 1639-1642
-    // Create transcript: [(f6lt-to-list x.pubkey) (f6lt-to-list y.pubkey) m ~]
-    let mut nonce_transcript = [0u64; 12 + 5];
+    // 1) Generate the deterministic nonce from the public transcript and the
+    // secret key. Omitting `sk` makes the nonce publicly computable and leaks
+    // the signing key from a single `(challenge, signature)` pair.
+    //
+    // Hoon: [(f6lt-to-list x.pubkey) (f6lt-to-list y.pubkey)
+    //        m-list sk-as-32-bit-belts ~]
+    let mut nonce_transcript = [0u64; 12 + 5 + 8];
     nonce_transcript[..6].copy_from_slice(&pk.0); // pubkey.x (6 limbs)
     nonce_transcript[6..12].copy_from_slice(&pk.1); // pubkey.y (6 limbs)
-    nonce_transcript[12..].copy_from_slice(&m5); // message (5 limbs)
+    nonce_transcript[12..17].copy_from_slice(&m5); // message (5 limbs)
+    nonce_transcript[17..].copy_from_slice(&sk_t8.values); // secret key (8 limbs)
 
     // Hash and truncate to get nonce
     let nonce_digest = tip5_hash_words(&nonce_transcript);
@@ -743,42 +731,45 @@ mod schnorr_tests {
     use super::*;
 
     #[test]
-    fn test_schnorr_sign_digest_compatibility() {
-        // Test vectors from reference implementation (Hoon test)
-        let sk_be: [u8; 32] = [
-            0x12, 0x34, 0x56, 0x78, // MSB
-            0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55,
-            0x66, 0x66, 0x77, 0x77, 0x88, 0x88, 0x99, 0x99, 0xaa, 0xaa, 0xbb, 0xbb, 0xcc,
-            0xcc, // LSB
-        ];
-
+    fn schnorr_sign_digest_matches_canonical_hoon_vector() {
+        // hoon/tests/crypto/mod/cheetah.hoon, cheetah-sign-kats (sk=8).
+        let mut sk_be = [0u8; 32];
+        sk_be[31] = 8;
         let pk = cheetah_pub_from_sk(sk_be);
         let message = [1u64, 2, 3, 4, 5];
-
         let (challenge, signature) = schnorr_sign_digest(sk_be, pk, message);
 
-        // Expected values from reference implementation
         let expected_challenge: [u64; 8] = [
-            0x364619a6, // LSW
-            0x6af9178c, 0x46e47b17, 0xf8609591, 0xf4c6b69a, 0x1a511b32, 0xd7e56411,
-            0x2f519cb9, // MSW
+            0x45b41193, 0xb83f973c, 0x4272d5a9, 0xbd655eab, 0xfd1d32c6, 0x5f24c26a, 0x225112a7,
+            0x030fa095,
         ];
-
         let expected_signature: [u64; 8] = [
-            0x0918903a, 0x0e94f5a7, 0x34d7585a, 0xb809abfe, 0x55753257, 0x5b73fced, 0x4ac8fd17,
-            0x21b70dda,
+            0xeb994ee4, 0xdd4421ae, 0x498ef6e3, 0x8f7880ad, 0xdd388a63, 0xf3330a21, 0x4219900a,
+            0x077fc160,
         ];
 
-        println!("\nGenerated challenge: {:016x?}", challenge.values);
-        println!("Expected challenge:  {:016x?}", expected_challenge);
-        println!("\nGenerated signature: {:016x?}", signature.values);
-        println!("Expected signature:  {:016x?}", expected_signature);
-
-        assert_eq!(
-            challenge.values, expected_challenge,
-            "Challenge mismatch - hashing implementation may be incorrect"
-        );
+        assert_eq!(challenge.values, expected_challenge);
         assert_eq!(signature.values, expected_signature, "Signature mismatch");
+    }
+
+    #[test]
+    fn nonce_depends_on_secret_key() {
+        let sk_a = [0x11; 32];
+        let sk_b = [0x22; 32];
+        let pk = cheetah_pub_from_sk(sk_a);
+        let message = [1, 2, 3, 4, 5];
+
+        let nonce_for = |sk: [u8; 32]| {
+            let sk_t8 = be32_atom_to_t8_le(&sk);
+            let mut transcript = [0u64; 12 + 5 + 8];
+            transcript[..6].copy_from_slice(&pk.0);
+            transcript[6..12].copy_from_slice(&pk.1);
+            transcript[12..17].copy_from_slice(&message);
+            transcript[17..].copy_from_slice(&sk_t8.values);
+            trunc_g_order_to_be32(tip5_hash_words(&transcript))
+        };
+
+        assert_ne!(nonce_for(sk_a), nonce_for(sk_b));
     }
 }
 // ---- SLIP-10 child derivation (xprv/xpub) ----------------------------------
