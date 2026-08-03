@@ -3,6 +3,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use hmac::{Hmac, Mac};
 use sha2::Sha512;
+use zeroize::Zeroize;
 
 use crate::crypto::goldilocks::{bpegcd_full, tip5_permute, Belt, GOLDILOCKS_P};
 use crate::crypto::utils_nostd::{add_mod_n, mul_mod_n};
@@ -548,11 +549,12 @@ fn mod_n_from_be_bytes(bytes_be: &[u8]) -> [u8; 32] {
 pub fn hmac_split_512(key: &[u8], data: &[u8]) -> ([u8; 32], [u8; 32]) {
     let mut mac = HmacSha512::new_from_slice(key).expect("HMAC key");
     mac.update(data);
-    let out = mac.finalize().into_bytes();
+    let mut out = mac.finalize().into_bytes();
     let mut left = [0u8; 32];
     let mut right = [0u8; 32];
     left.copy_from_slice(&out[..32]);
     right.copy_from_slice(&out[32..]);
+    out.zeroize();
     (left, right)
 }
 
@@ -570,13 +572,21 @@ pub fn master_from_seed(seed: &[u8]) -> ([u8; 32], [u8; 32]) {
         right.copy_from_slice(&i[32..]);
 
         if !is_zero32(&left) && be32_lt(&left, &CHEETAH_N) {
-            return (left, right);
+            let result = (left, right);
+            left.zeroize();
+            right.zeroize();
+            i.zeroize();
+            return result;
         }
 
         // rehash whole 64B per spec
         let mut mac = HmacSha512::new_from_slice(NOCKCHAIN_SLIP10_KEY).unwrap();
         mac.update(&i);
-        i = mac.finalize().into_bytes();
+        let next = mac.finalize().into_bytes();
+        left.zeroize();
+        right.zeroize();
+        i.zeroize();
+        i = next;
     }
 }
 
@@ -617,8 +627,13 @@ pub fn ser_a_pt_rep104(pk: &([u64; 6], [u64; 6])) -> [u8; 104] {
 
 /// Compute affine (x,y) for the secret scalar `sk_be` (big-endian).
 /// Internal limbs are LSW..MSW; wire/serialized limbs must be MSW..LSW.
-pub fn cheetah_pub_from_sk(sk_be: [u8; 32]) -> ([u64; 6], [u64; 6]) {
+pub fn cheetah_pub_from_sk(mut sk_be: [u8; 32]) -> ([u64; 6], [u64; 6]) {
+    if is_zero32(&sk_be) || !be32_lt(&sk_be, &CHEETAH_N) {
+        sk_be.zeroize();
+        panic!("Secret key must be in the range 1..curve_order");
+    }
     let p = ch_scal_big(&sk_be, &basepoint());
+    sk_be.zeroize();
     let mut x = [0u64; 6];
     let mut y = [0u64; 6];
 
@@ -639,27 +654,39 @@ pub fn cheetah_pub_from_sk(sk_be: [u8; 32]) -> ([u64; 6], [u64; 6]) {
 ///
 /// Note: this function is the analogue of sign:affine:belt-schnorr:cheetah
 /// on line 1799 in nockchain/ztd/three.hoon
-pub fn schnorr_sign_digest(sk_be: [u8; 32], pk: ([u64; 6], [u64; 6]), m5: [u64; 5]) -> (T8, T8) {
+pub fn schnorr_sign_digest(
+    mut sk_be: [u8; 32],
+    pk: ([u64; 6], [u64; 6]),
+    m5: [u64; 5],
+) -> (T8, T8) {
     // Hoon-compatible Schnorr signature implementation
     // Matches sign:affine:schnorr in three.hoon line 1628
 
     // Convert secret key to T8 format to validate components
-    let sk_t8 = be32_atom_to_t8_le(&sk_be);
+    let mut sk_t8 = be32_atom_to_t8_le(&sk_be);
 
     // Validate each T8 component is < 2^32 (matches Hoon line 1634)
     // ?>  (levy sk-as-32-bit-belts |=(n=@ (lth n b-32)))
-    for (i, &limb) in sk_t8.values.iter().enumerate() {
-        if limb >= (1u64 << 32) {
-            panic!(
-                "Secret key T8 component {} ({:#x}) must be less than 2^32",
-                i, limb
-            );
-        }
+    if let Some((i, limb)) = sk_t8
+        .values
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, limb)| *limb >= (1u64 << 32))
+    {
+        sk_be.zeroize();
+        sk_t8.values.zeroize();
+        panic!(
+            "Secret key T8 component {} ({:#x}) must be less than 2^32",
+            i, limb
+        );
     }
 
     // Validate that sk_be represents a valid scalar < curve order (line 1637)
-    if !be32_lt(&sk_be, &CHEETAH_N) {
-        panic!("Secret key must be less than curve order");
+    if is_zero32(&sk_be) || !be32_lt(&sk_be, &CHEETAH_N) {
+        sk_be.zeroize();
+        sk_t8.values.zeroize();
+        panic!("Secret key must be in the range 1..curve_order");
     }
 
     // 1) Generate the deterministic nonce from the public transcript and the
@@ -675,11 +702,16 @@ pub fn schnorr_sign_digest(sk_be: [u8; 32], pk: ([u64; 6], [u64; 6]), m5: [u64; 
     nonce_transcript[17..].copy_from_slice(&sk_t8.values); // secret key (8 limbs)
 
     // Hash and truncate to get nonce
-    let nonce_digest = tip5_hash_words(&nonce_transcript);
-    let nonce_be = trunc_g_order_to_be32(nonce_digest);
+    let mut nonce_digest = tip5_hash_words(&nonce_transcript);
+    let mut nonce_be = trunc_g_order_to_be32(nonce_digest);
 
     // Verify nonce != 0 (line 1643)
     if is_zero32(&nonce_be) {
+        sk_be.zeroize();
+        sk_t8.values.zeroize();
+        nonce_transcript.zeroize();
+        nonce_digest.zeroize();
+        nonce_be.zeroize();
         panic!("Generated nonce is zero"); // Should be extremely rare
     }
 
@@ -701,21 +733,41 @@ pub fn schnorr_sign_digest(sk_be: [u8; 32], pk: ([u64; 6], [u64; 6]), m5: [u64; 
 
     // Verify challenge != 0 (line 1648)
     if is_zero32(&chal_be) {
+        sk_be.zeroize();
+        sk_t8.values.zeroize();
+        nonce_transcript.zeroize();
+        nonce_digest.zeroize();
+        nonce_be.zeroize();
         panic!("Generated challenge is zero"); // Should be extremely rare
     }
 
     // 4) Compute signature s = (nonce + challenge × sk) mod n - matches Hoon line 1649-1652
-    let chal_times_sk = mul_mod_n(&chal_be, &sk_be);
-    let s_be = add_mod_n(&nonce_be, &chal_times_sk);
+    let mut chal_times_sk = mul_mod_n(&chal_be, &sk_be);
+    let mut s_be = add_mod_n(&nonce_be, &chal_times_sk);
 
     // Verify signature != 0 (line 1653)
     if is_zero32(&s_be) {
+        sk_be.zeroize();
+        sk_t8.values.zeroize();
+        nonce_transcript.zeroize();
+        nonce_digest.zeroize();
+        nonce_be.zeroize();
+        chal_times_sk.zeroize();
+        s_be.zeroize();
         panic!("Generated signature is zero"); // Should be extremely rare
     }
 
     // 5) Convert challenge and signature to T8 format for return
     let chal_t8 = be32_atom_to_t8_le(&chal_be);
     let sig_t8 = be32_atom_to_t8_le(&s_be);
+
+    sk_be.zeroize();
+    sk_t8.values.zeroize();
+    nonce_transcript.zeroize();
+    nonce_digest.zeroize();
+    nonce_be.zeroize();
+    chal_times_sk.zeroize();
+    s_be.zeroize();
 
     (chal_t8, sig_t8)
 }
@@ -803,8 +855,10 @@ fn fingerprint_from_pk(pk: &([u64; 6], [u64; 6])) -> [u8; 4] {
 }
 
 pub fn xprv_derive_child(parent: &XKey, i: u32) -> XKey {
-    let prv = parent.sk.expect("need private key");
-    let cc = parent.chain_code;
+    let mut prv = parent.sk.expect("need private key");
+    let mut cc = parent.chain_code;
+    let parent_pk = parent.pk.unwrap_or_else(|| cheetah_pub_from_sk(prv));
+    let parent_fingerprint = fingerprint_from_pk(&parent_pk);
 
     const APT_SER_LEN: usize = 97;
 
@@ -814,32 +868,44 @@ pub fn xprv_derive_child(parent: &XKey, i: u32) -> XKey {
         data[0] = 0x00;
         data[1..33].copy_from_slice(&prv);
         data[33..].copy_from_slice(&ser32_be(i));
-        hmac_split_512(&cc, &data)
+        let split = hmac_split_512(&cc, &data);
+        data.zeroize();
+        split
     } else {
         // data = ser_a_pt(P) || ser32(i)
-        let pk_xy = parent.pk.unwrap_or_else(|| cheetah_pub_from_sk(prv));
-        let pub_ser = ser_a_pt(&pk_xy); // 97 bytes
+        let pub_ser = ser_a_pt(&parent_pk); // 97 bytes
         let mut data = [0u8; APT_SER_LEN + 4];
         data[..APT_SER_LEN].copy_from_slice(&pub_ser);
         data[APT_SER_LEN..].copy_from_slice(&ser32_be(i));
-        hmac_split_512(&cc, &data)
+        let split = hmac_split_512(&cc, &data);
+        data.zeroize();
+        split
     };
 
     // Retry until 0 < left < n and child != 0 using 0x01 || right || i
     for _ in 0..1024 {
         if !is_zero32(&left) && be32_lt(&left, &CHEETAH_N) {
-            let child_sk = be32_add_mod_n(&left, &prv);
+            let mut child_sk = be32_add_mod_n(&left, &prv);
             if !is_zero32(&child_sk) {
                 let child_pk = cheetah_pub_from_sk(child_sk);
-                return XKey {
+                let mut child_chain_code = right;
+                let result = XKey {
                     sk: Some(child_sk),
                     pk: Some(child_pk),
-                    chain_code: right,
+                    chain_code: child_chain_code,
                     depth: parent.depth + 1,
                     index: i,
-                    parent_fingerprint: parent.parent_fingerprint,
+                    parent_fingerprint,
                 };
+                child_sk.zeroize();
+                child_chain_code.zeroize();
+                left.zeroize();
+                right.zeroize();
+                prv.zeroize();
+                cc.zeroize();
+                return result;
             }
+            child_sk.zeroize();
         }
 
         // Next attempt seed: 0x01 || right || ser32(i)
@@ -848,10 +914,17 @@ pub fn xprv_derive_child(parent: &XKey, i: u32) -> XKey {
         red[1..33].copy_from_slice(&right);
         red[33..].copy_from_slice(&ser32_be(i));
         let (l2, r2) = hmac_split_512(&cc, &red);
+        red.zeroize();
+        left.zeroize();
+        right.zeroize();
         left = l2;
         right = r2;
     }
 
+    left.zeroize();
+    right.zeroize();
+    prv.zeroize();
+    cc.zeroize();
     panic!("xprv_derive_child: too many retries at index {}", i);
 }
 
