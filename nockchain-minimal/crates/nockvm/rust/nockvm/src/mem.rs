@@ -164,6 +164,17 @@ pub enum Memory {
     Malloc(*mut u8, usize),
 }
 
+impl Drop for Memory {
+    fn drop(&mut self) {
+        if let Self::Malloc(ptr, words) = self {
+            let layout = Layout::from_size_align(*words << 3, std::mem::size_of::<u64>())
+                .expect("Invalid layout");
+            // Malloc owns this allocation; mmap storage releases itself through MmapMut.
+            unsafe { std::alloc::dealloc(*ptr, layout) };
+        }
+    }
+}
+
 impl Deref for Memory {
     type Target = [u8];
 
