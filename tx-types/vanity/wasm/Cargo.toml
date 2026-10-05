@@ -1,0 +1,16 @@
+[package]
+name = "vanity-pkh-wasm"
+version.workspace = true
+edition.workspace = true
+description = "WASM key custody and verification for the WebGPU vanity PKH miner"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tx-types = { path = "../..", default-features = false, features = ["vanity-export"] }
+zeroize = { workspace = true }
+bs58 = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

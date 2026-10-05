@@ -5,7 +5,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha512;
 use zeroize::Zeroize;
 
-use crate::crypto::goldilocks::{bpegcd_full, tip5_permute, Belt, GOLDILOCKS_P};
+use crate::crypto::goldilocks::{tip5_permute, Belt, GOLDILOCKS_P};
 use crate::crypto::utils_nostd::{add_mod_n, mul_mod_n};
 
 // ---- Constants --------------------------------------------------------------
@@ -66,7 +66,7 @@ pub struct T8 {
 
 // F_{p^6} element (tower) as six Belt limbs
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct F6lt([Belt; 6]);
+pub struct F6lt(pub(crate) [Belt; 6]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheetahPoint {
@@ -134,30 +134,36 @@ fn f6_inv(a: &F6lt) -> F6lt {
         return *a;
     }
 
-    let mut u = [Belt(0); 7];
-    u[..6].copy_from_slice(&a.0);
-
-    // μ(t) = t^6 - 7
-    let mu = [
-        -Belt(7),
-        Belt(0),
-        Belt(0),
-        Belt(0),
-        Belt(0),
-        Belt(0),
-        Belt(1),
-    ];
-
-    let (s, _t, d0) = bpegcd_full(&u, &mu);
-    let inv_d0 = d0.inv();
-    F6lt([
-        s[0] * inv_d0,
-        s[1] * inv_d0,
-        s[2] * inv_d0,
-        s[3] * inv_d0,
-        s[4] * inv_d0,
-        s[5] * inv_d0,
-    ])
+    // Euclid with degree-six remainders and coefficients reduced modulo t^6-7.
+    // All scratch space has a fixed size, including the quotient product.
+    let mut r0 = [Belt(0); 7];
+    r0[0] = -Belt(7);
+    r0[6] = Belt(1);
+    let mut r1 = [Belt(0); 7];
+    r1[..6].copy_from_slice(&a.0);
+    let mut s0 = F6_ZERO;
+    let mut s1 = F6_ONE;
+    while let Some(degree) = r1.iter().rposition(|v| *v != Belt(0)) {
+        if degree == 0 {
+            return f6_scal(&s1, r1[0].inv());
+        }
+        let mut quotient = [Belt(0); 7];
+        let inv_lead = r1[degree].inv();
+        for i in (degree..7).rev() {
+            let factor = r0[i] * inv_lead;
+            quotient[i - degree] = factor;
+            for j in 0..=degree {
+                r0[i - degree + j] = r0[i - degree + j] - factor * r1[j];
+            }
+        }
+        core::mem::swap(&mut r0, &mut r1);
+        quotient[0] = quotient[0] + Belt(7) * quotient[6];
+        let q = F6lt(core::array::from_fn(|i| quotient[i]));
+        let next = f6_sub(&s0, &f6_mul(&q, &s1));
+        s0 = s1;
+        s1 = next;
+    }
+    unreachable!("nonzero extension-field element has an inverse")
 }
 
 #[inline]
@@ -210,7 +216,7 @@ fn ch_add_unsafe(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
     }
 }
 #[inline]
-fn ch_add(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
+pub(crate) fn ch_add(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
     ch_add_unsafe(p, q)
 }
 
@@ -316,41 +322,24 @@ fn f_montify(a: u64) -> u64 {
 /// TIP5 hash of a variable-length list of u64 words.
 /// This follows the upstream nockchain implementation with:
 /// - RATE=10, padding with [1, 0, 0, ...], Montgomery form, REPLACE absorption
-fn tip5_hash_words(words: &[u64]) -> [u64; DIGEST_LENGTH] {
+pub(crate) fn tip5_hash_words(words: &[u64]) -> [u64; DIGEST_LENGTH] {
     let mut state = [0u64; 16];
 
-    // Pad input to be a multiple of RATE
-    // Hoon always adds padding, even if len % RATE == 0
-    let len = words.len();
-    let remainder = len % RATE;
-    let padding_needed = RATE - remainder; // Always add at least [1, 0, ..., 0]
-
-    // Create padded input: original + [1, 0, 0, ...]
-    // Then montify EVERYTHING (Hoon does padding before montification)
-    let mut padded = alloc::vec::Vec::with_capacity(len + padding_needed);
-    for &w in words {
-        padded.push(w);
-    }
-    padded.push(1);
-    for _ in 1..padding_needed {
-        padded.push(0);
-    }
-
-    // Now montify all elements
-    for i in 0..padded.len() {
-        padded[i] = f_montify(padded[i]);
-    }
-
-    // Absorb RATE-sized blocks with REPLACE (not XOR)
-    let mut offset = 0;
-    while offset < padded.len() {
-        // Replace first RATE elements of state with input block
-        for i in 0..RATE {
-            state[i] = padded[offset + i];
+    let mut chunks = words.chunks_exact(RATE);
+    for block in &mut chunks {
+        for (slot, &word) in state[..RATE].iter_mut().zip(block) {
+            *slot = f_montify(word);
         }
         tip5_permute(&mut state);
-        offset += RATE;
     }
+    // Always absorb padding, including when the input fills an entire block.
+    let tail = chunks.remainder();
+    state[..RATE].fill(0);
+    for (slot, &word) in state.iter_mut().zip(tail) {
+        *slot = f_montify(word);
+    }
+    state[tail.len()] = f_montify(1);
+    tip5_permute(&mut state);
 
     // Demontify the digest (convert from Montgomery form back to normal)
     [
@@ -1160,6 +1149,63 @@ fn be32_atom_to_t8_le(be: &[u8; 32]) -> T8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_inverse_matches_polynomial_gcd() {
+        use crate::crypto::goldilocks::bpegcd_full;
+        let mut modulus = [Belt(0); 7];
+        modulus[0] = -Belt(7);
+        modulus[6] = Belt(1);
+        let mut random = 0x91ab_339e_574f_0acdu64;
+        let mut cases = alloc::vec![F6_ZERO, F6_ONE, GX, GY];
+        for i in 0..6 {
+            let mut a = F6_ZERO;
+            a.0[i] = Belt(1);
+            cases.push(a);
+        }
+        for _ in 0..64 {
+            cases.push(F6lt(core::array::from_fn(|_| {
+                random ^= random << 13;
+                random ^= random >> 7;
+                random ^= random << 17;
+                Belt(random % GOLDILOCKS_P)
+            })));
+        }
+        for a in cases {
+            let inverse = f6_inv(&a);
+            if a == F6_ZERO {
+                assert_eq!(inverse, F6_ZERO);
+                continue;
+            }
+            let mut polynomial = [Belt(0); 7];
+            polynomial[..6].copy_from_slice(&a.0);
+            let (s, _, d) = bpegcd_full(&polynomial, &modulus);
+            let reference = F6lt(core::array::from_fn(|i| s[i] * d.inv()));
+            assert_eq!(inverse, reference);
+            assert_eq!(f6_mul(&a, &inverse), F6_ONE);
+        }
+    }
+
+    #[test]
+    fn streaming_tip5_matches_reference_at_rate_boundaries() {
+        for len in [0, 1, 9, 10, 11, 19, 20, 21, 38, 40, 101] {
+            let words: Vec<u64> = (0..len)
+                .map(|i| GOLDILOCKS_P - 1 - i as u64)
+                .collect();
+            let mut padded = words.clone();
+            padded.push(1);
+            padded.resize((len / RATE + 1) * RATE, 0);
+            let mut state = [0; 16];
+            for block in padded.chunks_exact(RATE) {
+                for i in 0..RATE {
+                    state[i] = f_montify(block[i]);
+                }
+                tip5_permute(&mut state);
+            }
+            let expected = core::array::from_fn(|i| f_mont_reduction(state[i] as u128));
+            assert_eq!(tip5_hash_words(&words), expected);
+        }
+    }
 
     #[test]
     fn test_schnorr_sign_digest_with_t8_key() {
