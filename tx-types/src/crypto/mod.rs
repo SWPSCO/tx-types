@@ -7,13 +7,11 @@
 /// - SLIP-10 hierarchical deterministic key derivation
 /// - Utility routines for scalar arithmetic
 
-// For no_std builds, use the self-contained cheetah_nostd and goldilocks modules
-#[cfg(not(feature = "std"))]
+// Self-contained primitives are also available to hosted mining tools.
 pub mod goldilocks;
-#[cfg(not(feature = "std"))]
 pub mod utils_nostd;
-#[cfg(not(feature = "std"))]
 pub mod cheetah_nostd;
+pub mod vanity;
 
 // For std builds, use the new modular structure
 #[cfg(feature = "std")]
