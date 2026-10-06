@@ -81,9 +81,9 @@ self.onmessage = async ({ data }) => {
   cancelled = false;
   let keys;
   try {
-    const { prefix, insensitive, lanes, steps, maxAttempts, backend = "auto", keyMode = "mnemonic" } = data;
+    const { prefix, insensitive, lanes, steps, maxAttempts, backend = "auto", keyMode = "extended" } = data;
     if (!["auto", "cpu"].includes(backend)) throw new Error("Choose Automatic or CPU for the backend.");
-    if (!["mnemonic", "raw"].includes(keyMode)) throw new Error("Choose mnemonic or raw keys.");
+    if (!["extended", "mnemonic", "raw"].includes(keyMode)) throw new Error("Choose an extended key, mnemonic, or raw key.");
     if (!Number.isInteger(steps) || steps < 1 || steps > 16) throw new Error("Steps must be between 1 and 16.");
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 0) throw new Error("Attempt limit must be a nonnegative safe integer.");
     keys = await WasmKeys.load(data.wasmUrl);
@@ -140,7 +140,7 @@ self.onmessage = async ({ data }) => {
       const found = activeResults.find((result) => result.status === 1);
       if (cancelled) break;
       if (found) {
-        const bytes = keys.verify(found.lane, found.offset);
+        const bytes = keys.verify(found.lane, found.offset, keyMode);
         const pkh = addressFromDigest(keys.reference(found.lane, found.offset).slice(24));
         postMessage({ type: "match", pkh, bytes: bytes.buffer, attempts, adapter }, [bytes.buffer]);
         return;

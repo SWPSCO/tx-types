@@ -46,6 +46,17 @@ in the WASM module built from `wasm/`; GPU matches are checked against Rust befo
 returning private JSON. Preserve the relative asset paths or supply the documented
 URL overrides.
 
+The browser defaults to `keyMode: "extended"`: it mines at raw-key speed, then
+exports a version-1 master `zprv` with a fresh random chain code at path `m`.
+The root address remains the mined address; there is no seed phrase. `mnemonic`
+searches recoverable 24-word phrases, and `raw` exports a scalar without HD
+metadata. Rust callers use `extended_key_json` with their own random chain code.
+
+`expectedVanityAttempts(prefix, insensitive)` accounts for canonical Base58 and
+letter/digit matching. Divide it by the measured candidate rate for an estimated
+average time, then format it with `formatVanityDuration`. This is an average,
+not a deadline or a countdown.
+
 Automatic mode uses WebGPU when available and switches to CPU/WASM if the GPU is
 unavailable or cannot compile the shaders. GPU self-test and result-verification
 failures stop the search. `backend: "cpu"` skips GPU initialization.

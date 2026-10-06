@@ -11,8 +11,8 @@ use std::cell::RefCell;
 use tx_types::crypto::cheetah_nostd::cheetah_pub_from_sk;
 use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
 use vanity::{
-    derive_mnemonic, encode_pkh, key_json, pkh_from_public_key, Match, MatchMode, MnemonicMatch,
-    MnemonicSearch, Prefix, Search,
+    derive_mnemonic, encode_pkh, extended_key_json, key_json, pkh_from_public_key, Match,
+    MatchMode, MnemonicMatch, MnemonicSearch, Prefix, Search,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -335,6 +335,23 @@ pub extern "C" fn mnemonic_verify() -> u32 {
 /// Returns zero and clears output for an invalid lane or a false GPU match.
 #[no_mangle]
 pub extern "C" fn verify_match(lane: usize, offset: u32) -> u32 {
+    verify_key(lane, offset, None)
+}
+
+/// Consume seed_ptr as a fresh chain code and export a verified match as a zprv.
+/// The input is erased on success and failure; the root address is unchanged.
+#[no_mangle]
+pub extern "C" fn verify_extended_match(lane: usize, offset: u32) -> u32 {
+    let chain_code = SESSION.with(|cell| {
+        let mut s = cell.borrow_mut();
+        let chain_code = Zeroizing::new(*s.seed_input);
+        s.seed_input.zeroize();
+        chain_code
+    });
+    verify_key(lane, offset, Some(&chain_code))
+}
+
+fn verify_key(lane: usize, offset: u32, chain_code: Option<&[u8; 32]>) -> u32 {
     SESSION.with(|cell| {
         let mut s = cell.borrow_mut();
         s.output.zeroize();
@@ -353,14 +370,15 @@ pub extern "C" fn verify_match(lane: usize, offset: u32) -> u32 {
         if !prefix.matches(&address) {
             return 0;
         }
-        let json = key_json(
-            &Match {
-                secret_key_be: key,
-                public_key: public,
-                pkh: hash,
-            },
-            None,
-        );
+        let found = Match {
+            secret_key_be: key,
+            public_key: public,
+            pkh: hash,
+        };
+        let json = match chain_code {
+            Some(chain_code) => extended_key_json(&found, chain_code),
+            None => key_json(&found, None),
+        };
         s.output.extend_from_slice(json.as_bytes());
         1
     })
@@ -431,6 +449,36 @@ mod tests {
         clear();
         assert_eq!(mnemonic_batch(), 3);
         assert_eq!(mnemonic_verify(), 0);
+    }
+
+    #[test]
+    fn extended_match_consumes_chain_code_and_erases_failed_output() {
+        reset(1);
+        let mut scalar = [0u8; 32];
+        scalar[31] = 1;
+        assert_eq!(seed(scalar), 1);
+        let address = encode_pkh(pkh_from_public_key(&cheetah_pub_from_sk(scalar)));
+        assert_eq!(prefix(address.as_str(), false), 1);
+        SESSION.with(|s| s.borrow_mut().seed_input.fill(7));
+        assert_eq!(verify_extended_match(0, 0), 1);
+        SESSION.with(|s| {
+            let s = s.borrow();
+            assert_eq!(*s.seed_input, [0; 32]);
+            let json: serde_json::Value = serde_json::from_slice(&s.output).unwrap();
+            let payload = bs58::decode(json["zprv"].as_str().unwrap())
+                .with_check(None)
+                .into_vec()
+                .unwrap();
+            assert_eq!(&payload[14..46], &[7u8; 32]);
+            assert_eq!(&payload[47..], &scalar);
+            assert_eq!(json["pkh"], address.as_str());
+            assert!(json.get("mnemonic").is_none());
+        });
+        SESSION.with(|s| s.borrow_mut().seed_input.fill(9));
+        assert_eq!(verify_extended_match(0, 1), 0);
+        assert_eq!(output_len(), 0);
+        SESSION.with(|s| assert_eq!(*s.borrow().seed_input, [0; 32]));
+        clear();
     }
 
     #[test]

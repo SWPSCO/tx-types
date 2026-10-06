@@ -1,5 +1,5 @@
 /**
- * Mine an address without UI dependencies. Both recovery modes automatically
+ * Mine an address without UI dependencies. All recovery modes automatically
  * select WebGPU when available and otherwise use WASM CPU.
  *
  * @param {import('./miner.js').MineOptions} options
@@ -9,7 +9,7 @@ export function mineAddress(options) {
   const { signal, onProgress, workerUrl = new URL("./worker.js", import.meta.url),
     wasmUrl, shaderUrls, mnemonicShaderUrls, tableUrl, ...settings } = options;
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(new DOMException("Mining cancelled", "AbortError")); return; }
+    if (signal?.aborted) { reject(new DOMException("Generation cancelled", "AbortError")); return; }
     let worker;
     try { worker = new Worker(workerUrl, { type: "module" }); }
     catch (error) { reject(error); return; }
@@ -23,14 +23,14 @@ export function mineAddress(options) {
       worker.terminate();
       if (error) reject(error); else resolve(result);
     };
-    const aborted = () => finish(new DOMException("Mining cancelled", "AbortError"));
+    const aborted = () => finish(new DOMException("Generation cancelled", "AbortError"));
     const abort = () => {
       worker.postMessage({ type: "stop" });
       abortTimer = setTimeout(aborted, 5000);
     };
     signal?.addEventListener("abort", abort, { once: true });
-    worker.onerror = (event) => finish(new Error(event.message || "Mining worker failed."));
-    worker.onmessageerror = () => finish(new Error("Cannot decode mining worker response."));
+    worker.onerror = (event) => finish(new Error(event.message || "Address generation failed."));
+    worker.onmessageerror = () => finish(new Error("Cannot decode the address generator response."));
     worker.onmessage = ({ data }) => {
       if (signal?.aborted) { if (data.type === "stopped") aborted(); return; }
       if (data.type === "error") finish(new Error(data.message));
@@ -46,7 +46,7 @@ export function mineAddress(options) {
       }
     };
     try {
-      worker.postMessage({ type: "start", insensitive: false, keyMode: "mnemonic", backend: "auto", lanes: options.keyMode === "raw" ? 64 : 4096,
+      worker.postMessage({ type: "start", insensitive: false, keyMode: "extended", backend: "auto", lanes: options.keyMode === "mnemonic" ? 4096 : 64,
         steps: 1, maxAttempts: 0, ...settings,
         wasmUrl: wasmUrl === undefined ? undefined : new URL(wasmUrl, import.meta.url).href,
         shaderUrls: shaderUrls?.map(url => new URL(url, import.meta.url).href),
@@ -56,3 +56,5 @@ export function mineAddress(options) {
     } catch (error) { finish(error); }
   });
 }
+
+export { expectedVanityAttempts, formatVanityDuration } from "./estimate.js";

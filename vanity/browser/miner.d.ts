@@ -2,13 +2,13 @@ export interface MineOptions {
   prefix: string;
   /** Ignore case and match documented letter/digit alternatives. */
   insensitive?: boolean;
-  /** Default: mnemonic (24 words, path m, empty passphrase). raw has no phrase. */
-  keyMode?: "mnemonic" | "raw";
-  /** Both modes: auto selects WebGPU, then WASM CPU when unavailable or shader compilation fails. */
+  /** Default: extended (zprv, path m, fresh chain code, no phrase). mnemonic uses 24 words and an empty passphrase. */
+  keyMode?: "extended" | "mnemonic" | "raw";
+  /** All modes: auto selects WebGPU, then WASM CPU when unavailable or shader compilation fails. */
   backend?: "auto" | "cpu";
-  /** GPU lanes: mnemonic 1..4096 (default 4096); raw 1..256 (default 64). */
+  /** GPU lanes: mnemonic 1..4096 (default 4096); extended/raw 1..256 (default 64). */
   lanes?: number;
-  /** Raw-key GPU steps per batch (1..16); ignored by mnemonic mining. */
+  /** Extended/raw-key GPU steps per batch (1..16); ignored by mnemonic mining. */
   steps?: number;
   /** Total candidates across all lanes. 0 (default) means unlimited. */
   maxAttempts?: number;
@@ -29,7 +29,7 @@ export type MineProgress =
 
 export interface MineResult {
   pkh: string;
-  /** UTF-8 private JSON; mnemonic mode includes phrase and recovery settings. */
+  /** UTF-8 private JSON; extended includes zprv and path m; mnemonic includes phrase and recovery settings. */
   keyJson: Uint8Array;
   attempts: number;
   backend: string;
@@ -37,3 +37,8 @@ export interface MineResult {
 
 /** Returns null on the attempt limit; rejects with AbortError on cancellation. */
 export function mineAddress(options: MineOptions): Promise<MineResult | null>;
+
+/** Expected trials for a uniform PKH, or null for an invalid/impossible prefix. */
+export function expectedVanityAttempts(prefix: string, insensitive?: boolean): number | null;
+/** Human-readable average duration; null for a non-finite or negative input. */
+export function formatVanityDuration(seconds: number): string | null;

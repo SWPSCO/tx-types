@@ -24,7 +24,7 @@ pub use mnemonic::{derive_mnemonic, Mnemonic, MnemonicBatch, MnemonicMatch, Mnem
 #[cfg(feature = "export")]
 mod export;
 #[cfg(feature = "export")]
-pub use export::key_json;
+pub use export::{extended_key_json, key_json};
 
 use tx_types::crypto::cheetah_nostd::{
     ch_add, cheetah_pub_from_sk, tip5_hash_words, CheetahPoint, F6lt, G,

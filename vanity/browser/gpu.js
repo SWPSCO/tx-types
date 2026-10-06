@@ -17,7 +17,7 @@ export async function requestGpuDevice() {
 
 function compilationUnavailable(cause) {
   return new WebGpuUnavailableError(
-    "This GPU cannot compile the mining shaders. Using CPU / WASM.",
+    "This GPU cannot compile the address-generation shaders. Using CPU / WASM.",
     { cause },
   );
 }

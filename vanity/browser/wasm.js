@@ -4,7 +4,7 @@ export class WasmKeys {
 
   static async load(url = new URL("./generated/vanity_pkh.wasm", import.meta.url)) {
     const response = await fetch(url);
-    if (!response.ok) throw new Error("Could not load the vanity mining WASM module.");
+    if (!response.ok) throw new Error("Could not load the address generator.");
     const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});
     return new WasmKeys(instance.exports);
   }
@@ -54,9 +54,20 @@ export class WasmKeys {
     return new Uint32Array(e.memory.buffer, e.reference_ptr(), 34).slice();
   }
 
-  verify(lane, offset) {
+  verify(lane, offset, keyMode = "raw") {
     const e = this.exports;
-    if (e.verify_match(lane, offset) !== 1) throw new Error("GPU match failed independent WASM verification.");
+    let verified;
+    if (keyMode === "extended") {
+      const chainCode = new Uint8Array(32);
+      try {
+        crypto.getRandomValues(chainCode);
+        new Uint8Array(e.memory.buffer, e.seed_ptr(), 32).set(chainCode);
+        verified = e.verify_extended_match(lane, offset);
+      } finally { chainCode.fill(0); }
+    } else {
+      verified = e.verify_match(lane, offset);
+    }
+    if (verified !== 1) throw new Error("GPU match failed independent WASM verification.");
     return new Uint8Array(e.memory.buffer, e.output_ptr(), e.output_len()).slice();
   }
 
