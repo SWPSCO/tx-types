@@ -1,5 +1,6 @@
 [workspace]
 members = ["tx-types", "pokenoun", "examples/vanity-pkh", "tx-types/vanity/wasm"]
+exclude = ["nockchain-minimal"]
 resolver = "2"
 
 [workspace.package]
@@ -7,18 +8,17 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-# Nockchain dependencies - by default from git
-# temporarily using nockpool/hoon-v1
-noun-serde = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-noun-serde-derive = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-nockapp = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
-nockvm = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-nockchain-libp2p-io = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
-nockchain-math = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-zkvm-jetpack = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-ibig = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4", default-features = false }
-murmur3 = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
-nockvm_macros = { git = "https://github.com/swpsco/nockchain.git", rev = "980a0a1045e6adca027e9b5d3a909e56ffc12bc4" }
+# Nockchain crates supplied by this repository
+noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
+noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
+nockapp = { path = "./nockchain-minimal/crates/nockapp", default-features = false }
+nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
+nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io", default-features = false }
+nockchain-math = { path = "./nockchain-minimal/crates/nockchain-math" }
+zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
+ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig", default-features = false }
+murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
+nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }
 
 # Standard dependencies (matching nockchain-minimal workspace)
 aes = { version = "0.8.3", default-features = false }
@@ -82,16 +82,3 @@ pokenoun = { path = "./pokenoun" }
 tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }
 tracy-client = { path = "./dummy-tracy/tracy-client" }
 tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }
-
-# Use local nockchain dependencies for WASM compilation
-[patch."https://github.com/swpsco/nockchain.git"]
-noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
-noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
-nockapp = { path = "./nockchain-minimal/crates/nockapp" }
-nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
-nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io" }
-nockchain-math = { path = "./nockchain-minimal/crates/nockchain-math" }
-zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
-ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig" }
-murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
-nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }
