@@ -1,7 +1,7 @@
 //! Shared terminal display for the CPU and GPU command-line runners.
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
-use vanity::{format_vanity_duration, Prefix};
+use vanity::{format_vanity_duration, Pattern};
 
 pub struct Progress {
     start: Instant,
@@ -14,7 +14,7 @@ pub struct Progress {
 }
 
 impl Progress {
-    pub fn new(prefix: &Prefix) -> Self {
+    pub fn new(prefix: &Pattern) -> Self {
         let mut progress = Self {
             start: Instant::now(),
             reported: Duration::ZERO,

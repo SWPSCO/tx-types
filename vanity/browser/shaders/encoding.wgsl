@@ -56,15 +56,23 @@ fn base58_digits(digest: array<U64, 5>) -> EncodedPkh {
     return EncodedPkh(digits, length);
 }
 
-fn prefix_matches(digest: array<U64, 5>) -> bool {
+fn pattern_matches(digest: array<U64, 5>) -> bool {
     let encoded = base58_digits(digest);
-    let prefix_length = config[2];
-    if encoded.length < prefix_length { return false; }
-    for (var i = 0u; i < prefix_length; i++) {
-        let digit = encoded.digits[encoded.length - 1u - i];
-        let mask = config[4u + i*2u + digit/32u];
-        if (mask & (1u << (digit % 32u))) == 0u { return false; }
+    let pattern_length = config[2];
+    if encoded.length < pattern_length { return false; }
+    // Config mode: 0 = prefix, 1 = suffix, 2 = contains.
+    var first = 0u;
+    var last = 0u;
+    if config[3] == 1u { first = encoded.length - pattern_length; last = first; }
+    if config[3] == 2u { last = encoded.length - pattern_length; }
+    for (var start = first; start <= last; start++) {
+        var matched = true;
+        for (var i = 0u; i < pattern_length; i++) {
+            let digit = encoded.digits[encoded.length - 1u - start - i];
+            let mask = config[4u + i*2u + digit/32u];
+            if (mask & (1u << (digit % 32u))) == 0u { matched = false; break; }
+        }
+        if matched { return true; }
     }
-    return true;
+    return false;
 }
-

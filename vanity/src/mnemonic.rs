@@ -4,7 +4,7 @@ pub use bip39::Mnemonic;
 use tx_types::crypto::cheetah_nostd::{cheetah_pub_from_sk, master_from_seed};
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{encode_pkh, pkh_from_public_key, Match, Prefix};
+use super::{encode_pkh, pkh_from_public_key, AddressMatcher, Match};
 
 /// Derive the address Nockster displays when importing this phrase with an
 /// empty passphrase. This uses the shared SLIP-10-over-Cheetah implementation.
@@ -50,7 +50,7 @@ impl MnemonicSearch {
         }
     }
 
-    pub fn search_batch(&mut self, prefix: &Prefix, limit: u64) -> MnemonicBatch {
+    pub fn search_batch(&mut self, pattern: &impl AddressMatcher, limit: u64) -> MnemonicBatch {
         let mut batch = MnemonicBatch {
             attempts: 0,
             matched: None,
@@ -61,7 +61,7 @@ impl MnemonicSearch {
             let key = derive_mnemonic(&mnemonic);
             batch.attempts += 1;
             self.advance();
-            if prefix.matches(&encode_pkh(key.pkh)) {
+            if pattern.matches(&encode_pkh(key.pkh)) {
                 batch.matched = Some(MnemonicMatch { mnemonic, key });
                 break;
             }
@@ -85,6 +85,7 @@ impl MnemonicSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Prefix;
 
     #[test]
     fn nockchain_wallet_master_address_vector() {

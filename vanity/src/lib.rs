@@ -1,4 +1,4 @@
-//! Allocation-free raw-key and mnemonic PKH prefix searches.
+//! Allocation-free raw-key and mnemonic PKH searches.
 //!
 //! Enable `mnemonic` for BIP39 recovery at path `m` with an empty
 //! passphrase, and `export` for private JSON serialization.
@@ -15,6 +15,11 @@ extern crate alloc;
 
 use core::fmt;
 pub use zeroize::Zeroizing;
+
+#[cfg(all(feature = "std", feature = "export"))]
+mod output;
+#[cfg(all(feature = "std", feature = "export"))]
+pub use output::KeyOutput;
 
 mod estimate;
 pub use estimate::format_vanity_duration;
@@ -45,6 +50,7 @@ pub enum Error {
     InvalidSecretKey,
     InvalidPrefix,
     ImpossiblePrefix,
+    InvalidPattern,
 }
 
 impl fmt::Display for Error {
@@ -55,6 +61,9 @@ impl fmt::Display for Error {
                 "prefix must contain 1 to 55 characters supported by the matching mode"
             }
             Self::ImpossiblePrefix => "prefix is outside the canonical PKH encoding range",
+            Self::InvalidPattern => {
+                "pattern must contain 1 to 55 characters supported by the matching mode"
+            }
         })
     }
 }
@@ -109,7 +118,7 @@ impl Prefix {
         Self::with_mode(text, MatchMode::Exact)
     }
 
-    pub fn with_mode(text: &str, mode: MatchMode) -> Result<Self, Error> {
+    fn compile(text: &str, mode: MatchMode) -> Result<Self, Error> {
         let input = text.as_bytes();
         if input.is_empty()
             || input.len() > MAX_PKH_LEN
@@ -125,11 +134,16 @@ impl Prefix {
         for (dest, &source) in bytes.iter_mut().zip(input) {
             *dest = mode.normalize(source);
         }
-        let prefix = Self {
+        Ok(Self {
             bytes,
             len: input.len(),
             mode,
-        };
+        })
+    }
+
+    pub fn with_mode(text: &str, mode: MatchMode) -> Result<Self, Error> {
+        let prefix = Self::compile(text, mode)?;
+        let bytes = prefix.bytes;
         // A nonzero integer cannot have a leading '1'. Find the smallest
         // matching numeral to check the 55-character upper bound as well.
         let mut smallest = [0; MAX_PKH_LEN];
@@ -173,6 +187,80 @@ impl Prefix {
             }
         }
         masks
+    }
+}
+
+/// Predicate evaluated against each candidate's canonical Base58 address.
+pub trait AddressMatcher {
+    fn matches(&self, address: &EncodedPkh) -> bool;
+}
+
+impl AddressMatcher for Prefix {
+    fn matches(&self, address: &EncodedPkh) -> bool {
+        Prefix::matches(self, address)
+    }
+}
+
+/// Where a pattern must occur in the address. Values also identify GPU modes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum MatchPosition {
+    Prefix = 0,
+    Suffix = 1,
+    Contains = 2,
+}
+
+/// One compiled address pattern for a CPU or native GPU search.
+#[derive(Clone, Copy)]
+pub struct Pattern {
+    digits: Prefix,
+    position: MatchPosition,
+}
+
+impl Pattern {
+    pub fn new(text: &str, position: MatchPosition) -> Result<Self, Error> {
+        Self::with_mode(text, position, MatchMode::Exact)
+    }
+
+    pub fn with_mode(text: &str, position: MatchPosition, mode: MatchMode) -> Result<Self, Error> {
+        let digits = if position == MatchPosition::Prefix || text.len() == MAX_PKH_LEN {
+            Prefix::with_mode(text, mode)?
+        } else {
+            Prefix::compile(text, mode).map_err(|_| Error::InvalidPattern)?
+        };
+        Ok(Self { digits, position })
+    }
+
+    pub fn position(&self) -> MatchPosition {
+        self.position
+    }
+    pub fn digit_masks(&self) -> [[u32; 2]; MAX_PKH_LEN] {
+        self.digits.digit_masks()
+    }
+
+    pub fn matches(&self, address: &EncodedPkh) -> bool {
+        let bytes = address.as_str().as_bytes();
+        let len = self.digits.len;
+        if bytes.len() < len {
+            return false;
+        }
+        let at = |start: usize| {
+            bytes[start..start + len]
+                .iter()
+                .zip(&self.digits.bytes[..len])
+                .all(|(&candidate, &pattern)| self.digits.mode.accepts(pattern, candidate))
+        };
+        match self.position {
+            MatchPosition::Prefix => at(0),
+            MatchPosition::Suffix => at(bytes.len() - len),
+            MatchPosition::Contains => (0..=bytes.len() - len).any(at),
+        }
+    }
+}
+
+impl AddressMatcher for Pattern {
+    fn matches(&self, address: &EncodedPkh) -> bool {
+        Pattern::matches(self, address)
     }
 }
 
@@ -287,7 +375,7 @@ impl Search {
 
     /// Test at most `limit` candidates, stopping at a match or the group order.
     /// State points to the next untested scalar after every call.
-    pub fn search_batch(&mut self, prefix: &Prefix, limit: u64) -> BatchResult {
+    pub fn search_batch(&mut self, pattern: &impl AddressMatcher, limit: u64) -> BatchResult {
         let mut result = BatchResult {
             attempts: 0,
             matched: None,
@@ -297,7 +385,7 @@ impl Search {
             let public_key = (self.point.x.0.map(|v| v.0), self.point.y.0.map(|v| v.0));
             let pkh = pkh_from_public_key(&public_key);
             result.attempts += 1;
-            if prefix.matches(&encode_pkh(pkh)) {
+            if pattern.matches(&encode_pkh(pkh)) {
                 result.matched = Some(Match {
                     secret_key_be: Zeroizing::new(*self.secret_key),
                     public_key,

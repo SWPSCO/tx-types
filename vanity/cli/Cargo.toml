@@ -8,10 +8,12 @@ publish = false
 
 [dependencies]
 tx-types = { path = "../../tx-types", default-features = false }
-vanity = { path = "..", features = ["export"] }
+vanity = { path = "..", features = ["export", "std"] }
 getrandom = { workspace = true }
 zeroize = { workspace = true }
 serde_json = { workspace = true }
+
+ctrlc = "3.4"
 
 [dev-dependencies]
 bs58 = { workspace = true }

@@ -2,23 +2,29 @@ mod gpu;
 #[path = "../../progress.rs"]
 mod progress;
 use progress::Progress;
+use vanity::KeyOutput;
 
-use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use vanity::{encode_pkh, extended_key_json, key_json, MatchMode, Prefix, Zeroizing};
+use vanity::{
+    encode_pkh, extended_key_json, key_json, MatchMode, MatchPosition, Pattern, Zeroizing,
+};
 
-const HELP: &str = "Usage: vanity-gpu <PREFIX> --output <FILE> [OPTIONS]
+const HELP: &str =
+    "Usage: vanity-gpu [PREFIX | --suffix TEXT | --contains TEXT] --output <FILE> [OPTIONS]
        vanity-gpu --list-gpus
        vanity-gpu --self-test [--adapter N]
 
 Generate a Nockchain address on a native Vulkan GPU. No browser or CUDA toolkit.
 Defaults to a zprv extended private key at path m, with no seed phrase.
 
+  --prefix TEXT      Match the start (also accepted as a positional argument)
+  --suffix TEXT      Match the end of the address
+  --contains TEXT    Match anywhere in the address
+  --continuous       Keep finding keys; atomically save a JSON array after each match
   --output FILE      Private JSON backup; must not exist (0600 on Unix)
   --insensitive      Ignore case and match letter/digit equivalents
   --adapter N        Adapter index from --list-gpus (default: discrete GPU)
@@ -38,13 +44,14 @@ Ctrl+C stops after the current GPU batch. No match leaves the reserved file empt
 Exit codes: 0 match/self-test, 1 error, 2 attempt limit, 130 interrupted.";
 
 struct Args {
-    prefix: Option<Prefix>,
+    prefix: Option<Pattern>,
     output: Option<PathBuf>,
     adapter: Option<usize>,
     lanes: u32,
     steps: u32,
     max_attempts: u64,
     raw_key: bool,
+    continuous: bool,
     list: bool,
     self_test: bool,
 }
@@ -52,6 +59,7 @@ struct Args {
 fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     let mut args = args;
     let mut prefix = None;
+    let mut position = MatchPosition::Prefix;
     let mut insensitive = false;
     let mut result = Args {
         prefix: None,
@@ -61,6 +69,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
         steps: 16,
         max_attempts: u64::MAX,
         raw_key: false,
+        continuous: false,
         list: false,
         self_test: false,
     };
@@ -71,6 +80,18 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
             "--self-test" => result.self_test = true,
             "--insensitive" => insensitive = true,
             "--raw-key" => result.raw_key = true,
+            "--continuous" => result.continuous = true,
+            "--prefix" | "--suffix" | "--contains" => {
+                if prefix.is_some() {
+                    return Err("Choose exactly one of prefix, --suffix, or --contains".into());
+                }
+                position = match arg.as_str() {
+                    "--suffix" => MatchPosition::Suffix,
+                    "--contains" => MatchPosition::Contains,
+                    _ => MatchPosition::Prefix,
+                };
+                prefix = Some(args.next().ok_or("missing pattern value")?);
+            }
             "--output" => {
                 result.output = Some(PathBuf::from(args.next().ok_or("Missing --output path")?))
             }
@@ -105,7 +126,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
             }
             _ if arg.starts_with('-') => return Err(format!("Unknown option: {arg}")),
             _ if prefix.is_none() => prefix = Some(arg),
-            _ => return Err("Only one address prefix is accepted".into()),
+            _ => return Err("Choose exactly one match pattern".into()),
         }
     }
     if !(1..=65536).contains(&result.lanes) {
@@ -118,7 +139,11 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
         return Err("The attempt limit must be positive".into());
     }
     if result.list || result.self_test {
-        if result.list && result.self_test || prefix.is_some() || result.output.is_some() {
+        if result.list && result.self_test
+            || prefix.is_some()
+            || result.output.is_some()
+            || result.continuous
+        {
             return Err(
                 "Use --list-gpus or --self-test on its own, without a prefix or output".into(),
             );
@@ -126,8 +151,9 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     } else {
         let text = prefix.ok_or("An address prefix is required (see --help)")?;
         result.prefix = Some(
-            Prefix::with_mode(
+            Pattern::with_mode(
                 &text,
+                position,
                 if insensitive {
                     MatchMode::Insensitive
                 } else {
@@ -141,19 +167,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
         }
     }
     Ok(Some(result))
-}
-
-fn create_output(path: &PathBuf) -> Result<File, String> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options
-        .open(path)
-        .map_err(|e| format!("Cannot create {}: {e}", path.display()))
 }
 
 fn random_seeds(lanes: u32, stop: &AtomicBool) -> Result<Vec<Zeroizing<[u8; 32]>>, String> {
@@ -184,7 +197,13 @@ fn batch_shape(lanes: u32, steps: u32, remaining: u64) -> (u32, u32) {
 
 fn run(args: Args) -> Result<i32, String> {
     // Reserve the private backup before generating keys or spending GPU time.
-    let mut output = args.output.as_ref().map(create_output).transpose()?;
+    let mut output = args
+        .output
+        .as_ref()
+        .map(|p| {
+            KeyOutput::create(p, args.continuous).map_err(|e| format!("Cannot create backup: {e}"))
+        })
+        .transpose()?;
     let adapters = gpu::adapters();
     if adapters.is_empty() {
         return Err("No Vulkan adapters found. Install the GPU vendor's Vulkan driver.".into());
@@ -276,7 +295,7 @@ fn run(args: Args) -> Result<i32, String> {
             }
             attempts += u64::from(candidate.tested);
         }
-        if let Some(candidate) = candidates.iter().find(|c| c.status == 1) {
+        for candidate in candidates.iter().filter(|c| c.status == 1) {
             let found = gpu::verify(&seeds[candidate.lane], candidate, prefix)?;
             let json = if args.raw_key {
                 key_json(&found, None)
@@ -287,8 +306,7 @@ fn run(args: Args) -> Result<i32, String> {
                 extended_key_json(&found, &chain_code)
             };
             let file = output.as_mut().unwrap();
-            file.write_all(json.as_bytes())
-                .and_then(|_| file.sync_all())
+            file.save(&json)
                 .map_err(|e| format!("Cannot save private backup: {e}"))?;
             progress.finish(attempts);
             println!("{}", encode_pkh(found.pkh));
@@ -296,7 +314,9 @@ fn run(args: Args) -> Result<i32, String> {
                 "Verified match; backup saved to {}",
                 args.output.as_ref().unwrap().display()
             );
-            return Ok(0);
+            if !args.continuous {
+                return Ok(0);
+            }
         }
         if candidates.iter().any(|c| c.status == 2) {
             seeds = random_seeds(args.lanes, &stop)?;
@@ -310,11 +330,15 @@ fn run(args: Args) -> Result<i32, String> {
     }
     progress.finish(attempts);
     if stop.load(Ordering::Relaxed) {
-        eprintln!("Stopped. The reserved output file is empty.");
+        eprintln!("Stopped. Saved matches remain in the output file.");
         Ok(130)
     } else {
-        eprintln!("Attempt limit reached. The reserved output file is empty.");
-        Ok(2)
+        eprintln!("Attempt limit reached. Saved matches remain in the output file.");
+        Ok(if output.as_ref().unwrap().count() > 0 {
+            0
+        } else {
+            2
+        })
     }
 }
 

@@ -1,6 +1,8 @@
 use std::sync::{mpsc, Arc, Mutex};
 use tx_types::crypto::cheetah_nostd::cheetah_pub_from_sk;
-use vanity::{encode_pkh, pkh_from_public_key, Match, MatchMode, Prefix, Zeroizing};
+use vanity::{
+    encode_pkh, pkh_from_public_key, Match, MatchMode, MatchPosition, Pattern, Zeroizing,
+};
 use wgpu::util::DeviceExt;
 
 const POINT_WORDS: usize = 26;
@@ -53,7 +55,7 @@ pub struct Candidate {
 }
 
 /// Recompute a winning scalar, point, hash and prefix independently of the GPU.
-pub fn verify(seed: &[u8; 32], candidate: &Candidate, prefix: &Prefix) -> Result<Match, String> {
+pub fn verify(seed: &[u8; 32], candidate: &Candidate, prefix: &Pattern) -> Result<Match, String> {
     let key = offset_key(seed, candidate.offset).ok_or("GPU returned an invalid key offset")?;
     let public_key = cheetah_pub_from_sk(*key);
     let pkh = pkh_from_public_key(&public_key);
@@ -150,7 +152,7 @@ impl Gpu {
     pub fn initialize(
         &self,
         seeds: &[Zeroizing<[u8; 32]>],
-        prefix: &Prefix,
+        prefix: &Pattern,
     ) -> Result<Buffers, String> {
         self.check()?;
         if seeds.is_empty() || seeds.len() > 65536 {
@@ -166,6 +168,7 @@ impl Gpu {
         }
         let mut settings = [0u32; 114];
         settings[0] = seeds.len() as u32;
+        settings[3] = prefix.position() as u32;
         for (i, mask) in prefix.digit_masks().iter().enumerate() {
             if *mask != [0, 0] {
                 settings[2] += 1;
@@ -295,7 +298,8 @@ impl Gpu {
         let mut one = Zeroizing::new([0; 32]);
         one[31] = 1;
         let seeds = [one, Zeroizing::new([0x35; 32])];
-        let mut buffers = self.initialize(&seeds, &Prefix::new("1").unwrap())?;
+        let mut buffers =
+            self.initialize(&seeds, &Pattern::new("1", MatchPosition::Prefix).unwrap())?;
         for batch in 0..2 {
             for result in self.dispatch(&mut buffers, 2, 2)? {
                 let scalar = offset_key(&seeds[result.lane], batch * 2 + 1).unwrap();
@@ -330,8 +334,9 @@ impl Gpu {
             })
             .collect();
         for prefix in [
-            Prefix::new(address.as_str()).unwrap(),
-            Prefix::with_mode(&insensitive, MatchMode::Insensitive).unwrap(),
+            Pattern::new(address.as_str(), MatchPosition::Prefix).unwrap(),
+            Pattern::with_mode(&insensitive, MatchPosition::Prefix, MatchMode::Insensitive)
+                .unwrap(),
         ] {
             let mut buffers = self.initialize(&seeds, &prefix)?;
             let results = self.dispatch(&mut buffers, 1, 2)?;
@@ -353,7 +358,7 @@ mod tests {
         seed[31] = 1;
         let key = offset_key(&seed, 1).unwrap();
         let digest = pkh_from_public_key(&cheetah_pub_from_sk(*key));
-        let prefix = Prefix::new(encode_pkh(digest).as_str()).unwrap();
+        let prefix = Pattern::new(encode_pkh(digest).as_str(), MatchPosition::Prefix).unwrap();
         let mut candidate = Candidate {
             lane: 0,
             status: 1,
@@ -365,7 +370,12 @@ mod tests {
         candidate.digest[0] ^= 1;
         assert!(verify(&seed, &candidate, &prefix).is_err());
         candidate.digest = digest;
-        assert!(verify(&seed, &candidate, &Prefix::new("1").unwrap()).is_err());
+        assert!(verify(
+            &seed,
+            &candidate,
+            &Pattern::new("1", MatchPosition::Prefix).unwrap()
+        )
+        .is_err());
         assert!(offset_key(&[255; 32], 1).is_none());
         assert!(offset_key(&[0; 32], 0).is_none());
     }

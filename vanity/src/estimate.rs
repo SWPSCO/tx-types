@@ -1,58 +1,102 @@
 use alloc::{format, string::String};
 
-use crate::{encode_pkh, Prefix, BASE58_ALPHABET, GOLDILOCKS_P};
+use crate::{encode_pkh, MatchPosition, Pattern, Prefix, BASE58_ALPHABET, GOLDILOCKS_P};
 
 impl Prefix {
     /// Expected trials for a uniform PKH, including canonical Base58's leading
     /// digit bias and this prefix's case and letter/digit matching rules.
     pub fn expected_attempts(&self) -> f64 {
-        let maximum = encode_pkh([GOLDILOCKS_P - 1; 5]);
-        let max_digits = maximum.as_str().as_bytes();
-        let masks = self.digit_masks();
-        let mut matches = 0.0;
-        // Count matching numerals at each length. `equal` follows the upper
-        // bound; `less` counts numerals already below it. Floating point is
-        // sufficient for an estimate, including the full 320-bit address space.
-        for length in self.len..=max_digits.len() {
-            let mut equal = 1.0;
-            let mut less = 0.0;
-            for position in 0..length {
-                let limit = if length == max_digits.len() {
-                    BASE58_ALPHABET
-                        .iter()
-                        .position(|&b| b == max_digits[position])
-                        .unwrap()
-                } else {
-                    57
-                };
-                let mut allowed = 0;
-                let mut below = 0;
-                let mut at_limit = false;
-                for digit in 0..58 {
-                    if position == 0 && length > 1 && digit == 0 {
-                        continue;
-                    }
-                    if position < self.len && masks[position][digit / 32] & (1 << (digit % 32)) == 0
-                    {
-                        continue;
-                    }
-                    allowed += 1;
-                    below += usize::from(digit < limit);
-                    at_limit |= digit == limit;
-                }
-                less = less * allowed as f64 + equal * below as f64;
-                if !at_limit {
-                    equal = 0.0;
-                }
-            }
-            matches += less + equal;
-        }
-        let mut space = 1.0;
-        for _ in 0..5 {
-            space *= GOLDILOCKS_P as f64;
-        }
-        space / matches
+        anchored_expected_attempts(self, false)
     }
+}
+
+impl Pattern {
+    /// Estimated trials at a uniform PKH. Prefix and suffix counts include the
+    /// canonical integer range; contains uses the average matching-window count.
+    /// Overlapping substring occurrences make the contains estimate approximate.
+    pub fn expected_attempts(&self) -> f64 {
+        match self.position {
+            MatchPosition::Prefix => self.digits.expected_attempts(),
+            MatchPosition::Suffix => anchored_expected_attempts(&self.digits, true),
+            MatchPosition::Contains => {
+                if self.digits.len == crate::MAX_PKH_LEN {
+                    return self.digits.expected_attempts();
+                }
+                let mut probability = 1.0;
+                for mask in self.digits.digit_masks().iter().take(self.digits.len) {
+                    probability *= (mask[0].count_ones() + mask[1].count_ones()) as f64 / 58.0;
+                }
+                let maximum = encode_pkh([GOLDILOCKS_P - 1; 5]);
+                let mut space = 1.0;
+                for _ in 0..5 {
+                    space *= GOLDILOCKS_P as f64;
+                }
+                let mut lower: f64 = 1.0;
+                let mut expected_windows = 0.0;
+                for length in 1..=maximum.as_str().len() {
+                    let upper = (lower * 58.0).min(space);
+                    let count = upper - if length == 1 { 0.0 } else { lower };
+                    if length >= self.digits.len {
+                        expected_windows += count / space * (length - self.digits.len + 1) as f64;
+                    }
+                    lower = upper;
+                }
+                (1.0 / (probability * expected_windows)).max(1.0)
+            }
+        }
+    }
+}
+
+fn anchored_expected_attempts(pattern: &Prefix, suffix: bool) -> f64 {
+    let maximum = encode_pkh([GOLDILOCKS_P - 1; 5]);
+    let max_digits = maximum.as_str().as_bytes();
+    let masks = pattern.digit_masks();
+    let mut matches = 0.0;
+    // Count matching numerals at each length. `equal` follows the upper
+    // bound; `less` counts numerals already below it. Floating point is
+    // sufficient for an estimate, including the full 320-bit address space.
+    for length in pattern.len..=max_digits.len() {
+        let mut equal = 1.0;
+        let mut less = 0.0;
+        for position in 0..length {
+            let limit = if length == max_digits.len() {
+                BASE58_ALPHABET
+                    .iter()
+                    .position(|&b| b == max_digits[position])
+                    .unwrap()
+            } else {
+                57
+            };
+            let mut allowed = 0;
+            let mut below = 0;
+            let mut at_limit = false;
+            for digit in 0..58 {
+                if position == 0 && length > 1 && digit == 0 {
+                    continue;
+                }
+                let start = if suffix { length - pattern.len } else { 0 };
+                if position >= start
+                    && position < start + pattern.len
+                    && masks[position - start][digit / 32] & (1 << (digit % 32)) == 0
+                {
+                    continue;
+                }
+                allowed += 1;
+                below += usize::from(digit < limit);
+                at_limit |= digit == limit;
+            }
+            less = less * allowed as f64 + equal * below as f64;
+            if !at_limit {
+                equal = 0.0;
+            }
+        }
+        matches += less + equal;
+    }
+    let mut space = 1.0;
+    for _ in 0..5 {
+        space *= GOLDILOCKS_P as f64;
+    }
+    space / matches
 }
 
 /// Human-readable average search duration at a measured candidate rate.

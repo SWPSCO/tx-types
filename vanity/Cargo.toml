@@ -14,12 +14,14 @@ bip39 = { workspace = true, optional = true, features = ["zeroize"] }
 bs58 = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
+tempfile = { version = "3", optional = true }
+
 [dev-dependencies]
 pokenoun = { workspace = true }
 ibig = { workspace = true, default-features = false }
 
 [features]
 default = []
-std = ["tx-types/std"]
+std = ["tx-types/std", "dep:tempfile"]
 mnemonic = ["dep:bip39"]
 export = ["mnemonic", "dep:bs58", "dep:serde_json"]

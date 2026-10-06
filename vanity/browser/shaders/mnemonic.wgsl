@@ -97,5 +97,5 @@ fn mnemonic_address(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     if f6_equal(point.z, F6()) { results[lane] = Result(3u,0u,0u,0u,array<U64,5>()); return; }
     let digest = hash_point(j_affine(point));
-    results[lane] = Result(select(0u, 1u, prefix_matches(digest)), 0u, 1u, 0u, digest);
+    results[lane] = Result(select(0u, 1u, pattern_matches(digest)), 0u, 1u, 0u, digest);
 }

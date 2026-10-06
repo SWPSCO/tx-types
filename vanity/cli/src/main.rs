@@ -1,23 +1,29 @@
 #[path = "../../progress.rs"]
 mod progress;
 use progress::Progress;
+use vanity::KeyOutput;
 
-use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
-use vanity::{encode_pkh, key_json, Match, MatchMode, Mnemonic, MnemonicSearch, Prefix, Search};
+use vanity::{
+    encode_pkh, key_json, Match, MatchMode, MatchPosition, Mnemonic, MnemonicSearch, Pattern,
+    Search,
+};
 use zeroize::Zeroizing;
 
-const HELP: &str = "Usage: vanity-pkh <PREFIX> --output <FILE> [--insensitive] [--raw-key] [--threads <N>] [--max-attempts <N>]
+const HELP: &str = "Usage: vanity-pkh [PREFIX | --suffix TEXT | --contains TEXT] --output <FILE> [--insensitive] [--raw-key] [--threads <N>] [--max-attempts <N>]
 
 Mine a Base58 Nockchain public-key hash prefix (exact matching by default).
 Search 24-word BIP39 phrases using Nockster's master address (path m, empty passphrase).
 
+  --prefix TEXT      Match the start (also accepted as a positional argument)
+  --suffix TEXT      Match the end of the address
+  --contains TEXT    Match anywhere in the address
+  --continuous       Keep finding keys; atomically save a JSON array after each match
   --output FILE      Write the winning key as JSON; file must not exist (0600 on Unix)
   --raw-key          Search raw scalars instead of recoverable mnemonics (faster)
   --threads N        CPU workers (default: available parallelism)
@@ -33,17 +39,20 @@ Two terminal lines refresh: progress every 5s, average duration every 30s.
 The estimate is an average, not a countdown. Redirected output uses plain lines.";
 
 struct Args {
-    prefix: Prefix,
+    prefix: Pattern,
     output: PathBuf,
     threads: usize,
     max_attempts: u64,
     raw_key: bool,
+    continuous: bool,
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     let mut args = args;
     let mut prefix = None;
+    let mut position = MatchPosition::Prefix;
     let mut raw_key = false;
+    let mut continuous = false;
     let mut mode = MatchMode::Exact;
     let mut output = None;
     let mut threads = std::thread::available_parallelism().map_or(1, usize::from);
@@ -52,7 +61,19 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Args>, String
         match arg.as_str() {
             "-h" | "--help" => return Ok(None),
             "--raw-key" => raw_key = true,
+            "--continuous" => continuous = true,
             "--insensitive" => mode = MatchMode::Insensitive,
+            "--prefix" | "--suffix" | "--contains" => {
+                if prefix.is_some() {
+                    return Err("Choose exactly one of prefix, --suffix, or --contains".into());
+                }
+                position = match arg.as_str() {
+                    "--suffix" => MatchPosition::Suffix,
+                    "--contains" => MatchPosition::Contains,
+                    _ => MatchPosition::Prefix,
+                };
+                prefix = Some(args.next().ok_or("missing pattern value")?);
+            }
             "--output" => {
                 output = Some(PathBuf::from(args.next().ok_or("missing --output value")?))
             }
@@ -78,16 +99,21 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Args>, String
             }
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ if prefix.is_none() => prefix = Some(arg),
-            _ => return Err("only one prefix is accepted".into()),
+            _ => return Err("choose exactly one match pattern".into()),
         }
     }
     Ok(Some(Args {
-        prefix: Prefix::with_mode(&prefix.ok_or("a Base58 prefix is required")?, mode)
-            .map_err(|e| e.to_string())?,
+        prefix: Pattern::with_mode(
+            &prefix.ok_or("a Base58 match pattern is required")?,
+            position,
+            mode,
+        )
+        .map_err(|e| e.to_string())?,
         output: output.ok_or("--output is required")?,
         threads,
         max_attempts,
         raw_key,
+        continuous,
     }))
 }
 
@@ -102,28 +128,14 @@ fn random_search() -> Result<Search, String> {
     }
 }
 
-fn create_output(path: &PathBuf) -> Result<File, String> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options
-        .open(path)
-        .map_err(|e| format!("cannot create {}: {e}", path.display()))
-}
-
 struct Found {
     key: Match,
     mnemonic: Option<Mnemonic>,
 }
 
-fn write_match(file: &mut File, found: &Found) -> Result<(), String> {
+fn write_match(file: &mut KeyOutput, found: &Found) -> Result<(), String> {
     let json = key_json(&found.key, found.mnemonic.as_ref());
-    file.write_all(json.as_bytes())
-        .and_then(|_| file.sync_all())
+    file.save(&json)
         .map_err(|e| format!("cannot save winning key: {e}"))
 }
 
@@ -142,7 +154,7 @@ impl WorkerSearch {
         Ok(Self::Mnemonic(MnemonicSearch::new(entropy)))
     }
 
-    fn batch(&mut self, prefix: &Prefix, limit: u64) -> (u64, Option<Found>, bool) {
+    fn batch(&mut self, prefix: &Pattern, limit: u64) -> (u64, Option<Found>, bool) {
         match self {
             Self::Mnemonic(search) => {
                 let batch = search.search_batch(prefix, limit);
@@ -170,25 +182,28 @@ impl WorkerSearch {
     }
 }
 
-fn mine(args: Args) -> Result<bool, String> {
-    // Reserve the private file before spending time mining or generating keys.
-    let mut output = create_output(&args.output)?;
-    let stop = AtomicBool::new(false);
+fn mine(args: Args) -> Result<i32, String> {
+    let mut output = KeyOutput::create(&args.output, args.continuous)
+        .map_err(|e| format!("cannot create backup: {e}"))?;
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let interrupted = std::sync::Arc::new(AtomicBool::new(false));
+    let (signal_stop, signal_interrupted) = (stop.clone(), interrupted.clone());
+    ctrlc::set_handler(move || {
+        signal_interrupted.store(true, Ordering::Relaxed);
+        signal_stop.store(true, Ordering::Relaxed);
+    })
+    .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
     let claimed = AtomicU64::new(0);
     let completed = AtomicU64::new(0);
     eprintln!(
-        "Mining {} with {} workers; key output: {}",
-        if args.raw_key {
-            "raw keys"
-        } else {
-            "24-word mnemonics (m, empty passphrase)"
-        },
+        "Mining with {} workers; key output: {}",
         args.threads,
         args.output.display()
     );
     let mut progress = Progress::new(&args.prefix);
-    let winner = std::thread::scope(|scope| -> Result<Option<Found>, String> {
-        let (sender, receiver) = mpsc::channel();
+    std::thread::scope(|scope| -> Result<(), String> {
+        // Bound queued private material and apply backpressure while saving.
+        let (sender, receiver) = mpsc::sync_channel(args.threads);
         let mut workers = Vec::new();
         for _ in 0..args.threads {
             let sender = sender.clone();
@@ -208,18 +223,23 @@ fn mine(args: Args) -> Result<bool, String> {
                             break;
                         };
                         let limit = batch_size.min(args.max_attempts - first);
-                        let (attempts, matched, exhausted) = search.batch(&args.prefix, limit);
-                        completed.fetch_add(attempts, Ordering::Relaxed);
-                        if let Some(found) = matched {
-                            if !stop.swap(true, Ordering::Relaxed) {
-                                sender
-                                    .send(found)
-                                    .map_err(|_| "result receiver disconnected")?;
+                        // Consume the whole reservation, including after a match.
+                        let mut remaining = limit;
+                        while remaining > 0 && !stop.load(Ordering::Relaxed) {
+                            let (attempts, matched, exhausted) =
+                                search.batch(&args.prefix, remaining);
+                            completed.fetch_add(attempts, Ordering::Relaxed);
+                            remaining -= attempts;
+                            if let Some(found) = matched {
+                                if args.continuous || !stop.swap(true, Ordering::Relaxed) {
+                                    sender
+                                        .send(found)
+                                        .map_err(|_| "result receiver disconnected")?;
+                                }
                             }
-                            break;
-                        }
-                        if exhausted {
-                            search = WorkerSearch::random(args.raw_key)?;
+                            if exhausted {
+                                search = WorkerSearch::random(args.raw_key)?;
+                            }
                         }
                     }
                     Ok(())
@@ -233,46 +253,67 @@ fn mine(args: Args) -> Result<bool, String> {
                 Ok(worker) => workers.push(worker),
                 Err(error) => {
                     stop.store(true, Ordering::Relaxed);
+                    drop(receiver);
                     return Err(format!("cannot start worker: {error}"));
                 }
             }
         }
         drop(sender);
-        let winner = loop {
-            match receiver.recv_timeout(Duration::from_secs(5)) {
-                Ok(found) => break Some(found),
-                Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+        let mut save_error = None;
+        loop {
+            match receiver.recv_timeout(Duration::from_secs(1)) {
+                Ok(found) => {
+                    if let Err(error) = write_match(&mut output, &found) {
+                        stop.store(true, Ordering::Relaxed);
+                        save_error = Some(error);
+                        break;
+                    }
+                    progress.finish(completed.load(Ordering::Relaxed));
+                    println!("{}", encode_pkh(found.key.pkh));
+                    eprintln!(
+                        "Match {} saved to {}",
+                        output.count(),
+                        args.output.display()
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let count = completed.load(Ordering::Relaxed);
-                    progress.update(count);
+                    progress.update(completed.load(Ordering::Relaxed))
                 }
             }
-        };
-        // Save a winning key before waiting for the remaining workers.
-        if let Some(found) = &winner {
-            write_match(&mut output, found)?;
         }
+        // Disconnect before joining so a failed save cannot strand a sender.
+        drop(receiver);
+        let mut worker_error = None;
         for worker in workers {
-            let result = worker.join().map_err(|_| "mining worker panicked")?;
-            if winner.is_none() {
-                result?;
+            match worker.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    worker_error.get_or_insert(error);
+                }
+                Err(_) => {
+                    worker_error.get_or_insert("mining worker panicked".into());
+                }
             }
         }
-        Ok(winner)
+        if let Some(error) = save_error.or(worker_error) {
+            return Err(error);
+        }
+        Ok(())
     })?;
-    let count = completed.load(Ordering::Relaxed);
-    progress.finish(count);
-    if let Some(found) = winner {
-        println!("{}", encode_pkh(found.key.pkh));
-        eprintln!("Key saved to {}", args.output.display());
-        Ok(true)
+    progress.finish(completed.load(Ordering::Relaxed));
+    eprintln!(
+        "{} matches saved to {}",
+        output.count(),
+        args.output.display()
+    );
+    Ok(if interrupted.load(Ordering::Relaxed) {
+        130
+    } else if output.count() > 0 {
+        0
     } else {
-        eprintln!(
-            "No match within the attempt limit. {} is empty.",
-            args.output.display()
-        );
-        Ok(false)
-    }
+        2
+    })
 }
 
 fn main() {
@@ -280,12 +321,11 @@ fn main() {
         Some(args) => mine(args),
         None => {
             println!("{HELP}");
-            Ok(true)
+            Ok(0)
         }
     });
     match result {
-        Ok(true) => {}
-        Ok(false) => std::process::exit(2),
+        Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("error: {error}");
             std::process::exit(1);
@@ -333,7 +373,7 @@ mod tests {
             "vanity-pkh-output-test-{}.json",
             std::process::id()
         ));
-        let mut file = create_output(&path).unwrap();
+        let mut file = KeyOutput::create(&path, false).unwrap();
         write_match(
             &mut file,
             &Found {

@@ -13,8 +13,9 @@ fn mine(@builtin(global_invocation_id) id: vec3<u32>) {
         result.digest = hash_point(point);
         result.offset = point.offset;
         result.tested++;
-        if prefix_matches(result.digest) {
+        if pattern_matches(result.digest) {
             result.found = 1u;
+            point = advance(point);
             break;
         }
         point = advance(point);
