@@ -4,7 +4,7 @@ export interface MineOptions {
   insensitive?: boolean;
   /** Default: mnemonic (24 words, path m, empty passphrase). raw has no phrase. */
   keyMode?: "mnemonic" | "raw";
-  /** Both modes: auto selects WebGPU, then WASM CPU when unavailable. */
+  /** Both modes: auto selects WebGPU, then WASM CPU when unavailable or shader compilation fails. */
   backend?: "auto" | "cpu";
   /** GPU lanes: mnemonic 1..4096 (default 4096); raw 1..256 (default 64). */
   lanes?: number;

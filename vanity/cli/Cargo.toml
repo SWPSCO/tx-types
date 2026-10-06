@@ -2,12 +2,13 @@
 name = "vanity-pkh"
 version.workspace = true
 edition.workspace = true
-description = "Example CLI for tx-types vanity address mining"
+description = "CLI for Nockchain vanity address mining"
 license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-tx-types = { path = "../../tx-types", default-features = false, features = ["vanity-export"] }
+tx-types = { path = "../../tx-types", default-features = false }
+vanity = { path = "..", features = ["export"] }
 getrandom = { workspace = true }
 zeroize = { workspace = true }
 serde_json = { workspace = true }

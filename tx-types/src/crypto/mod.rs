@@ -11,7 +11,6 @@
 pub mod goldilocks;
 pub mod utils_nostd;
 pub mod cheetah_nostd;
-pub mod vanity;
 
 // For std builds, use the new modular structure
 #[cfg(feature = "std")]

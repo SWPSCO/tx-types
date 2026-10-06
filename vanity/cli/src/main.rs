@@ -6,9 +6,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
-use tx_types::crypto::vanity::{
-    encode_pkh, key_json, Match, MatchMode, Mnemonic, MnemonicSearch, Prefix, Search,
-};
+use vanity::{encode_pkh, key_json, Match, MatchMode, Mnemonic, MnemonicSearch, Prefix, Search};
 use zeroize::Zeroizing;
 
 const HELP: &str = "Usage: vanity-pkh <PREFIX> --output <FILE> [--insensitive] [--raw-key] [--threads <N>] [--max-attempts <N>]
@@ -301,7 +299,7 @@ fn main() {
 mod tests {
     use super::*;
     use tx_types::crypto::cheetah_nostd::{cheetah_pub_from_sk, ser_a_pt};
-    use tx_types::crypto::vanity::pkh_from_public_key;
+    use vanity::pkh_from_public_key;
 
     #[test]
     fn insensitive_flag_works_before_or_after_prefix() {
@@ -313,7 +311,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let masks = args.prefix.digit_masks();
-            let alphabet = tx_types::crypto::vanity::BASE58_ALPHABET;
+            let alphabet = vanity::BASE58_ALPHABET;
             for (letter, expected) in [(b'i', true), (b'1', true), (b'L', false)] {
                 let index = alphabet.iter().position(|&b| b == letter).unwrap();
                 assert_eq!(masks[0][index / 32] & (1 << (index % 32)) != 0, expected);

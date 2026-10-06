@@ -1,7 +1,7 @@
 //! Allocation-free raw-key and mnemonic PKH prefix searches.
 //!
-//! Enable `vanity-mnemonic` for BIP39 recovery at path `m` with an empty
-//! passphrase, and `vanity-export` for private JSON serialization.
+//! Enable `mnemonic` for BIP39 recovery at path `m` with an empty
+//! passphrase, and `export` for private JSON serialization.
 //! Browser hosts use the reusable WebGPU/WASM runtime in `vanity/browser`.
 //!
 //! The host supplies a uniformly random scalar in `1..CHEETAH_N`. Each search
@@ -9,22 +9,28 @@
 //! Give parallel workers independent random starting scalars. Keep these starts
 //! secret: a start and an offset determine every private key in that walk.
 
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+
+extern crate alloc;
+
 use core::fmt;
 pub use zeroize::Zeroizing;
 
-#[cfg(feature = "vanity-mnemonic")]
+#[cfg(feature = "mnemonic")]
 mod mnemonic;
-#[cfg(feature = "vanity-mnemonic")]
+#[cfg(feature = "mnemonic")]
 pub use mnemonic::{derive_mnemonic, Mnemonic, MnemonicBatch, MnemonicMatch, MnemonicSearch};
 
-#[cfg(feature = "vanity-export")]
+#[cfg(feature = "export")]
 mod export;
-#[cfg(feature = "vanity-export")]
+#[cfg(feature = "export")]
 pub use export::key_json;
 
-use super::cheetah_nostd::{ch_add, cheetah_pub_from_sk, tip5_hash_words, CheetahPoint, F6lt, G};
-use super::goldilocks::{Belt, GOLDILOCKS_P};
-use super::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
+use tx_types::crypto::cheetah_nostd::{
+    ch_add, cheetah_pub_from_sk, tip5_hash_words, CheetahPoint, F6lt, G,
+};
+use tx_types::crypto::goldilocks::{Belt, GOLDILOCKS_P};
+use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
 
 pub const BASE58_ALPHABET: &[u8; 58] =
     b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -412,7 +418,7 @@ mod tests {
             #[cfg(feature = "std")]
             assert_eq!(
                 encode_pkh(digest).as_str(),
-                crate::Hash { values: digest }.to_b58()
+                tx_types::Hash { values: digest }.to_b58()
             );
         }
         assert_eq!(encode_pkh([0; 5]).as_str(), "1");
@@ -516,13 +522,13 @@ mod tests {
             assert_eq!(found.pkh, pkh);
             #[cfg(feature = "std")]
             {
-                let reference = crate::crypto::cheetah::point::cheetah_pub_from_sk(*key);
+                let reference = tx_types::crypto::cheetah::point::cheetah_pub_from_sk(*key);
                 assert_eq!(reference, [public_key.0, public_key.1]);
-                let pk = crate::SchnorrPubkey {
-                    x: crate::F6LT {
+                let pk = tx_types::SchnorrPubkey {
+                    x: tx_types::F6LT {
                         values: public_key.0,
                     },
-                    y: crate::F6LT {
+                    y: tx_types::F6LT {
                         values: public_key.1,
                     },
                     inf: false,

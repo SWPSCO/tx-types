@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 SOURCE = Path(__file__).resolve().parent / "browser"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--out-dir", type=Path, required=True, help="Browser library asset destination")
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         [cargo, "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT))
     artifact = Path(metadata["target_directory"]) / "wasm32-unknown-unknown/release/vanity_pkh_wasm.wasm"
     shutil.copyfile(artifact, OUT / "vanity_pkh.wasm")
-    subprocess.run([cargo, "run", "--quiet", "--release", "-p", "tx-types", "--no-default-features",
-                    "--example", "vanity_gpu_table", "--", str(OUT / "generator-table.bin")],
+    subprocess.run([cargo, "run", "--quiet", "--release", "-p", "vanity", "--no-default-features",
+                    "--example", "gpu_table", "--", str(OUT / "generator-table.bin")],
                    cwd=ROOT, check=True)
     print(f"Built browser library assets in {DEST}")

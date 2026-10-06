@@ -2,7 +2,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use tx_types::crypto::cheetah_nostd::cheetah_pub_from_sk;
-use tx_types::crypto::vanity::{encode_pkh, pkh_from_public_key, Prefix, Search};
+use vanity::{encode_pkh, pkh_from_public_key, Prefix, Search};
 use zeroize::Zeroizing;
 
 struct CountingAllocator;
@@ -64,10 +64,10 @@ fn initialization_and_search_allocate_nothing() {
     assert_eq!(found.pkh, pkh);
 }
 
-#[cfg(feature = "vanity-mnemonic")]
+#[cfg(feature = "mnemonic")]
 #[test]
 fn mnemonic_derivation_allocates_nothing() {
-    use tx_types::crypto::vanity::MnemonicSearch;
+    use vanity::MnemonicSearch;
     let prefix = Prefix::new("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").unwrap();
     ALLOCATIONS.with(|count| count.set(Some(0)));
     let mut search = MnemonicSearch::new(Zeroizing::new([0x42; 32]));

@@ -1,5 +1,5 @@
 [workspace]
-members = ["tx-types", "pokenoun", "examples/vanity-pkh", "tx-types/vanity/wasm"]
+members = ["tx-types", "pokenoun", "vanity", "vanity/cli", "vanity/wasm"]
 exclude = ["nockchain-minimal"]
 resolver = "2"
 

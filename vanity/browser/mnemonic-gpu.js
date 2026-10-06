@@ -1,4 +1,4 @@
-import { GpuSearch, requestGpuDevice } from "./gpu.js";
+import { GpuSearch, requestGpuDevice, compileShader, compilePipeline } from "./gpu.js";
 
 export async function mnemonicShaderSource(urls) {
   const files = ["shaders/field.wgsl", "generated/constants.wgsl", "shaders/cheetah.wgsl",
@@ -21,16 +21,14 @@ export class MnemonicGpuSearch extends GpuSearch {
       if (!response.ok) throw new Error("Cannot load the generator table. Run the browser build first.");
       const table = await response.arrayBuffer();
       if (table.byteLength !== 64 * 16 * 96) throw new Error("Invalid generator table length.");
-      const module = device.createShaderModule({ code });
-      const errors = (await module.getCompilationInfo()).messages.filter(m => m.type === "error");
-      if (errors.length) throw new Error(errors.map(m => `${m.lineNum}:${m.linePos}: ${m.message}`).join("\n"));
+      const module = await compileShader(device, code);
       // One explicit layout lets all four stages share a bind group.
       gpu.layout = device.createBindGroupLayout({ entries: ["read-only-storage", "storage", "read-only-storage", "storage", "read-only-storage"].map((type,binding) => ({
         binding, visibility: GPUShaderStage.COMPUTE, buffer: { type },
       })) });
       const layout = device.createPipelineLayout({ bindGroupLayouts: [gpu.layout] });
       gpu.pipelines = await Promise.all(["mnemonic_init", "mnemonic_pbkdf", "mnemonic_master", "mnemonic_address"].map(entryPoint =>
-        device.createComputePipelineAsync({ layout, compute: { module, entryPoint } })));
+        compilePipeline(device, { layout, compute: { module, entryPoint } })));
       gpu.table = device.createBuffer({ size: table.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       device.queue.writeBuffer(gpu.table, 0, table);
       gpu.checkDevice();

@@ -15,6 +15,27 @@ export async function requestGpuDevice() {
   } catch (error) { throw new WebGpuUnavailableError(`WebGPU could not initialize: ${error.message}`); }
 }
 
+function compilationUnavailable(cause) {
+  return new WebGpuUnavailableError(
+    "This GPU cannot compile the mining shaders. Using CPU / WASM.",
+    { cause },
+  );
+}
+
+export async function compileShader(device, code) {
+  try {
+    const module = device.createShaderModule({ code });
+    const errors = (await module.getCompilationInfo()).messages.filter(message => message.type === "error");
+    if (errors.length) throw new Error(errors.map(message => `${message.lineNum}:${message.linePos}: ${message.message}`).join("\n"));
+    return module;
+  } catch (error) { throw compilationUnavailable(error); }
+}
+
+export async function compilePipeline(device, descriptor) {
+  try { return await device.createComputePipelineAsync(descriptor); }
+  catch (error) { throw compilationUnavailable(error); }
+}
+
 export async function shaderSource(urls) {
   const files = ["shaders/field.wgsl", "generated/constants.wgsl", "shaders/cheetah.wgsl",
     "shaders/tip5.wgsl", "shaders/encoding.wgsl", "shaders/search.wgsl"];
@@ -31,10 +52,8 @@ export class GpuSearch {
     const gpu = new GpuSearch(device);
     gpu.adapterName = adapterName;
     try {
-      const module = device.createShaderModule({ code: await shaderSource(shaderUrls) });
-      const messages = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
-      if (messages.length) throw new Error(messages.map((m) => `${m.lineNum}:${m.linePos}: ${m.message}`).join("\n"));
-      gpu.pipeline = await device.createComputePipelineAsync({
+      const module = await compileShader(device, await shaderSource(shaderUrls));
+      gpu.pipeline = await compilePipeline(device, {
         layout: "auto", compute: { module, entryPoint: "mine" },
       });
       gpu.checkDevice();

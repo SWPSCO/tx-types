@@ -10,7 +10,7 @@ mod mnemonic_gpu;
 use std::cell::RefCell;
 use tx_types::crypto::cheetah_nostd::cheetah_pub_from_sk;
 use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
-use tx_types::crypto::vanity::{
+use vanity::{
     derive_mnemonic, encode_pkh, key_json, pkh_from_public_key, Match, MatchMode, MnemonicMatch,
     MnemonicSearch, Prefix, Search,
 };
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn mnemonic_export_restores_the_wallet_vector_and_clears_on_reset() {
-        use tx_types::crypto::vanity::Mnemonic;
+        use vanity::Mnemonic;
         let phrase = "wedding chef bread absurd leader surge auction access document fiber chunk hurt earn rain swarm cotton leisure ozone drill switch cry jungle soda oxygen";
         // Parsing the known English vector also validates its checksum.
         let mnemonic: Mnemonic = phrase.parse().unwrap();
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(prefix("I", true), 1);
         SESSION.with(|s| {
             let masks = s.borrow().masks;
-            for (digit, &byte) in tx_types::crypto::vanity::BASE58_ALPHABET.iter().enumerate() {
+            for (digit, &byte) in vanity::BASE58_ALPHABET.iter().enumerate() {
                 assert_eq!(
                     masks[digit / 32] & (1 << (digit % 32)) != 0,
                     matches!(byte, b'i' | b'1')

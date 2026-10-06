@@ -1,6 +1,6 @@
-use crate::crypto::cheetah_nostd::ser_a_pt;
 use alloc::string::String;
 use core::fmt::Write;
+use tx_types::crypto::cheetah_nostd::ser_a_pt;
 use zeroize::Zeroizing;
 
 use super::{encode_pkh, Match, Mnemonic};

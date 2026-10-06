@@ -64,9 +64,9 @@ pub struct T8 {
     pub values: [u64; 8],
 }
 
-// F_{p^6} element (tower) as six Belt limbs
+/// F_{p^6} element with six canonical Goldilocks coefficients, lowest degree first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct F6lt(pub(crate) [Belt; 6]);
+pub struct F6lt(pub [Belt; 6]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheetahPoint {
@@ -215,8 +215,9 @@ fn ch_add_unsafe(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
         inf: false,
     }
 }
+/// Add affine Cheetah points, including the point at infinity.
 #[inline]
-pub(crate) fn ch_add(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
+pub fn ch_add(p: &CheetahPoint, q: &CheetahPoint) -> CheetahPoint {
     ch_add_unsafe(p, q)
 }
 
@@ -322,7 +323,7 @@ fn f_montify(a: u64) -> u64 {
 /// TIP5 hash of a variable-length list of u64 words.
 /// This follows the upstream nockchain implementation with:
 /// - RATE=10, padding with [1, 0, 0, ...], Montgomery form, REPLACE absorption
-pub(crate) fn tip5_hash_words(words: &[u64]) -> [u64; DIGEST_LENGTH] {
+pub fn tip5_hash_words(words: &[u64]) -> [u64; DIGEST_LENGTH] {
     let mut state = [0u64; 16];
 
     let mut chunks = words.chunks_exact(RATE);

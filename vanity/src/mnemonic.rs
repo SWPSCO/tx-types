@@ -1,7 +1,7 @@
 //! BIP39 English phrases, empty passphrase, Cheetah master path `m`.
 
-use crate::crypto::cheetah_nostd::{cheetah_pub_from_sk, master_from_seed};
 pub use bip39::Mnemonic;
+use tx_types::crypto::cheetah_nostd::{cheetah_pub_from_sk, master_from_seed};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::{encode_pkh, pkh_from_public_key, Match, Prefix};

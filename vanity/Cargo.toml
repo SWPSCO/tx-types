@@ -1,0 +1,25 @@
+[package]
+name = "vanity"
+version.workspace = true
+edition.workspace = true
+authors = ["SWPSCO"]
+description = "Allocation-free Nockchain vanity address mining"
+repository = "https://github.com/SWPSCO/tx-types"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tx-types = { path = "../tx-types", default-features = false }
+zeroize = { workspace = true }
+bip39 = { workspace = true, optional = true, features = ["zeroize"] }
+bs58 = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+pokenoun = { workspace = true }
+ibig = { workspace = true, default-features = false }
+
+[features]
+default = []
+std = ["tx-types/std"]
+mnemonic = ["dep:bip39"]
+export = ["mnemonic", "dep:bs58", "dep:serde_json"]

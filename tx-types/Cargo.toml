@@ -64,5 +64,3 @@ std = [
 ]
 tracy = []
 legacy-tests = []
-vanity-mnemonic = ["dep:bip39"]
-vanity-export = ["vanity-mnemonic", "dep:bs58", "dep:serde_json"]

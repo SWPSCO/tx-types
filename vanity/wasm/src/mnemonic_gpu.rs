@@ -1,6 +1,6 @@
 use super::{split_words, SESSION};
 use sha2::{Digest, Sha512};
-use tx_types::crypto::vanity::{derive_mnemonic, encode_pkh, key_json, Mnemonic};
+use vanity::{derive_mnemonic, encode_pkh, key_json, Mnemonic};
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Default)]
