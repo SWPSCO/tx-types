@@ -43,10 +43,8 @@ rustup target add wasm32-unknown-unknown
 python3 tx-types/vanity/build-browser.py --out-dir ../my-app/public/vendor/vanity
 ```
 
-Import `mineAddress` from the generated `miner.js`; see
-[`miner.d.ts`](tx-types/vanity/browser/miner.d.ts) for options and results.
-It uses WebGPU with automatic CPU fallback. The page and browser tests live in
-[nockster.com](https://github.com/SWPSCO/nockster.com).
+It uses WebGPU with automatic CPU fallback. A live deployment lives on
+[nockster.com](https://nockster.com/vanity/).
 
 ## License
 
