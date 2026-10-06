@@ -1,9 +1,13 @@
+#[path = "../../progress.rs"]
+mod progress;
+use progress::Progress;
+
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tx_types::crypto::utils_nostd::{be32_lt, is_zero32, CHEETAH_N};
 use vanity::{encode_pkh, key_json, Match, MatchMode, Mnemonic, MnemonicSearch, Prefix, Search};
@@ -24,7 +28,9 @@ Search 24-word BIP39 phrases using Nockster's master address (path m, empty pass
 
 The output contains the mnemonic, derivation settings, private key, public key, and PKH.
 With --raw-key the output has no mnemonic. Keep the file private and backed up.
-Only the public PKH and search statistics are printed to the terminal.";
+Only the public PKH and search statistics are printed to the terminal.
+Two terminal lines refresh: progress every 5s, average duration every 30s.
+The estimate is an average, not a countdown. Redirected output uses plain lines.";
 
 struct Args {
     prefix: Prefix,
@@ -170,7 +176,6 @@ fn mine(args: Args) -> Result<bool, String> {
     let stop = AtomicBool::new(false);
     let claimed = AtomicU64::new(0);
     let completed = AtomicU64::new(0);
-    let start = Instant::now();
     eprintln!(
         "Mining {} with {} workers; key output: {}",
         if args.raw_key {
@@ -181,6 +186,7 @@ fn mine(args: Args) -> Result<bool, String> {
         args.threads,
         args.output.display()
     );
+    let mut progress = Progress::new(&args.prefix);
     let winner = std::thread::scope(|scope| -> Result<Option<Found>, String> {
         let (sender, receiver) = mpsc::channel();
         let mut workers = Vec::new();
@@ -233,16 +239,12 @@ fn mine(args: Args) -> Result<bool, String> {
         }
         drop(sender);
         let winner = loop {
-            match receiver.recv_timeout(Duration::from_secs(1)) {
+            match receiver.recv_timeout(Duration::from_secs(5)) {
                 Ok(found) => break Some(found),
                 Err(mpsc::RecvTimeoutError::Disconnected) => break None,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let count = completed.load(Ordering::Relaxed);
-                    eprintln!(
-                        "{count} candidates, {:.0}/s, {:.1}s elapsed",
-                        count as f64 / start.elapsed().as_secs_f64(),
-                        start.elapsed().as_secs_f64()
-                    );
+                    progress.update(count);
                 }
             }
         };
@@ -259,11 +261,7 @@ fn mine(args: Args) -> Result<bool, String> {
         Ok(winner)
     })?;
     let count = completed.load(Ordering::Relaxed);
-    eprintln!(
-        "Tested {count} candidates in {:.2}s ({:.0}/s)",
-        start.elapsed().as_secs_f64(),
-        count as f64 / start.elapsed().as_secs_f64()
-    );
+    progress.finish(count);
     if let Some(found) = winner {
         println!("{}", encode_pkh(found.key.pkh));
         eprintln!("Key saved to {}", args.output.display());

@@ -16,6 +16,9 @@ extern crate alloc;
 use core::fmt;
 pub use zeroize::Zeroizing;
 
+mod estimate;
+pub use estimate::format_vanity_duration;
+
 #[cfg(feature = "mnemonic")]
 mod mnemonic;
 #[cfg(feature = "mnemonic")]

@@ -42,8 +42,12 @@ Rust results before generating keys; `--self-test` runs that check on its own.
 
 The default output contains a `zprv` with a fresh random chain code and the mined
 address at path `m`. There is no seed phrase. `--raw-key` selects a raw scalar
-backup. Only the public address reaches stdout; progress appears on stderr once
-per second. Backups use mode 0600 on Unix and never overwrite an existing file.
+backup. Only the public address reaches stdout. Two lines on stderr refresh in
+place: speed, attempts, and elapsed time every 5 seconds, and an estimated average
+duration every 30 seconds. Durations use seconds, minutes, hours, or days as
+appropriate. Redirected output uses plain log lines. The estimate uses
+the measured candidate rate and prefix probability; it is not a countdown.
+Backups use mode 0600 on Unix and never overwrite an existing file.
 
 `--lanes` controls independent GPU walks (default 1024), and `--steps` controls
 candidates per lane per dispatch (default 16). `--max-attempts N` bounds the total
@@ -61,6 +65,10 @@ The CLI in `cli/` defaults to a 24-word seed phrase. `--raw-key` searches faster
 and produces a private key without a recovery phrase. Output files contain private
 key material and are created without overwriting existing files. Run `--help`
 for thread and attempt limits.
+
+Two terminal lines refresh in place: progress every 5 seconds and an estimated
+average duration every 30 seconds. Elapsed time uses minutes and hours as needed.
+A final summary appears immediately when the search finishes.
 
 ## Browser library
 

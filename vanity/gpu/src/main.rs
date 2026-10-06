@@ -1,4 +1,7 @@
 mod gpu;
+#[path = "../../progress.rs"]
+mod progress;
+use progress::Progress;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -7,7 +10,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::{Duration, Instant};
 use vanity::{encode_pkh, extended_key_json, key_json, MatchMode, Prefix, Zeroizing};
 
 const HELP: &str = "Usage: vanity-gpu <PREFIX> --output <FILE> [OPTIONS]
@@ -30,6 +32,8 @@ Defaults to a zprv extended private key at path m, with no seed phrase.
 
 A device self-test runs before every search. Every match is verified in Rust.
 Only the public address and statistics are printed. Keep the JSON backup private.
+Two terminal lines refresh: progress every 5s, average duration every 30s.
+The estimate is an average, not a countdown. Redirected output uses plain lines.
 Ctrl+C stops after the current GPU batch. No match leaves the reserved file empty.
 Exit codes: 0 match/self-test, 1 error, 2 attempt limit, 130 interrupted.";
 
@@ -237,8 +241,6 @@ fn run(args: Args) -> Result<i32, String> {
     }
     let mut buffers = gpu.initialize(&seeds, prefix)?;
     let mut offsets = vec![0u32; args.lanes as usize];
-    let started = Instant::now();
-    let mut reported = started;
     let mut attempts = 0u64;
     eprintln!(
         "Generating {} with {} lanes × {} steps. Ctrl+C stops.",
@@ -250,6 +252,7 @@ fn run(args: Args) -> Result<i32, String> {
         args.lanes,
         args.steps
     );
+    let mut progress = Progress::new(prefix);
     while !stop.load(Ordering::Relaxed) && attempts < args.max_attempts {
         let (active, steps) = batch_shape(args.lanes, args.steps, args.max_attempts - attempts);
         let candidates = gpu.dispatch(&mut buffers, active, steps)?;
@@ -287,12 +290,12 @@ fn run(args: Args) -> Result<i32, String> {
             file.write_all(json.as_bytes())
                 .and_then(|_| file.sync_all())
                 .map_err(|e| format!("Cannot save private backup: {e}"))?;
+            progress.finish(attempts);
             println!("{}", encode_pkh(found.pkh));
             eprintln!(
                 "Verified match; backup saved to {}",
                 args.output.as_ref().unwrap().display()
             );
-            report(attempts, started);
             return Ok(0);
         }
         if candidates.iter().any(|c| c.status == 2) {
@@ -303,12 +306,9 @@ fn run(args: Args) -> Result<i32, String> {
             buffers = gpu.initialize(&seeds, prefix)?;
             offsets.fill(0);
         }
-        if reported.elapsed() >= Duration::from_secs(1) {
-            report(attempts, started);
-            reported = Instant::now();
-        }
+        progress.update(attempts);
     }
-    report(attempts, started);
+    progress.finish(attempts);
     if stop.load(Ordering::Relaxed) {
         eprintln!("Stopped. The reserved output file is empty.");
         Ok(130)
@@ -316,14 +316,6 @@ fn run(args: Args) -> Result<i32, String> {
         eprintln!("Attempt limit reached. The reserved output file is empty.");
         Ok(2)
     }
-}
-
-fn report(attempts: u64, start: Instant) {
-    let seconds = start.elapsed().as_secs_f64();
-    eprintln!(
-        "Tested {attempts} candidates · {:.0}/s · {seconds:.1}s elapsed",
-        attempts as f64 / seconds.max(0.001)
-    );
 }
 
 fn main() {
