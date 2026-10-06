@@ -40,7 +40,7 @@ jobs:
       - name: Run vanity library and CLI tests
         run: |
           cargo test -p vanity --all-features
-          cargo test -p vanity-pkh -p vanity-pkh-wasm
+          cargo test -p vanity-pkh -p vanity-pkh-wasm -p vanity-gpu
 
       - name: Build browser mining assets
         run: python3 vanity/build-browser.py --out-dir target/vanity-browser

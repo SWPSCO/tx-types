@@ -21,6 +21,36 @@ Secret search state and exported JSON use zeroizing buffers. A raw search walks
 consecutive scalars from its secret starting key; give parallel workers independent
 random starts and keep those starts private.
 
+## Native GPU runner (Linux)
+
+Install Rust through rustup, Python 3, a C linker, and the NVIDIA driver with
+Vulkan support. CUDA and a browser are not required. Cargo uses the repository's
+pinned Rust toolchain; Python runs only during the build.
+
+```sh
+git clone https://github.com/SWPSCO/tx-types.git
+cd tx-types
+cargo build --release -p vanity-gpu
+./target/release/vanity-gpu --list-gpus
+./target/release/vanity-gpu nock --insensitive --output ./nock-key.json
+```
+
+The runner selects a discrete GPU by default. `--adapter N` selects an index from
+`--list-gpus`. It uses the browser generator's WGSL shaders through Vulkan and
+embeds them in the executable. Every run checks the device against independent
+Rust results before generating keys; `--self-test` runs that check on its own.
+
+The default output contains a `zprv` with a fresh random chain code and the mined
+address at path `m`. There is no seed phrase. `--raw-key` selects a raw scalar
+backup. Only the public address reaches stdout; progress appears on stderr once
+per second. Backups use mode 0600 on Unix and never overwrite an existing file.
+
+`--lanes` controls independent GPU walks (default 1024), and `--steps` controls
+candidates per lane per dispatch (default 16). `--max-attempts N` bounds the total
+work exactly, including partial batches. Ctrl+C stops after the current GPU batch.
+An interrupted or exhausted search leaves its reserved output file empty; use a
+new output path for the next run. Run `--help` for all options and exit codes.
+
 ## Command line
 
 ```sh
@@ -65,7 +95,8 @@ failures stop the search. `backend: "cpu"` skips GPU initialization.
 
 ```sh
 cargo test -p vanity --all-features
-cargo test -p vanity-pkh -p vanity-pkh-wasm
+cargo test -p vanity-pkh -p vanity-pkh-wasm -p vanity-gpu
+cargo test --release -p vanity-gpu --test cli -- --ignored --test-threads=1 # hardware Vulkan GPU
 cargo check -p vanity --features mnemonic --lib --target thumbv7em-none-eabihf
 node --experimental-default-type=module --test vanity/tests/*.test.mjs
 ```

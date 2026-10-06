@@ -28,6 +28,15 @@ tx-types = { git = "https://github.com/SWPSCO/tx-types" }
 `no_std` prefix searches. Enable `mnemonic` for 24-word recovery phrases
 or `export` for private JSON output.
 
+For a Linux Vulkan GPU (including NVIDIA), generate a `zprv` with:
+
+```sh
+cargo run --release -p vanity-gpu -- Reid --insensitive --output ./my-key.json
+```
+
+See the [native GPU setup and options](vanity/#native-gpu-runner-linux).
+For CPU generation:
+
 ```sh
 cargo run --release -p vanity-pkh -- Reid --insensitive --output ./my-key.json
 ```

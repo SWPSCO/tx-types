@@ -1,0 +1,19 @@
+[package]
+name = "vanity-gpu"
+version.workspace = true
+edition.workspace = true
+description = "Native Vulkan runner for Nockchain custom address generation"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+vanity = { path = "..", features = ["export"] }
+tx-types = { path = "../../tx-types", default-features = false }
+getrandom = { workspace = true }
+wgpu = { version = "24.0.5", default-features = false, features = ["wgsl"] }
+pollster = "0.4"
+ctrlc = "3.4"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+bs58 = { workspace = true }
