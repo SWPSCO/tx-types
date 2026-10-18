@@ -1,7 +1,7 @@
 use either::{Left, Right};
 use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
-use nockvm::noun::{Atom, Cell, Error, IndirectAtom, Noun, Result, D};
+use nockvm::noun::{Atom, Cell, Error, IndirectAtom, Noun, NounSpace, Result, D};
 use noun_serde::{NounDecode, NounEncode};
 
 use crate::belt::*;
@@ -331,7 +331,9 @@ impl TryFrom<Cell> for BPolyVec {
 impl NounDecode for FPolyVec {
     fn from_noun(
         noun: &nockvm::noun::Noun,
+        space: &NounSpace,
     ) -> std::result::Result<Self, noun_serde::NounDecodeError> {
+        let _ = space;
         FPolyVec::try_from(noun.as_cell().expect("not a cell"))
             .map_err(|_| noun_serde::NounDecodeError::FPolyDecodeError)
     }
@@ -349,7 +351,9 @@ impl NounEncode for FPolyVec {
 impl NounDecode for BPolyVec {
     fn from_noun(
         noun: &nockvm::noun::Noun,
+        space: &NounSpace,
     ) -> std::result::Result<Self, noun_serde::NounDecodeError> {
+        let _ = space;
         BPolyVec::try_from(noun.as_cell().expect("not a cell"))
             .map_err(|_| noun_serde::NounDecodeError::FPolyDecodeError)
     }

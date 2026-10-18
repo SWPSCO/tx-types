@@ -1540,6 +1540,15 @@ pub trait NounAllocator: Sized {
 
     /** Allocate space for a struct in a stack frame */
     unsafe fn alloc_struct<T>(&mut self, count: usize) -> *mut T;
+
+    /** The space nouns allocated by this allocator belong to.
+     *
+     * The minimal runtime resolves pointers directly, so the default empty
+     * space is sufficient; allocators with several arenas can override it.
+     */
+    fn noun_space(&self) -> NounSpace {
+        NounSpace::empty()
+    }
 }
 
 /**
@@ -1698,5 +1707,265 @@ mod test {
                 0xef, 0xa0
             ]
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Space-scoped handle API (additive compatibility shim)
+//
+// The upstream nockchain API threads a `NounSpace` through noun traversal so
+// that indirect atoms can be resolved without relying on ambient state. The
+// vendored minimal runtime is single-arena and resolves pointers directly, so
+// the space is carried by the handles but ignored when reading.
+// ---------------------------------------------------------------------------
+
+/// Allocation context for a noun.
+///
+/// The minimal runtime is single-arena; the recorded ranges are retained for
+/// API compatibility but are not required to resolve pointers.
+#[derive(Clone, Default, Debug)]
+pub struct NounSpace {
+    extra_ptr_ranges: Vec<(usize, usize)>,
+}
+
+impl NounSpace {
+    /// An empty space. Valid for direct atoms and for the minimal runtime's
+    /// single-arena nouns.
+    pub fn empty() -> Self {
+        Self {
+            extra_ptr_ranges: Vec::new(),
+        }
+    }
+
+    /// Record additional pointer ranges belonging to this space.
+    pub fn with_extra_ptr_ranges(mut self, ranges: Vec<(usize, usize)>) -> Self {
+        self.extra_ptr_ranges = ranges;
+        self
+    }
+
+    /// Pointer ranges recorded for this space.
+    pub fn extra_ptr_ranges(&self) -> &[(usize, usize)] {
+        &self.extra_ptr_ranges
+    }
+}
+
+/// A noun paired with the space it belongs to.
+#[derive(Copy, Clone)]
+pub struct NounHandle<'a> {
+    noun: Noun,
+    space: &'a NounSpace,
+}
+
+impl<'a> NounHandle<'a> {
+    pub fn new(noun: Noun, space: &'a NounSpace) -> Self {
+        Self { noun, space }
+    }
+
+    pub fn noun(self) -> Noun {
+        self.noun
+    }
+
+    pub fn space(self) -> &'a NounSpace {
+        self.space
+    }
+
+    pub fn is_direct(self) -> bool {
+        self.noun.is_direct()
+    }
+
+    pub fn is_atom(self) -> bool {
+        self.noun.is_atom()
+    }
+
+    pub fn is_cell(self) -> bool {
+        self.noun.is_cell()
+    }
+
+    pub fn is_allocated(self) -> bool {
+        self.noun.is_allocated()
+    }
+
+    pub fn as_atom(self) -> Result<AtomHandle<'a>> {
+        self.noun
+            .as_atom()
+            .map(|atom| AtomHandle::new(atom, self.space))
+    }
+
+    pub fn as_cell(self) -> Result<CellHandle<'a>> {
+        self.noun
+            .as_cell()
+            .map(|cell| CellHandle::new(cell, self.space))
+    }
+
+    pub fn atom(self) -> Option<AtomHandle<'a>> {
+        self.noun.atom().map(|atom| AtomHandle::new(atom, self.space))
+    }
+
+    pub fn cell(self) -> Option<CellHandle<'a>> {
+        self.noun.cell().map(|cell| CellHandle::new(cell, self.space))
+    }
+
+    pub fn as_noun(self) -> Noun {
+        self.noun
+    }
+
+    pub fn eq_bytes(self, bytes: impl AsRef<[u8]>) -> bool {
+        self.as_atom().map(|atom| atom.eq_bytes(bytes)).unwrap_or(false)
+    }
+}
+
+/// A cell paired with the space it belongs to.
+#[derive(Copy, Clone)]
+pub struct CellHandle<'a> {
+    cell: Cell,
+    space: &'a NounSpace,
+}
+
+impl<'a> CellHandle<'a> {
+    pub fn new(cell: Cell, space: &'a NounSpace) -> Self {
+        Self { cell, space }
+    }
+
+    pub fn cell(self) -> Cell {
+        self.cell
+    }
+
+    pub fn space(self) -> &'a NounSpace {
+        self.space
+    }
+
+    pub fn as_noun(self) -> NounHandle<'a> {
+        NounHandle::new(self.cell.as_noun(), self.space)
+    }
+
+    pub fn head(self) -> NounHandle<'a> {
+        NounHandle::new(self.cell.head(), self.space)
+    }
+
+    pub fn tail(self) -> NounHandle<'a> {
+        NounHandle::new(self.cell.tail(), self.space)
+    }
+
+    pub fn head_tail(self) -> (NounHandle<'a>, NounHandle<'a>) {
+        (self.head(), self.tail())
+    }
+}
+
+/// An atom paired with the space it belongs to.
+#[derive(Copy, Clone)]
+pub struct AtomHandle<'a> {
+    atom: Atom,
+    space: &'a NounSpace,
+}
+
+impl<'a> AtomHandle<'a> {
+    pub fn new(atom: Atom, space: &'a NounSpace) -> Self {
+        Self { atom, space }
+    }
+
+    pub fn atom(self) -> Atom {
+        self.atom
+    }
+
+    pub fn space(self) -> &'a NounSpace {
+        self.space
+    }
+
+    pub fn as_noun(self) -> NounHandle<'a> {
+        NounHandle::new(self.atom.as_noun(), self.space)
+    }
+
+    pub fn is_direct(self) -> bool {
+        self.atom.is_direct()
+    }
+
+    pub fn is_indirect(self) -> bool {
+        self.atom.is_indirect()
+    }
+
+    pub fn is_normalized(self) -> bool {
+        self.atom.is_normalized()
+    }
+
+    pub fn as_ne_bytes(&self) -> &[u8] {
+        self.atom.as_ne_bytes()
+    }
+
+    pub fn to_ne_bytes(self) -> Vec<u8> {
+        self.atom.to_ne_bytes()
+    }
+
+    pub fn to_be_bytes(self) -> Vec<u8> {
+        self.atom.to_be_bytes()
+    }
+
+    pub fn to_le_bytes(self) -> Vec<u8> {
+        self.atom.to_le_bytes()
+    }
+
+    pub fn as_u64(self) -> Result<u64> {
+        self.atom.as_u64()
+    }
+
+    pub fn size(self) -> usize {
+        self.atom.size()
+    }
+
+    pub fn bit_size(self) -> usize {
+        self.atom.bit_size()
+    }
+
+    pub fn data_pointer(self) -> *const u64 {
+        self.atom.data_pointer()
+    }
+
+    pub fn as_bitslice(&self) -> &BitSlice<u32, Lsb0> {
+        self.atom.as_bitslice()
+    }
+
+    pub fn eq_bytes<B: AsRef<[u8]>>(&self, bytes: B) -> bool {
+        let bytes_ref = bytes.as_ref();
+        let atom_bytes = self.atom.as_ne_bytes();
+        if bytes_ref.len() > atom_bytes.len() {
+            return false;
+        }
+        if bytes_ref.len() == atom_bytes.len() {
+            return atom_bytes == bytes_ref;
+        }
+        if atom_bytes[bytes_ref.len()..].iter().any(|b| *b != 0) {
+            return false;
+        }
+        &atom_bytes[..bytes_ref.len()] == bytes_ref
+    }
+
+    pub fn into_string(self) -> std::result::Result<String, std::str::Utf8Error> {
+        std::str::from_utf8(self.atom.as_ne_bytes())
+            .map(|string| string.trim_end_matches('\0').to_string())
+    }
+
+    pub fn to_bytes_until_nul(self) -> std::result::Result<Vec<u8>, std::str::Utf8Error> {
+        std::str::from_utf8(self.atom.as_ne_bytes())
+            .map(|bytes| bytes.trim_end_matches('\0').as_bytes().to_vec())
+    }
+}
+
+impl Noun {
+    /// Pair this noun with the space it was allocated in.
+    pub fn in_space<'a>(&self, space: &'a NounSpace) -> NounHandle<'a> {
+        NounHandle::new(*self, space)
+    }
+}
+
+impl Cell {
+    /// Pair this cell with the space it was allocated in.
+    pub fn in_space<'a>(&self, space: &'a NounSpace) -> CellHandle<'a> {
+        CellHandle::new(*self, space)
+    }
+}
+
+impl Atom {
+    /// Pair this atom with the space it was allocated in.
+    pub fn in_space<'a>(self, space: &'a NounSpace) -> AtomHandle<'a> {
+        AtomHandle::new(self, space)
     }
 }

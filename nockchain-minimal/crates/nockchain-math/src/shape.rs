@@ -1,7 +1,7 @@
 use nockapp::Noun;
 use nockvm::jets::list::util::flop;
 use nockvm::jets::JetErr;
-use nockvm::noun::{NounAllocator, D, T};
+use nockvm::noun::{NounAllocator, NounSpace, D, T};
 use noun_serde::NounEncode;
 
 pub fn dyck<A: NounAllocator>(stack: &mut A, t: Noun) -> Result<Noun, JetErr> {
@@ -21,21 +21,25 @@ fn dyck_recursive<A: NounAllocator>(stack: &mut A, t: Noun, vec: Noun) -> Result
     }
 }
 
-pub fn leaf_sequence<A: NounAllocator>(stack: &mut A, t: Noun) -> Result<Noun, JetErr> {
+pub fn leaf_sequence<A: NounAllocator>(
+    stack: &mut A,
+    t: Noun,
+    space: &NounSpace,
+) -> Result<Noun, JetErr> {
     let mut leaf: Vec<u64> = Vec::<u64>::new();
-    do_leaf_sequence(t, &mut leaf)?;
+    do_leaf_sequence(t, &mut leaf, space)?;
     let res = leaf.to_noun(stack);
     Ok(res)
 }
 
-pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {
+pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>, space: &NounSpace) -> Result<(), JetErr> {
     if noun.is_atom() {
-        vec.push(noun.as_atom()?.as_u64()?);
+        vec.push(noun.in_space(space).as_atom()?.as_u64()?);
         Ok(())
     } else {
-        let cell = noun.as_cell()?;
-        do_leaf_sequence(cell.head(), vec)?;
-        do_leaf_sequence(cell.tail(), vec)?;
+        let cell = noun.in_space(space).as_cell()?;
+        do_leaf_sequence(cell.head().noun(), vec, space)?;
+        do_leaf_sequence(cell.tail().noun(), vec, space)?;
         Ok(())
     }
 }

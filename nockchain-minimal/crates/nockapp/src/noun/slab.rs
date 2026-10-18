@@ -11,7 +11,9 @@ use either::Either;
 use intmap::IntMap;
 use nockvm::mem::NockStack;
 use nockvm::mug::{calc_atom_mug_u32, calc_cell_mug_u32, get_mug, set_mug};
-use nockvm::noun::{Atom, Cell, CellMemory, DirectAtom, IndirectAtom, Noun, NounAllocator, D};
+use nockvm::noun::{
+    Atom, Cell, CellMemory, DirectAtom, IndirectAtom, Noun, NounAllocator, NounSpace, D,
+};
 use nockvm::serialization::{met0_u64_to_usize, met0_usize};
 use thiserror::Error;
 
@@ -71,7 +73,7 @@ impl<J> NounSlab<J> {
             .list_iter()
             .map(|n| {
                 let mut slab = Self::new();
-                slab.copy_into(n);
+                slab.copy_into(n, &NounSpace::empty());
                 slab
             })
             .collect()
@@ -93,9 +95,10 @@ impl<J> NounSlab<J> {
         f: F,
         imports: (Noun, Noun, Noun),
     ) {
-        self.copy_into(imports.0);
-        self.copy_into(imports.1);
-        self.copy_into(imports.2);
+        let space = NounSpace::empty();
+        self.copy_into(imports.0, &space);
+        self.copy_into(imports.1, &space);
+        self.copy_into(imports.2, &space);
         let new_root_base = f(imports, self.root);
         let new_root = nockvm::noun::T(self, &new_root_base);
         self.set_root(new_root);
@@ -105,7 +108,8 @@ impl<J> NounSlab<J> {
 impl<J> Clone for NounSlab<J> {
     fn clone(&self) -> Self {
         let mut slab = Self::new();
-        slab.copy_into(self.root);
+        let space = self.noun_space();
+        slab.copy_into(self.root, &space);
         slab
     }
 }
@@ -218,7 +222,7 @@ impl<J> Default for NounSlab<J> {
 impl<J> From<Noun> for NounSlab<J> {
     fn from(noun: Noun) -> Self {
         let mut slab = Self::new();
-        slab.copy_into(noun);
+        slab.copy_into(noun, &NounSpace::empty());
         slab
     }
 }
@@ -251,12 +255,16 @@ impl<J> NounSlab<J> {
 
     /// Copy the root from another slab into this slab, set this slab's root to the copied root
     pub fn copy_from_slab(&mut self, other: &NounSlab) {
-        self.copy_into(other.root);
+        let space = other.noun_space();
+        self.copy_into(other.root, &space);
     }
 
     /// Copy a noun into this slab, only leaving references into the PMA. Set that noun as the root
     /// noun.
-    pub fn copy_into(&mut self, copy_root: Noun) -> Noun {
+    ///
+    /// The minimal runtime is single-arena, so `space` is accepted for API
+    /// compatibility with upstream and ignored.
+    pub fn copy_into(&mut self, copy_root: Noun, _space: &NounSpace) -> Noun {
         let mut copied: IntMap<u64, Noun> = IntMap::new();
         // let mut copy_stack = vec![(copy_root, &mut self.root as *mut Noun)];
         let mut copy_stack = vec![(copy_root, std::ptr::addr_of_mut!(self.root))];
@@ -1065,7 +1073,7 @@ mod tests {
         let test_noun = T(&mut slab, &[D(5), D(23)]);
         slab.set_root(test_noun);
         let mut copy_slab: NounSlab = NounSlab::new();
-        copy_slab.copy_into(test_noun);
+        copy_slab.copy_into(test_noun, &NounSpace::empty());
     }
 
     // Fails in Miri

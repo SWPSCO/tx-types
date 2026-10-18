@@ -1,4 +1,4 @@
-use nockvm::noun::{IndirectAtom, Noun, NounAllocator};
+use nockvm::noun::{IndirectAtom, Noun, NounAllocator, NounSpace};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 use crate::belt::Belt;
@@ -92,7 +92,7 @@ impl TryFrom<MarySliceMut<'_>> for &mut [Felt] {
 }
 
 impl NounDecode for Mary {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, _space: &NounSpace) -> Result<Self, NounDecodeError> {
         Mary::try_from(*noun).map_err(|_| NounDecodeError::MaryDecodeError)
     }
 }

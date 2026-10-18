@@ -12,17 +12,36 @@ license = "MIT OR Apache-2.0"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
-ibig = { workspace = true, default-features = false }
 pokenoun = { workspace = true }
 
+# The Nockchain runtime is selected with the `embedded` / `native` features.
+# Both dependency sets are declared here and aliased onto the canonical crate
+# names by `lib.rs`, so the same source compiles against either one.
+nockapp-minimal = { package = "nockapp", path = "../nockchain-minimal/crates/nockapp", default-features = false, optional = true }
+nockapp-upstream = { package = "nockapp", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", default-features = false, optional = true }
+
+nockvm-minimal = { package = "nockvm", path = "../nockchain-minimal/crates/nockvm/rust/nockvm", default-features = false, features = ["malloc"], optional = true }
+nockvm-upstream = { package = "nockvm", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", optional = true }
+
+noun-serde-minimal = { package = "noun-serde", path = "../nockchain-minimal/crates/noun-serde", optional = true }
+noun-serde-upstream = { package = "noun-serde", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", optional = true }
+
+nockchain-math-minimal = { package = "nockchain-math", path = "../nockchain-minimal/crates/nockchain-math", optional = true }
+nockchain-math-upstream = { package = "nockchain-math", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", optional = true }
+
+zkvm-jetpack-minimal = { package = "zkvm-jetpack", path = "../nockchain-minimal/crates/zkvm-jetpack", optional = true }
+zkvm-jetpack-upstream = { package = "zkvm-jetpack", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", optional = true }
+
+nockchain-libp2p-io-minimal = { package = "nockchain-libp2p-io", path = "../nockchain-minimal/crates/nockchain-libp2p-io", default-features = false, optional = true }
+nockchain-libp2p-io-upstream = { package = "nockchain-libp2p-io", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", default-features = false, optional = true }
+
+nockvm_macros-minimal = { package = "nockvm_macros", path = "../nockchain-minimal/crates/nockvm/rust/nockvm_macros", optional = true }
+nockvm_macros-upstream = { package = "nockvm_macros", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", optional = true }
+
+ibig-minimal = { package = "ibig", path = "../nockchain-minimal/crates/nockvm/rust/ibig", default-features = false }
+ibig-upstream = { package = "ibig", git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", default-features = false, optional = true }
+
 # Optional std dependencies
-noun-serde = { workspace = true, optional = true }
-nockapp = { workspace = true, optional = true }
-nockvm = { workspace = true, optional = true }
-nockvm_macros = { workspace = true, optional = true }
-nockchain-libp2p-io = { workspace = true, optional = true }
-zkvm-jetpack = { workspace = true, optional = true }
-nockchain-math = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 either = { workspace = true, optional = true }
@@ -37,18 +56,45 @@ bytes = { workspace = true, optional = true }
 once_cell = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
+[[bin]]
+name = "sign_raw_tx"
+path = "src/bin/sign_raw_tx.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "zkey_pub_b58"
+path = "src/bin/zkey_pub_b58.rs"
+required-features = ["std"]
+
 [features]
-default = ["std"]
+default = ["embedded", "std"]
+
+embedded = [
+    "dep:nockapp-minimal",
+    "dep:nockvm-minimal",
+    "dep:noun-serde-minimal",
+    "dep:nockchain-math-minimal",
+    "dep:zkvm-jetpack-minimal",
+    "dep:nockchain-libp2p-io-minimal",
+    "dep:nockvm_macros-minimal",
+    "ibig-minimal/std",
+    "ibig-minimal/num-traits",
+]
+
+native = [
+    "dep:nockapp-upstream",
+    "dep:nockvm-upstream",
+    "dep:noun-serde-upstream",
+    "dep:nockchain-math-upstream",
+    "dep:zkvm-jetpack-upstream",
+    "dep:nockchain-libp2p-io-upstream",
+    "dep:nockvm_macros-upstream",
+    "dep:ibig-upstream",
+    "ibig-upstream/std",
+    "ibig-upstream/num-traits",
+]
+
 std = [
-    "ibig/std",
-    "ibig/num-traits",
-    "dep:noun-serde",
-    "dep:nockapp",
-    "dep:nockvm",
-    "dep:nockvm_macros",
-    "dep:nockchain-libp2p-io",
-    "dep:zkvm-jetpack",
-    "dep:nockchain-math",
     "dep:serde",
     "dep:serde_json",
     "dep:either",

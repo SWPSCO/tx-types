@@ -4,7 +4,7 @@ use nockvm::jets::list::util::{lent, weld};
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, Noun, D, T};
+use nockvm::noun::{Atom, Noun, NounAllocator, NounSpace, D, T};
 use nockvm_macros::tas;
 
 use crate::based;
@@ -357,13 +357,14 @@ fn hash_noun_varlen(stack: &mut NockStack, n: Noun) -> Result<Noun, JetErr> {
 }
 
 pub fn hash_hashable_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let space = context.stack.noun_space();
     let stack = &mut context.stack;
     let h = slot(subject, 6)?;
 
-    hash_hashable(stack, h)
+    hash_hashable(stack, h, &space)
 }
 
-pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
+pub fn hash_hashable(stack: &mut NockStack, h: Noun, space: &NounSpace) -> Result<Noun, JetErr> {
     if !h.is_cell() {
         return jet_err();
     }
@@ -375,32 +376,48 @@ pub fn hash_hashable(stack: &mut NockStack, h: Noun) -> Result<Noun, JetErr> {
         let tag = h_head.as_direct()?;
 
         match tag.data() {
-            tas!(b"hash") => hash_hashable_hash(stack, h_tail),
-            tas!(b"leaf") => hash_hashable_leaf(stack, h_tail),
-            tas!(b"list") => hash_hashable_list(stack, h_tail),
-            tas!(b"mary") => hash_hashable_mary(stack, h_tail),
-            _ => hash_hashable_other(stack, h_head, h_tail),
+            tas!(b"hash") => hash_hashable_hash(stack, h_tail, space),
+            tas!(b"leaf") => hash_hashable_leaf(stack, h_tail, space),
+            tas!(b"list") => hash_hashable_list(stack, h_tail, space),
+            tas!(b"mary") => hash_hashable_mary(stack, h_tail, space),
+            _ => hash_hashable_other(stack, h_head, h_tail, space),
         }
     } else {
-        hash_hashable_other(stack, h_head, h_tail)
+        hash_hashable_other(stack, h_head, h_tail, space)
     }
 }
 
-fn hash_hashable_hash(_stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+fn hash_hashable_hash(
+    _stack: &mut NockStack,
+    p: Noun,
+    _space: &NounSpace,
+) -> Result<Noun, JetErr> {
     Ok(p)
 }
-fn hash_hashable_leaf(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+fn hash_hashable_leaf(
+    stack: &mut NockStack,
+    p: Noun,
+    _space: &NounSpace,
+) -> Result<Noun, JetErr> {
     hash_noun_varlen(stack, p)
 }
-fn hash_hashable_list(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+fn hash_hashable_list(
+    stack: &mut NockStack,
+    p: Noun,
+    space: &NounSpace,
+) -> Result<Noun, JetErr> {
     let turn: Vec<Noun> = HoonList::try_from(p)?
         .into_iter()
-        .map(|x| hash_hashable(stack, x).unwrap())
+        .map(|x| hash_hashable(stack, x, space).unwrap())
         .collect();
     let turn_list = vecnoun_to_hoon_list(stack, &turn);
     hash_noun_varlen(stack, turn_list)
 }
-fn hash_hashable_mary(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
+fn hash_hashable_mary(
+    stack: &mut NockStack,
+    p: Noun,
+    space: &NounSpace,
+) -> Result<Noun, JetErr> {
     let (ma_step, ma_array_len, _ma_array_dat) = get_mary_fields(p)?;
 
     let ma_changed = change_step(stack, p, D(1))?;
@@ -413,12 +430,17 @@ fn hash_hashable_mary(stack: &mut NockStack, p: Noun) -> Result<Noun, JetErr> {
     let hash = T(stack, &[D(tas!(b"hash")), hash_belts_list]);
     let arg = T(stack, &[leaf_step, leaf_len, hash]);
 
-    hash_hashable(stack, arg)
+    hash_hashable(stack, arg, space)
 }
 
-fn hash_hashable_other(stack: &mut NockStack, p: Noun, q: Noun) -> Result<Noun, JetErr> {
-    let ph = hash_hashable(stack, p)?;
-    let qh = hash_hashable(stack, q)?;
+fn hash_hashable_other(
+    stack: &mut NockStack,
+    p: Noun,
+    q: Noun,
+    space: &NounSpace,
+) -> Result<Noun, JetErr> {
+    let ph = hash_hashable(stack, p, space)?;
+    let qh = hash_hashable(stack, q, space)?;
 
     let cell = T(stack, &[ph, qh]);
 

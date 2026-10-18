@@ -1,7 +1,7 @@
 use bs58;
 use ibig::{ubig, Stack, UBig};
 use nockapp::NockAppError;
-use nockvm::noun::Noun;
+use nockvm::noun::{Noun, NounSpace};
 use noun_serde::prelude::*;
 
 //TODO all this stuff would be useful as jets, which mostly just requires
@@ -20,8 +20,8 @@ const P: u64 = 0xffffffff00000001;
 ///
 /// # Returns
 /// The Noun as a Base58 string
-pub fn tip5_hash_to_base58(noun: Noun) -> Result<String, NockAppError> {
-    let tuple: [u64; 5] = noun.decode()?;
+pub fn tip5_hash_to_base58(noun: Noun, space: &NounSpace) -> Result<String, NockAppError> {
+    let tuple: [u64; 5] = noun.decode(space)?;
     let decimal_value = base_p_to_decimal(tuple)?;
     let base58_string = ubig_to_base58(decimal_value);
 
@@ -32,8 +32,9 @@ pub fn tip5_hash_to_base58(noun: Noun) -> Result<String, NockAppError> {
 pub fn tip5_hash_to_base58_stack<S: Stack>(
     stack: &mut S,
     noun: Noun,
+    space: &NounSpace,
 ) -> Result<String, NockAppError> {
-    let tuple: [u64; 5] = noun.decode()?;
+    let tuple: [u64; 5] = noun.decode(space)?;
     let decimal_value = base_p_to_decimal_stack(stack, tuple)?;
     let base58_string = ubig_to_base58(decimal_value);
 

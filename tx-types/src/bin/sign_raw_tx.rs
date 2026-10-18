@@ -1,3 +1,17 @@
+#[cfg(feature = "embedded")]
+extern crate nockapp_minimal as nockapp;
+#[cfg(feature = "embedded")]
+extern crate nockvm_minimal as nockvm;
+#[cfg(feature = "embedded")]
+extern crate noun_serde_minimal as noun_serde;
+
+#[cfg(feature = "native")]
+extern crate nockapp_upstream as nockapp;
+#[cfg(feature = "native")]
+extern crate nockvm_upstream as nockvm;
+#[cfg(feature = "native")]
+extern crate noun_serde_upstream as noun_serde;
+
 #[cfg(feature = "std")]
 use bytes::Bytes;
 #[cfg(feature = "std")]

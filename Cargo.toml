@@ -8,9 +8,10 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-# Nockchain crates supplied by this repository
-# Default: current upstream nockchain. Embedded/WASM builds run
-# ./use-local-nockchain.sh to patch these to ./nockchain-minimal.
+# Upstream Nockchain crates. tx-types itself declares both the upstream and
+# vendored (nockchain-minimal) dependency sets and selects between them with
+# the `native` / `embedded` features; these workspace entries remain for
+# other workspace members and for reference.
 noun-serde = { git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382" }
 noun-serde-derive = { git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382" }
 nockapp = { git = "https://github.com/SWPSCO/nockchain.git", rev = "73877be29bd1fafeeade1be7b95aebb0f64d8382", default-features = false }
@@ -85,17 +86,3 @@ tracy-client-sys = { path = "./dummy-tracy/tracy-client-sys" }
 tracy-client = { path = "./dummy-tracy/tracy-client" }
 tracing-tracy = { path = "./dummy-tracy/tracing-tracy" }
 
-# Embedded/WASM/no_std builds: run `./use-local-nockchain.sh` to uncomment
-# these patches and use the vendored nockchain-minimal subset instead of the
-# full upstream crates.
-# [patch."https://github.com/SWPSCO/nockchain.git"]
-# noun-serde = { path = "./nockchain-minimal/crates/noun-serde" }
-# noun-serde-derive = { path = "./nockchain-minimal/crates/noun-serde-derive" }
-# nockapp = { path = "./nockchain-minimal/crates/nockapp", default-features = false }
-# nockvm = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm" }
-# nockchain-libp2p-io = { path = "./nockchain-minimal/crates/nockchain-libp2p-io", default-features = false }
-# nockchain-math = { path = "./nockchain-minimal/crates/nockchain-math" }
-# zkvm-jetpack = { path = "./nockchain-minimal/crates/zkvm-jetpack" }
-# ibig = { path = "./nockchain-minimal/crates/nockvm/rust/ibig", default-features = false }
-# murmur3 = { path = "./nockchain-minimal/crates/nockvm/rust/murmur3" }
-# nockvm_macros = { path = "./nockchain-minimal/crates/nockvm/rust/nockvm_macros" }

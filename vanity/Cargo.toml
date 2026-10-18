@@ -22,6 +22,6 @@ ibig = { workspace = true, default-features = false }
 
 [features]
 default = []
-std = ["tx-types/std", "dep:tempfile"]
+std = ["tx-types/std", "tx-types/embedded", "dep:tempfile"]
 mnemonic = ["dep:bip39"]
 export = ["mnemonic", "dep:bs58", "dep:serde_json"]

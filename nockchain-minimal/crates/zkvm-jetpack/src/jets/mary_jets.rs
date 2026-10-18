@@ -6,7 +6,7 @@ use nockvm::jets::math::util::add;
 use nockvm::jets::util::{bite_to_word, chop, slot};
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
+use nockvm::noun::{Atom, IndirectAtom, Noun, NounAllocator, D, NO, T, YES};
 use nockvm_macros::tas;
 use tracing::{debug, error};
 
@@ -324,7 +324,8 @@ fn heapify_mary(stack: &mut NockStack, m_noun: Noun) -> Result<Noun, JetErr> {
     for i in 0..ma_array_len.as_u64()? {
         let t = snag_as_bpoly(stack, m_noun, i as usize)?;
         let hashable_bpoly = T(stack, &[D(tas!(b"mary")), D(1), t]);
-        let hash = hash_hashable(stack, hashable_bpoly)?;
+        let space = stack.noun_space();
+        let hash = hash_hashable(stack, hashable_bpoly, &space)?;
         let leafs = leaf_sequence(stack, hash)?;
         res_vec.push(leafs);
     }
