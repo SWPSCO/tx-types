@@ -26,6 +26,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: thumbv7em-none-eabihf,wasm32-unknown-unknown
+          rustflags: ""
 
       - name: Compile the production no-std library
         run: cargo check -p tx-types --no-default-features --lib --target thumbv7em-none-eabihf
