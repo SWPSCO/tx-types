@@ -30,7 +30,7 @@ pub fn compute_tx_id(inputs: &Inputs, timelock_range: &TimelockRange, total_fees
     );
 
     // Hash the structure
-    hash_hashable(&hashable)
+    hash_hashable(&hashable).expect("v0 tx-id hashable is u64-based")
 }
 
 /// Compute tx-id and return as base58 string
@@ -240,7 +240,7 @@ mod tests {
             ],
         };
 
-        let computed_hash = hash_hashable(&hashable);
+        let computed_hash = hash_hashable(&hashable).expect("v0 tx-id hashable is u64-based");
 
         println!("\nNNote hash:");
         println!("Expected hash from Hoon: {:x?}", expected_hash.values);
@@ -593,7 +593,7 @@ mod tests {
         }
 
         // Now verify the final hash
-        let computed_hash = hash_hashable(&hashable);
+        let computed_hash = hash_hashable(&hashable).expect("v0 tx-id hashable is u64-based");
         let expected_hash = Hash {
             values: [
                 0x7546_e958_54fa_40c0,
@@ -633,7 +633,8 @@ mod tests {
             ],
         };
         let hash_from_method = nname.to_hash();
-        let hash_from_manual = hash_hashable(&nname.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&nname.to_hashable()).expect("nname hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "NName to_hash should match manual approach"
@@ -645,7 +646,8 @@ mod tests {
             max: Some(PageNumber { value: 200 }),
         };
         let hash_from_method = timelock_range.to_hash();
-        let hash_from_manual = hash_hashable(&timelock_range.to_hashable());
+        let hash_from_manual = hash_hashable(&timelock_range.to_hashable())
+            .expect("timelock-range hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "TimelockRange to_hash should match manual approach"
@@ -665,7 +667,8 @@ mod tests {
             )),
         };
         let hash_from_method = timelock.to_hash();
-        let hash_from_manual = hash_hashable(&timelock.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&timelock.to_hashable()).expect("timelock hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Timelock to_hash should match manual approach"
@@ -679,7 +682,8 @@ mod tests {
             is_coinbase: false,
         };
         let hash_from_method = source.to_hash();
-        let hash_from_manual = hash_hashable(&source.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&source.to_hashable()).expect("source hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Source to_hash should match manual approach"
@@ -699,7 +703,8 @@ mod tests {
         pubkeys.put(pubkey);
         let lock = Lock { m: 1, pubkeys };
         let hash_from_method = lock.to_hash();
-        let hash_from_manual = hash_hashable(&lock.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&lock.to_hashable()).expect("lock hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Lock to_hash should match manual approach"
@@ -719,7 +724,8 @@ mod tests {
             },
         };
         let hash_from_method = seed.to_hash();
-        let hash_from_manual = hash_hashable(&seed.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&seed.to_hashable()).expect("seed hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Seed to_hash should match manual approach"
@@ -730,7 +736,8 @@ mod tests {
         seed_set.put(seed);
         let seeds = Seeds { set: seed_set };
         let hash_from_method = seeds.to_hash();
-        let hash_from_manual = hash_hashable(&seeds.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&seeds.to_hashable()).expect("seeds hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Seeds to_hash should match manual approach"
@@ -743,7 +750,8 @@ mod tests {
             fee: Coins { value: 10 },
         };
         let hash_from_method = spend.to_hash();
-        let hash_from_manual = hash_hashable(&spend.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&spend.to_hashable()).expect("spend hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Spend to_hash should match manual approach"
@@ -775,7 +783,8 @@ mod tests {
             spend: spend.clone(),
         };
         let hash_from_method = input.to_hash();
-        let hash_from_manual = hash_hashable(&input.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&input.to_hashable()).expect("input hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "Input to_hash should match manual approach"
@@ -783,7 +792,8 @@ mod tests {
 
         // Test NNote's to_hash (which already existed)
         let hash_from_method = nnote.to_hash();
-        let hash_from_manual = hash_hashable(&nnote.to_hashable());
+        let hash_from_manual =
+            hash_hashable(&nnote.to_hashable()).expect("note hashable is u64-based");
         assert_eq!(
             hash_from_method, hash_from_manual,
             "NNote to_hash should match manual approach"

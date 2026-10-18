@@ -33,6 +33,15 @@ pub struct Arena {
     cells: Vec<Cell>,
 }
 
+#[inline]
+fn trim_trailing_zeros(bytes: &[u8]) -> &[u8] {
+    let mut len = bytes.len();
+    while len > 0 && bytes[len - 1] == 0 {
+        len -= 1;
+    }
+    &bytes[..len]
+}
+
 impl Arena {
     pub fn new() -> Self {
         // AtomId(0) is always the canonical `0` atom with an empty byte slice.
@@ -58,9 +67,19 @@ impl Arena {
         &self.atom_data[start..end]
     }
 
+    /// Atom bytes with trailing zero bytes removed.
+    ///
+    /// Jam permits non-minimal atom encodings (for example `%pkh` with a
+    /// trailing zero byte). Numeric comparisons must treat those as the same
+    /// atom, and `atom_u64`/`atom_eq_bytes` do exactly that.
+    #[inline]
+    pub fn atom_bytes_trimmed(&self, id: AtomId) -> &[u8] {
+        trim_trailing_zeros(self.atom_bytes(id))
+    }
+
     #[inline]
     pub fn atom_u64(&self, id: AtomId) -> Option<u64> {
-        let bytes = self.atom_bytes(id);
+        let bytes = self.atom_bytes_trimmed(id);
         if bytes.len() > 8 {
             return None;
         }
@@ -73,7 +92,7 @@ impl Arena {
 
     #[inline]
     pub fn atom_eq_bytes(&self, id: AtomId, bytes: &[u8]) -> bool {
-        self.atom_bytes(id) == bytes
+        self.atom_bytes_trimmed(id) == trim_trailing_zeros(bytes)
     }
 
     pub fn alloc_atom_bytes(&mut self, bytes: &[u8]) -> Noun {
@@ -128,3 +147,47 @@ impl Arena {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn non_minimal_atom(arena: &mut Arena, bytes: &[u8], extra_zero_bytes: usize) -> Noun {
+        let off = arena.atom_data.len();
+        arena.atom_data.extend_from_slice(bytes);
+        arena
+            .atom_data
+            .extend(core::iter::repeat(0u8).take(extra_zero_bytes));
+        let len = bytes.len() + extra_zero_bytes;
+        let id = arena.push_atom_slice(off as u32, len as u32);
+        Noun::Atom(id)
+    }
+
+    #[test]
+    fn atom_eq_bytes_ignores_trailing_zero_bytes() {
+        let mut arena = Arena::new();
+        let minimal = arena.alloc_atom_bytes(b"pkh");
+        let padded = non_minimal_atom(&mut arena, b"pkh", 2);
+
+        let Noun::Atom(padded_id) = padded else {
+            panic!("expected atom");
+        };
+        let Noun::Atom(minimal_id) = minimal else {
+            panic!("expected atom");
+        };
+
+        assert_eq!(arena.atom_u64(padded_id), arena.atom_u64(minimal_id));
+        assert!(arena.atom_eq_bytes(padded_id, b"pkh"));
+        // `%pkh` encoded with a trailing zero byte still matches.
+        assert!(arena.atom_eq_bytes(minimal_id, b"pkh\0\0"));
+    }
+
+    #[test]
+    fn atom_u64_trims_non_minimal_encodings() {
+        let mut arena = Arena::new();
+        let padded = non_minimal_atom(&mut arena, &[1, 2], 3);
+        let Noun::Atom(id) = padded else {
+            panic!("expected atom");
+        };
+        assert_eq!(arena.atom_u64(id), Some(0x0201));
+    }
+}

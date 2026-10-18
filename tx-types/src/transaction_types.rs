@@ -1,14 +1,14 @@
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
 use nockapp::Noun;
-use nockvm::noun::{Atom, NounAllocator, D, T};
+use nockvm::noun::{Atom, NounAllocator, NounSpace, D, T};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use std::collections::HashMap;
 
 use crate::collections::{ZMap, ZSet};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
-use crate::hashing::tip5::Tip5Hasher;
+use crate::hashing::tip5::{Tip5Error, Tip5Hasher};
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
 
@@ -116,23 +116,40 @@ impl Hash {
     /// Convert base58 encoded string to Hash
     /// Implements the Hoon from-b58 function:
     /// ++  from-b58  |=(=cord `form`(atom-to-digest:tip5 (de-base58 (trip cord))))
+    ///
+    /// Decoding requires exactly five base-p limbs (so the value is in the
+    /// tip5 domain) and the canonical base58 spelling. Values with a non-zero
+    /// sixth quotient and aliases such as a leading `1` (zero byte) are
+    /// rejected instead of being silently truncated or re-encoded.
     pub fn from_b58(base58: &str) -> Result<Self, String> {
         use crate::hashing::u320::U320;
 
-        let n = U320::from_base58(base58).map_err(|e| format!("Invalid base58: {}", e))?;
+        let mut quotient =
+            U320::from_base58(base58).map_err(|e| format!("Invalid base58: {}", e))?;
 
-        // Four divmods by p: collect remainders a..d; final quotient e
-        let (q1, a) = n.divrem_p();
-        let (q2, b) = q1.divrem_p();
-        let (q3, c) = q2.divrem_p();
-        let (e_q, d) = q3.divrem_p();
-        let e = e_q
-            .as_single_u64()
-            .map_err(|e| format!("Hash value too large: {}", e))?;
+        // Exactly five divmods by p. Anything left over after five limbs is
+        // outside the tip5 digest domain.
+        let mut values = [0u64; 5];
+        for value in &mut values {
+            let (next, remainder) = quotient.divrem_p();
+            *value = remainder;
+            quotient = next;
+        }
 
-        Ok(Hash {
-            values: [a, b, c, d, e],
-        })
+        if quotient.as_single_u64().unwrap_or(1) != 0 {
+            return Err("Hash value too large: value does not fit in five base-p limbs".into());
+        }
+
+        let hash = Hash { values };
+
+        // Reject non-canonical spellings (for example a leading '1' zero
+        // byte) that decode to the same limbs. Without this check distinct
+        // strings would alias the same digest.
+        if hash.to_b58() != base58 {
+            return Err("Non-canonical base58 encoding".into());
+        }
+
+        Ok(hash)
     }
 
     /// Convert Hash to base58 encoded string
@@ -201,7 +218,7 @@ impl NName {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("NName hashable is u64-based")
     }
 
     // TODO: implement v1 hashing
@@ -234,12 +251,10 @@ impl NName {
             Hashable::Hash(owners.to_hash()),
             Hashable::null(),
         ]);
-        hash_hashable(&hashable)
+        hash_hashable(&hashable).expect("first_v0 hashable is u64-based")
     }
-
     /// Compute the last hash component of an NName
     /// Based on Hoon implementation:
-    /// |=  [=source =timelock]
     /// %-  hash-hashable:tip5
     /// :*  leaf+&                          :: outcome of second pact
     ///     (hashable:^source source)       :: source of note
@@ -253,7 +268,7 @@ impl NName {
             Hashable::Hash(timelock.to_hash()),
             Hashable::null(),
         ]);
-        hash_hashable(&hashable)
+        hash_hashable(&hashable).expect("last_v0 hashable is u64-based")
     }
 
     pub fn new_v1(lock: Hash, source: Source) -> Self {
@@ -267,6 +282,7 @@ impl NName {
         // & (loobean true/yes) = 0, so leaf+& = leaf+0 = Hashable::null()
         let loobean_yes = Hashable::null();
         hash_hashable(&Hashable::cell(loobean_yes, Hashable::Hash(lock)))
+            .expect("first_v1 hashable is u64-based")
     }
 
     pub fn last_v1(source: Source) -> Hash {
@@ -278,6 +294,7 @@ impl NName {
             source.to_hashable(),
             Hashable::null(),
         ]))
+        .expect("last_v1 hashable is u64-based")
     }
 
     pub fn display(&self) -> Vec<String> {
@@ -296,7 +313,7 @@ impl Timelock {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("timelock hashable is u64-based")
     }
 }
 
@@ -354,8 +371,8 @@ impl NounEncode for Timelock {
 }
 
 impl NounDecode for Timelock {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        let intent = TimelockIntent::from_noun(noun)?;
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        let intent = TimelockIntent::from_noun(noun, space)?;
         Timelock::new(intent).map_err(|e| NounDecodeError::Custom(e))
     }
 }
@@ -387,7 +404,7 @@ impl TimelockRange {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("timelock-range hashable is u64-based")
     }
 }
 // F6LT is a 6-element field type (a0-a5 in Hoon)
@@ -406,13 +423,14 @@ impl NounEncode for F6LT {
 }
 
 impl NounDecode for F6LT {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Extract 6 values from nested cell structure
         let mut values = [0u64; 6];
         let mut current = *noun;
 
         for i in 0..5 {
             let cell = current
+                .in_space(space)
                 .as_cell()
                 .map_err(|_| NounDecodeError::ExpectedCell)?;
             values[i] = cell
@@ -420,11 +438,12 @@ impl NounDecode for F6LT {
                 .as_atom()
                 .map_err(|_| NounDecodeError::ExpectedAtom)?
                 .as_u64()?;
-            current = cell.tail();
+            current = cell.tail().noun();
         }
 
         // Last element
         values[5] = current
+            .in_space(space)
             .as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;
@@ -463,7 +482,7 @@ impl SchnorrPubkey {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("schnorr-pubkey hashable is u64-based")
     }
 
     /// Convert base58 encoded string to SchnorrPubkey
@@ -676,8 +695,9 @@ impl Lock {
             // Hash each pubkey
             let mut slab: NounSlab = NounSlab::new();
             let pubkey_noun = pubkey.to_noun(&mut slab);
-            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun)
-                .unwrap_or_else(|_| Hash { values: [0; 5] });
+            let space = slab.noun_space();
+            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun, &space)
+                .expect("schnorr pubkey noun is u64-based");
             Hashable::Hash(pubkey_hash)
         });
 
@@ -689,7 +709,7 @@ impl Lock {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("lock hashable is u64-based")
     }
 
     /// Convert base58 encoded multisig parameters to Lock
@@ -782,7 +802,7 @@ impl Source {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("source hashable is u64-based")
     }
 }
 
@@ -794,20 +814,20 @@ pub enum NNote {
 }
 
 impl NNote {
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         match self {
-            NNote::V0(v0) => v0.to_hash(),
+            NNote::V0(v0) => Ok(v0.to_hash()),
             NNote::V1(v1) => v1.to_hash(),
         }
     }
 }
 
 impl NounDecode for NNote {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = NNoteV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = NNoteV0::from_noun(noun, space) {
             return Ok(NNote::V0(v0));
         }
-        if let Ok(v1) = NNoteV1::from_noun(noun) {
+        if let Ok(v1) = NNoteV1::from_noun(noun, space) {
             return Ok(NNote::V1(v1));
         }
         Err(NounDecodeError::Custom(
@@ -849,7 +869,7 @@ impl SchnorrSignature {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("schnorr-signature hashable is u64-based")
     }
 }
 // signature structure
@@ -895,14 +915,14 @@ impl Spend {
     ///     %1  [leaf+%1 (hashable:spend-1 +.form)]
     ///   ==
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         let version_leaf = Hashable::leaf_from_atom(&self.version.to_le_bytes());
 
         // Pair with the body's hashable: [version-leaf body-hashable]
-        Hashable::cell(version_leaf, self.body.to_hashable())
+        Ok(Hashable::cell(version_leaf, self.body.to_hashable()?))
     }
-    pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
+        hash_hashable(&self.to_hashable()?)
     }
 }
 
@@ -924,17 +944,17 @@ impl NounEncode for SpendBody {
 }
 
 impl NounDecode for SpendBody {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Try V0 first
-        if let Ok(v0) = SpendV0::from_noun(noun) {
+        if let Ok(v0) = SpendV0::from_noun(noun, space) {
             return Ok(SpendBody::V0(v0));
         }
         // Try V0ToV1
-        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun) {
+        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun, space) {
             return Ok(SpendBody::V0ToV1(v0tov1));
         }
         // Try V1
-        if let Ok(v1) = SpendV1::from_noun(noun) {
+        if let Ok(v1) = SpendV1::from_noun(noun, space) {
             return Ok(SpendBody::V1(v1));
         }
         Err(NounDecodeError::Custom(
@@ -944,19 +964,19 @@ impl NounDecode for SpendBody {
 }
 
 impl SpendBody {
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         match self {
-            SpendBody::V0(v) => v.to_hashable(),
+            SpendBody::V0(v) => Ok(v.to_hashable()),
             SpendBody::V0ToV1(v) => v.to_hashable(),
             SpendBody::V1(v) => v.to_hashable(),
         }
     }
-    pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
+        hash_hashable(&self.to_hashable()?)
     }
-    pub fn sig_hash(&self) -> Hash {
+    pub fn sig_hash(&self) -> Result<Hash, Tip5Error> {
         match self {
-            SpendBody::V0(v) => v.sig_hash(),
+            SpendBody::V0(v) => Ok(v.sig_hash()),
             SpendBody::V0ToV1(v) => v.compute_sig_hash(),
             SpendBody::V1(v) => v.compute_sig_hash(),
         }
@@ -980,8 +1000,8 @@ impl NounEncode for Input {
 }
 
 impl NounDecode for Input {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = InputV0::from_noun(noun, space) {
             return Ok(Input::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -998,7 +1018,7 @@ impl Input {
         }
     }
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("input hashable is u64-based")
     }
     pub fn calculate_timelock_range(&self) -> (Option<u64>, Option<u64>) {
         match self {
@@ -1025,8 +1045,8 @@ impl NounEncode for Inputs {
 }
 
 impl NounDecode for Inputs {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputsV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = InputsV0::from_noun(noun, space) {
             return Ok(Inputs::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1043,7 +1063,7 @@ impl Inputs {
         }
     }
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("inputs hashable is u64-based")
     }
 }
 
@@ -1063,9 +1083,10 @@ pub enum Tx {
 }
 
 impl NounDecode for Tx {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // First, peek at the version field (first field of the struct)
         let cell = noun
+            .in_space(space)
             .as_cell()
             .map_err(|_| NounDecodeError::Custom("Tx must be a cell".into()))?;
 
@@ -1080,8 +1101,8 @@ impl NounDecode for Tx {
 
         // Dispatch based on version
         match version {
-            0 => TxV0::from_noun(noun).map(Tx::V0),
-            1 => TxV1::from_noun(noun).map(Tx::V1),
+            0 => TxV0::from_noun(noun, space).map(Tx::V0),
+            1 => TxV1::from_noun(noun, space).map(Tx::V1),
             _ => Err(NounDecodeError::Custom(format!(
                 "Tx enum decode: unsupported version {}",
                 version
@@ -1106,8 +1127,8 @@ impl NounEncode for Outputs {
 }
 
 impl NounDecode for Outputs {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputsV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = OutputsV0::from_noun(noun, space) {
             return Ok(Outputs::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1132,8 +1153,8 @@ impl NounEncode for Output {
 }
 
 impl NounDecode for Output {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = OutputV0::from_noun(noun, space) {
             return Ok(Output::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1156,13 +1177,13 @@ pub enum RawTransaction {
 }
 
 impl NounDecode for RawTransaction {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Try V1 first (has version field)
-        if let Ok(v1) = RawTransactionV1::from_noun(noun) {
+        if let Ok(v1) = RawTransactionV1::from_noun(noun, space) {
             return Ok(RawTransaction::V1(v1));
         }
         // Fall back to V0
-        if let Ok(v0) = RawTransactionV0::from_noun(noun) {
+        if let Ok(v0) = RawTransactionV0::from_noun(noun, space) {
             return Ok(RawTransaction::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1172,19 +1193,23 @@ impl NounDecode for RawTransaction {
 }
 
 impl NounDecode for T8 {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         let mut ret: [u64; 8] = [0; 8];
         let mut cur = *noun;
         for i in 0..7 {
-            let cur_cell = cur.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
+            let cur_cell = cur
+                .in_space(space)
+                .as_cell()
+                .map_err(|_| NounDecodeError::ExpectedCell)?;
             ret[i] = cur_cell
                 .head()
                 .as_atom()
                 .map_err(|_| NounDecodeError::ExpectedAtom)?
                 .as_u64()?;
-            cur = cur_cell.tail();
+            cur = cur_cell.tail().noun();
         }
         ret[7] = cur
+            .in_space(space)
             .as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;

@@ -9,6 +9,10 @@ pub const GOLDILOCKS_P: u64 = 0xffff_ffff_0000_0001;
 const PRIME_128: u128 = 18446744069414584321;
 const STATE_SIZE: usize = 16;
 const RATE: usize = 10;
+/// Maximum number of logical nodes visited by the leaf/dyck walks. A small jam
+/// can contain a shared-cell DAG whose logical expansion is exponential; the
+/// budget keeps hostile jams from executing forever.
+const WALK_MAX_NODES: usize = 1 << 20;
 const DIGEST_LENGTH: usize = 5;
 const NUM_ROUNDS: usize = 7;
 const NUM_SPLIT_AND_LOOKUP: usize = 4;
@@ -23,6 +27,8 @@ const RP: u128 = 0xffff_ffff_0000_0001_0000_0000_0000_0000;
 pub enum Tip5Error {
     NotBased,
     BadLength,
+    /// The logical noun walk exceeded its node budget (hostile shared DAG).
+    WalkTooLarge,
 }
 
 const LOOKUP_TABLE: [u8; 256] = [
@@ -373,22 +379,8 @@ fn create_init_sponge_variable() -> [u64; STATE_SIZE] {
 
 fn create_init_sponge_fixed() -> [u64; STATE_SIZE] {
     [
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        0u64,
-        R_MOD_P,
-        R_MOD_P,
-        R_MOD_P,
-        R_MOD_P,
-        R_MOD_P,
-        R_MOD_P,
+        0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, R_MOD_P, R_MOD_P, R_MOD_P,
+        R_MOD_P, R_MOD_P, R_MOD_P,
     ]
 }
 
@@ -476,7 +468,12 @@ pub fn hash_ten_cell(left: [u64; 5], right: [u64; 5]) -> Result<[u64; 5], Tip5Er
 fn leaf_sequence(noun: Noun, arena: &Arena, out: &mut Vec<u64>) -> Result<(), Tip5Error> {
     let mut stack: Vec<Noun> = Vec::new();
     stack.push(noun);
+    let mut visited = 0usize;
     while let Some(n) = stack.pop() {
+        visited += 1;
+        if visited > WALK_MAX_NODES {
+            return Err(Tip5Error::WalkTooLarge);
+        }
         match n {
             Noun::Atom(id) => {
                 let Some(v) = arena.atom_u64(id) else {
@@ -506,7 +503,12 @@ fn dyck_sequence(noun: Noun, arena: &Arena, out: &mut Vec<u64>) -> Result<(), Ti
 
     let mut stack: Vec<Frame> = Vec::new();
     stack.push(Frame::Node(noun));
+    let mut visited = 0usize;
     while let Some(frame) = stack.pop() {
+        visited += 1;
+        if visited > WALK_MAX_NODES {
+            return Err(Tip5Error::WalkTooLarge);
+        }
         match frame {
             Frame::Node(n) => match n {
                 Noun::Atom(_) => {}
@@ -545,3 +547,35 @@ pub fn hash_noun_varlen(noun: Noun, arena: &Arena) -> Result<[u64; 5], Tip5Error
     hash_varlen_words(&transcript)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn walk_budget_rejects_cyclic_noun() {
+        // Locally built cyclic noun: a cell with itself as tail.
+        let mut arena = Arena::new();
+        let atom = arena.alloc_atom_u64(1);
+        let zero = arena.atom0();
+        let cell = arena.alloc_cell(atom, zero);
+        let Noun::Cell(id) = cell else {
+            panic!("expected cell");
+        };
+        arena.cell_mut(id).tail = cell;
+
+        assert!(matches!(
+            hash_noun_varlen(cell, &arena),
+            Err(Tip5Error::WalkTooLarge)
+        ));
+    }
+
+    #[test]
+    fn unbased_atom_is_rejected() {
+        let mut arena = Arena::new();
+        let atom = arena.alloc_atom_bytes(&[1; 9]);
+        assert!(matches!(
+            hash_noun_varlen(atom, &arena),
+            Err(Tip5Error::NotBased)
+        ));
+    }
+}

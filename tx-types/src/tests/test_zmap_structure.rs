@@ -26,9 +26,12 @@ mod tests {
             use crate::hashing::tip5::Tip5Hasher;
             use nockapp::noun::slab::NounSlab;
 
+            use nockvm::noun::NounAllocator;
+
             let mut slab: NounSlab = NounSlab::new();
             let noun = self.to_noun(&mut slab);
-            Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            let space = slab.noun_space();
+            Tip5Hasher::hash_noun_varlen(noun, &space).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
 
@@ -92,7 +95,7 @@ mod tests {
         );
 
         // Compute the final hash
-        let map_hash = hash_hashable(&hashable);
+        let map_hash = hash_hashable(&hashable).expect("z-map hashable is u64-based");
         println!("Final ZMap hash: {:016x?}", map_hash.values);
 
         // Verify we have all 10 elements

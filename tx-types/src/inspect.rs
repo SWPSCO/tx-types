@@ -8,6 +8,7 @@ use crate::transaction_types_v1::{
     SeedV1, SeedsV1, SpendCondition, SpendsV1, Witness,
 };
 use nockapp::noun::slab::NounSlab;
+use nockvm::noun::NounAllocator;
 use noun_serde::NounDecode;
 
 #[derive(Debug, Clone, Copy)]
@@ -243,7 +244,8 @@ fn decode_lock_entry(untyped: &UntypedNoun) -> Value {
         }
     };
 
-    let cell = match noun.as_cell() {
+    let space = slab.noun_space();
+    let cell = match noun.in_space(&space).as_cell() {
         Ok(cell) => cell,
         Err(_) => {
             return json!({
@@ -260,7 +262,7 @@ fn decode_lock_entry(untyped: &UntypedNoun) -> Value {
         .and_then(|atom| atom.as_u64().ok())
         .unwrap_or(0);
 
-    match SpendCondition::from_noun(&cell.tail()) {
+    match SpendCondition::from_noun(&cell.tail().noun(), &space) {
         Ok(cond) => json!({
             "type": "lock",
             "version": version,

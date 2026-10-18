@@ -4,7 +4,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use nockvm::jets::util::BAIL_EXIT;
 use nockvm::jets::JetErr;
-use nockvm::noun::Noun;
+use nockvm::noun::{Noun, NounSpace};
 use noun_serde::{NounDecode, NounEncode};
 use num_traits::Pow;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -85,7 +85,7 @@ impl NounEncode for Belt {
 }
 
 impl NounDecode for Belt {
-    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
+    fn from_noun(noun: &nockvm::noun::Noun, _space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
         let atom = noun
             .as_atom()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;

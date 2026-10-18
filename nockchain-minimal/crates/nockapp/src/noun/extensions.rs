@@ -1,15 +1,85 @@
 use core::str;
 use std::iter::Iterator;
+use std::ptr::copy_nonoverlapping;
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
+use either::Either;
+use intmap::IntMap;
 use nockvm::interpreter::Error;
 use nockvm::mem::NockStack;
-use nockvm::noun::{Atom, IndirectAtom, NounAllocator, D};
+use nockvm::noun::{Atom, Cell, IndirectAtom, NounAllocator, NounSpace, D};
 use nockvm::serialization::{cue, jam};
 
 use crate::noun::slab::NounSlab;
 use crate::{Noun, Result, ToBytes, ToBytesExt};
+
+const CACHED_MUG_METADATA_MASK: u64 = 0x7fff_ffff;
+
+/// Copy a foreign noun into an allocator using the upstream space-aware
+/// signature. The minimal runtime is single-arena, so `space` is ignored.
+pub trait NounAllocatorExt {
+    fn copy_into(&mut self, noun: Noun, space: &NounSpace) -> Noun;
+}
+
+impl<A: NounAllocator> NounAllocatorExt for A {
+    fn copy_into(&mut self, noun: Noun, _space: &NounSpace) -> Noun {
+        let mut copied: IntMap<u64, Noun> = IntMap::new();
+        let mut stack = Vec::with_capacity(32);
+        let mut res = D(0);
+        stack.push((noun, &mut res as *mut Noun));
+        while let Some((noun, dest)) = stack.pop() {
+            match noun.as_either_direct_allocated() {
+                Either::Left(direct) => unsafe {
+                    *dest = direct.as_noun();
+                },
+                Either::Right(allocated) => match allocated.as_either() {
+                    Either::Left(indirect) => {
+                        let source = unsafe { indirect.to_raw_pointer() };
+                        let source_key = source as u64;
+                        if let Some(copied_noun) = copied.get(source_key) {
+                            unsafe { *dest = *copied_noun };
+                            continue;
+                        }
+                        let copied_mem = unsafe { self.alloc_indirect(indirect.size()) };
+                        unsafe {
+                            copy_nonoverlapping(source, copied_mem, indirect.raw_size());
+                            *copied_mem &= CACHED_MUG_METADATA_MASK;
+                        }
+                        let copied_noun = unsafe {
+                            IndirectAtom::from_raw_pointer(copied_mem)
+                                .as_atom()
+                                .as_noun()
+                        };
+                        copied.insert(source_key, copied_noun);
+                        unsafe { *dest = copied_noun };
+                    }
+                    Either::Right(cell) => {
+                        let source = unsafe { cell.to_raw_pointer() };
+                        let source_key = source as u64;
+                        if let Some(copied_noun) = copied.get(source_key) {
+                            unsafe { *dest = *copied_noun };
+                            continue;
+                        }
+                        let copied_mem = unsafe { self.alloc_cell() };
+                        unsafe {
+                            copy_nonoverlapping(source, copied_mem, 1);
+                            (*copied_mem).metadata &= CACHED_MUG_METADATA_MASK;
+                        }
+                        let copied_noun = unsafe { Cell::from_raw_pointer(copied_mem).as_noun() };
+                        copied.insert(source_key, copied_noun);
+                        unsafe { *dest = copied_noun };
+                        unsafe {
+                            stack.push((cell.tail(), &mut (*copied_mem).tail));
+                            stack.push((cell.head(), &mut (*copied_mem).head));
+                        }
+                    }
+                },
+            }
+        }
+        res
+    }
+}
 
 pub trait NounExt {
     fn cue_bytes(stack: &mut NockStack, bytes: &Bytes) -> std::result::Result<Noun, Error>;
@@ -244,7 +314,7 @@ impl AsSlabVec for Noun {
         let mut slab_vec = Vec::new();
         for noun in noun_list.list_iter() {
             let mut new_slab = NounSlab::new();
-            new_slab.copy_into(noun);
+            new_slab.copy_into(noun, &NounSpace::empty());
             slab_vec.push(new_slab);
         }
         slab_vec

@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use nockapp::noun::slab::NounSlab;
-use nockvm::noun::{Noun, NounAllocator};
+use nockvm::noun::{Noun, NounAllocator, NounSpace};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -36,14 +36,15 @@ impl UntypedNoun {
             .map_err(|e| format!("Failed to cue noun: {:?}", e))?;
 
         // Decode the noun into type T
-        T::from_noun(&noun).map_err(|e| format!("Failed to decode noun: {:?}", e))
+        let space = slab.noun_space();
+        T::from_noun(&noun, &space).map_err(|e| format!("Failed to decode noun: {:?}", e))
     }
 }
 
 impl NounDecode for UntypedNoun {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         let mut slab: NounSlab = NounSlab::new();
-        slab.copy_into(*noun);
+        slab.copy_into(*noun, space);
         let noun_bytes: Bytes = slab.jam();
         Ok(UntypedNoun { p: noun_bytes })
     }

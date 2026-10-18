@@ -56,7 +56,7 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
         &message.values[..],      // 5 elements
         &secret_key.values[..],   // 8 elements (T8 format secret key)
     ])
-    .unwrap_or_else(|_| Hash { values: [0; 5] });
+    .expect("schnorr nonce transcript limbs are u64");
 
     let nonce_be = trunc_g_order_to_be32(nonce_digest.values);
 
@@ -77,7 +77,7 @@ pub fn schnorr_sign_digest(secret_key: T8, public_key: SchnorrPubkey, message: H
         &public_key.y.values[..], // pubkey.y (6 elements)
         &message.values[..],      // message (5 elements)
     ])
-    .unwrap_or_else(|_| Hash { values: [0; 5] });
+    .expect("schnorr challenge transcript limbs are u64");
     let chal_be = trunc_g_order_to_be32(chal_digest.values);
 
     // Verify challenge != 0 (line 1648)

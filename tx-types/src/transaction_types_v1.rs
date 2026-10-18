@@ -4,125 +4,122 @@ use crate::collections::zset::DorTip as ZSetDorTip;
 use crate::collections::{ZMap, ZSet};
 use crate::generic_noun::UntypedNoun;
 use crate::transaction_types::*;
-use nockapp::noun::slab::{CueError, NounSlab};
+use nockapp::noun::slab::NounSlab;
 use nockapp::utils::make_tas;
 use nockapp::Bytes;
-use nockvm::noun::{Atom, Noun, D};
+use nockvm::noun::{Noun, NounAllocator, NounSpace, D};
 use once_cell::sync::Lazy;
 
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
-use crate::hashing::raw::{
-    compute_tx_id_v1_from_raw_noun, hashable_note_data_from_raw, hashable_pkh_signature_direct,
-    hashable_pkh_signature_from_raw, hashable_seeds_from_raw, hashable_spend_from_raw,
-    hashable_spends_from_raw, hashable_witness_from_raw,
-};
-use crate::hashing::tip5::Tip5Hasher;
+use crate::hashing::raw::hashable_spends_from_raw;
+use crate::hashing::tip5::{Tip5Error, Tip5Hasher};
 
 static LOCK_MERKLE_AXIS_HASH: Lazy<Hash> = Lazy::new(|| {
     Hash::from_b58("6mhCSwJQDvbkbiPAUNjetJtVoo1VLtEhmEYoU4hmdGd6ep1F6ayaV4A")
         .expect("valid lock merkle proof axis hash constant")
 });
 
-fn hashable_from_noun_recursive(noun: nockvm::noun::Noun) -> Hashable {
-    if let Ok(cell) = noun.as_cell() {
-        Hashable::cell(
-            hashable_from_noun_recursive(cell.head()),
-            hashable_from_noun_recursive(cell.tail()),
-        )
+fn hashable_from_noun_recursive(
+    noun: nockvm::noun::Noun,
+    space: &NounSpace,
+) -> Result<Hashable, Tip5Error> {
+    if let Ok(cell) = noun.in_space(space).as_cell() {
+        Ok(Hashable::cell(
+            hashable_from_noun_recursive(cell.head().noun(), space)?,
+            hashable_from_noun_recursive(cell.tail().noun(), space)?,
+        ))
     } else {
-        let atom = noun
-            .as_atom()
-            .expect("hashable_from_noun_recursive: expected atom or cell");
+        let atom = noun.in_space(space).as_atom().map_err(|_| {
+            Tip5Error::InvalidNoun("hashable_from_noun_recursive: expected atom or cell".into())
+        })?;
         match atom.as_u64() {
-            Ok(val) => Hashable::leaf_from_atom(&val.to_le_bytes()),
+            Ok(val) => Ok(Hashable::leaf_from_atom(&val.to_le_bytes())),
             Err(_) => {
                 let mut slab: NounSlab = NounSlab::new();
-                slab.copy_into(atom.as_noun());
-                Hashable::Leaf(slab.jam().to_vec())
+                slab.copy_into(atom.as_noun().noun(), space);
+                Ok(Hashable::Leaf(slab.jam().to_vec()))
             }
         }
     }
 }
 
-fn hashable_from_untyped_noun(untyped: &UntypedNoun) -> Hashable {
+fn hashable_from_untyped_noun(untyped: &UntypedNoun) -> Result<Hashable, Tip5Error> {
     let mut slab: NounSlab = NounSlab::new();
-    let noun = match slab.cue_into(untyped.p.clone()) {
-        Ok(noun) => noun,
-        Err(_) => return Hashable::Leaf(untyped.p.to_vec()),
-    };
+    let noun = slab
+        .cue_into(untyped.p.clone())
+        .map_err(|e| Tip5Error::SerializationError(format!("failed to cue noun: {:?}", e)))?;
 
-    hashable_from_noun_recursive(noun)
+    let space = slab.noun_space();
+    hashable_from_noun_recursive(noun, &space)
 }
 
-fn hashable_leaf_from_noun(noun: Noun) -> Hashable {
+fn hashable_leaf_from_noun(noun: Noun, space: &NounSpace) -> Hashable {
     let mut slab: NounSlab = NounSlab::new();
-    let copy = slab.copy_into(noun);
+    let copy = slab.copy_into(noun, space);
     slab.set_root(copy);
     Hashable::Leaf(slab.jam().to_vec())
 }
 
-fn hashable_note_data_from_zmap(noun: Noun) -> Hashable {
-    if let Ok(atom) = noun.as_atom() {
+fn hashable_note_data_from_zmap(noun: Noun, space: &NounSpace) -> Result<Hashable, Tip5Error> {
+    if let Ok(atom) = noun.in_space(space).as_atom() {
         if atom.as_u64().unwrap_or(1) == 0 {
-            return Hashable::null();
+            return Ok(Hashable::null());
         }
     }
 
-    let cell = noun.as_cell().expect("note-data node should be a cell");
+    let invalid = || Tip5Error::InvalidNoun("malformed note-data node".into());
+    let cell = noun.in_space(space).as_cell().map_err(|_| invalid())?;
     let node = cell.head();
-    let children = cell
-        .tail()
-        .as_cell()
-        .expect("note-data child tuple should be a cell");
+    let children = cell.tail().as_cell().map_err(|_| invalid())?;
     let left = children.head();
     let right = match children.tail().as_cell() {
         Ok(right_cell) => right_cell.head(),
         Err(_) => children.tail(),
     };
 
-    let pair = node
-        .as_cell()
-        .expect("note-data key/value node should be a cell");
+    let pair = node.as_cell().map_err(|_| invalid())?;
     let key_noun = pair.head();
     let value_noun = pair.tail();
 
-    let key_leaf = hashable_leaf_from_noun(key_noun);
-    let value_hashable = hashable_from_noun_recursive(value_noun);
+    let key_leaf = hashable_leaf_from_noun(key_noun.noun(), space);
+    let value_hashable = hashable_from_noun_recursive(value_noun.noun(), space)?;
     let node_hashable = Hashable::cell(key_leaf, value_hashable);
 
-    Hashable::triple(
+    Ok(Hashable::triple(
         node_hashable,
-        hashable_note_data_from_zmap(left),
-        hashable_note_data_from_zmap(right),
-    )
+        hashable_note_data_from_zmap(left.noun(), space)?,
+        hashable_note_data_from_zmap(right.noun(), space)?,
+    ))
 }
 
-pub fn hashable_spends_from_zmap(noun: Noun) -> Hashable {
+pub fn hashable_spends_from_zmap(noun: Noun, space: &NounSpace) -> Result<Hashable, Tip5Error> {
     if noun_is_null(noun) {
-        return Hashable::null();
+        return Ok(Hashable::null());
     }
 
-    let (node, left, right) = decompose_map(noun);
-    let (name_noun, spend_noun) = decompose_pair(node);
+    let (node, left, right) = decompose_map(noun, space)?;
+    let (name_noun, spend_noun) = decompose_pair(node, space)?;
 
-    let name = NName::from_noun(&name_noun).expect("failed to decode spend name");
-    let spend = Spend::from_noun(&spend_noun).expect("failed to decode spend entry");
+    let name = NName::from_noun(&name_noun, space)
+        .map_err(|e| Tip5Error::InvalidNoun(format!("failed to decode spend name: {:?}", e)))?;
+    let spend = Spend::from_noun(&spend_noun, space)
+        .map_err(|e| Tip5Error::InvalidNoun(format!("failed to decode spend entry: {:?}", e)))?;
 
-    let node_hashable = Hashable::cell(name.to_hashable(), spend.to_hashable());
+    let node_hashable = Hashable::cell(name.to_hashable(), spend.to_hashable()?);
 
-    Hashable::triple(
+    Ok(Hashable::triple(
         node_hashable,
-        hashable_spends_from_zmap(left),
-        hashable_spends_from_zmap(right),
-    )
+        hashable_spends_from_zmap(left, space)?,
+        hashable_spends_from_zmap(right, space)?,
+    ))
 }
 
 fn noun_is_null(noun: Noun) -> bool {
     unsafe { noun.raw_equals(&D(0)) }
 }
 
-fn atom_trimmed_be(atom: Atom) -> Vec<u8> {
+fn atom_trimmed_be(atom: nockvm::noun::AtomHandle) -> Vec<u8> {
     let mut bytes = atom.to_be_bytes();
     let first_non_zero = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
     if first_non_zero == bytes.len() {
@@ -132,23 +129,30 @@ fn atom_trimmed_be(atom: Atom) -> Vec<u8> {
     }
 }
 
-fn nouns_equal(a: Noun, b: Noun) -> bool {
+fn nouns_equal(a: Noun, b: Noun, space: &NounSpace) -> bool {
     if unsafe { a.raw_equals(&b) } {
         return true;
     }
 
-    match (a.as_cell(), b.as_cell()) {
-        (Ok(ac), Ok(bc)) => nouns_equal(ac.head(), bc.head()) && nouns_equal(ac.tail(), bc.tail()),
+    match (a.in_space(space).as_cell(), b.in_space(space).as_cell()) {
+        (Ok(ac), Ok(bc)) => {
+            nouns_equal(ac.head().noun(), bc.head().noun(), space)
+                && nouns_equal(ac.tail().noun(), bc.tail().noun(), space)
+        }
         (Err(_), Err(_)) => {
-            let a_atom = a.as_atom().expect("noun should be atom");
-            let b_atom = b.as_atom().expect("noun should be atom");
-            atom_trimmed_be(a_atom) == atom_trimmed_be(b_atom)
+            if let (Ok(a_atom), Ok(b_atom)) =
+                (a.in_space(space).as_atom(), b.in_space(space).as_atom())
+            {
+                atom_trimmed_be(a_atom) == atom_trimmed_be(b_atom)
+            } else {
+                false
+            }
         }
         _ => false,
     }
 }
 
-fn atom_less_than(a: Atom, b: Atom) -> bool {
+fn atom_less_than(a: nockvm::noun::AtomHandle, b: nockvm::noun::AtomHandle) -> bool {
     let a_bytes = atom_trimmed_be(a);
     let b_bytes = atom_trimmed_be(b);
     match a_bytes.len().cmp(&b_bytes.len()) {
@@ -167,80 +171,88 @@ fn less_than_hash(a: &[u64; 5], b: &[u64; 5]) -> bool {
     hash_a.to_ubig() < hash_b.to_ubig()
 }
 
-fn tip_hash(noun: Noun) -> [u64; 5] {
-    Tip5Hasher::hash_noun_varlen(noun)
-        .map(|hash| hash.values)
-        .unwrap_or([0; 5])
+fn tip_hash(noun: Noun, space: &NounSpace) -> Result<[u64; 5], Tip5Error> {
+    Tip5Hasher::hash_noun_varlen(noun, space).map(|hash| hash.values)
 }
 
-fn double_tip_hash(noun: Noun) -> [u64; 5] {
-    let tip = tip_hash(noun);
+fn double_tip_hash(noun: Noun, space: &NounSpace) -> Result<[u64; 5], Tip5Error> {
+    let tip = tip_hash(noun, space)?;
     let hash = Hash { values: tip };
-    hash_ten_cell(hash.clone(), hash).values
+    Ok(hash_ten_cell(hash.clone(), hash).values)
 }
 
-fn dor_tip_compare(a: Noun, b: Noun) -> bool {
-    if nouns_equal(a, b) {
+fn dor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> bool {
+    if nouns_equal(a, b, space) {
         return true;
     }
 
-    match (a.as_cell(), b.as_cell()) {
+    match (a.in_space(space).as_cell(), b.in_space(space).as_cell()) {
         (Ok(ac), Ok(bc)) => {
-            if nouns_equal(ac.head(), bc.head()) {
-                dor_tip_compare(ac.tail(), bc.tail())
+            if nouns_equal(ac.head().noun(), bc.head().noun(), space) {
+                dor_tip_compare(ac.tail().noun(), bc.tail().noun(), space)
             } else {
-                dor_tip_compare(ac.head(), bc.head())
+                dor_tip_compare(ac.head().noun(), bc.head().noun(), space)
             }
         }
         (Ok(_), Err(_)) => false,
         (Err(_), Ok(_)) => false,
         (Err(_), Err(_)) => {
-            let a_atom = a.as_atom().expect("noun should be atom");
-            let b_atom = b.as_atom().expect("noun should be atom");
-            atom_less_than(a_atom, b_atom)
+            if let (Ok(a_atom), Ok(b_atom)) =
+                (a.in_space(space).as_atom(), b.in_space(space).as_atom())
+            {
+                atom_less_than(a_atom, b_atom)
+            } else {
+                false
+            }
         }
     }
 }
 
-fn gor_tip_compare(a: Noun, b: Noun) -> bool {
-    let a_tip = tip_hash(a);
-    let b_tip = tip_hash(b);
+fn gor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> Result<bool, Tip5Error> {
+    let a_tip = tip_hash(a, space)?;
+    let b_tip = tip_hash(b, space)?;
     if a_tip == b_tip {
-        dor_tip_compare(a, b)
+        Ok(dor_tip_compare(a, b, space))
     } else {
-        less_than_hash(&a_tip, &b_tip)
+        Ok(less_than_hash(&a_tip, &b_tip))
     }
 }
 
-fn mor_tip_compare(a: Noun, b: Noun) -> bool {
-    let a_tip = double_tip_hash(a);
-    let b_tip = double_tip_hash(b);
+fn mor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> Result<bool, Tip5Error> {
+    let a_tip = double_tip_hash(a, space)?;
+    let b_tip = double_tip_hash(b, space)?;
     if a_tip == b_tip {
-        dor_tip_compare(a, b)
+        Ok(dor_tip_compare(a, b, space))
     } else {
-        less_than_hash(&a_tip, &b_tip)
+        Ok(less_than_hash(&a_tip, &b_tip))
     }
 }
 
-fn decompose_map(noun: Noun) -> (Noun, Noun, Noun) {
-    let cell = noun.as_cell().expect("map node should be a cell");
-    let node = cell.head();
+fn decompose_map(noun: Noun, space: &NounSpace) -> Result<(Noun, Noun, Noun), Tip5Error> {
+    let cell = noun
+        .in_space(space)
+        .as_cell()
+        .map_err(|_| Tip5Error::InvalidNoun("map node must be a cell".into()))?;
+    let node = cell.head().noun();
     let tail = cell.tail();
 
     if let Ok(children) = tail.as_cell() {
-        let left = children.head();
-        let right = children.tail();
-        (node, left, right)
+        let left = children.head().noun();
+        let right = children.tail().noun();
+        Ok((node, left, right))
     } else {
-        (node, tail, D(0))
+        Ok((node, tail.noun(), D(0)))
     }
 }
 
-fn decompose_pair(noun: Noun) -> (Noun, Noun) {
-    let cell = noun.as_cell().expect("pair should be a cell");
-    let key = cell.head();
-    let value = cell.tail();
-    (key, value)
+fn decompose_pair(noun: Noun, space: &NounSpace) -> Result<(Noun, Noun), Tip5Error> {
+    let cell = noun
+        .in_space(space)
+        .as_cell()
+        .map_err(|_| Tip5Error::InvalidNoun("pair must be a cell".into()))?;
+    let key = cell.head().noun();
+    let value = cell.tail().noun();
+    Ok((key, value))
 }
 
 fn canonical_zmap_put<A: nockvm::noun::NounAllocator>(
@@ -248,50 +260,55 @@ fn canonical_zmap_put<A: nockvm::noun::NounAllocator>(
     map: Noun,
     key: Noun,
     value: Noun,
-) -> Noun {
+) -> Result<Noun, Tip5Error> {
     if noun_is_null(map) {
         let kv = nockvm::noun::T(alloc, &[key, value]);
         let children = nockvm::noun::T(alloc, &[D(0), D(0)]);
-        return nockvm::noun::T(alloc, &[kv, children]);
+        return Ok(nockvm::noun::T(alloc, &[kv, children]));
     }
 
-    let (node, left, right) = decompose_map(map);
-    let (node_key, node_value) = decompose_pair(node);
+    // Refresh the space after any prior allocation; a stack-backed space holds
+    // an epoch snapshot that allocations advance.
+    let space = alloc.noun_space();
+    let (node, left, right) = decompose_map(map, &space)?;
+    let (node_key, node_value) = decompose_pair(node, &space)?;
 
-    if nouns_equal(key, node_key) {
-        if nouns_equal(value, node_value) {
-            map
+    if nouns_equal(key, node_key, &space) {
+        if nouns_equal(value, node_value, &space) {
+            Ok(map)
         } else {
             let new_node = nockvm::noun::T(alloc, &[key, value]);
-            nockvm::noun::T(alloc, &[new_node, left, right])
+            Ok(nockvm::noun::T(alloc, &[new_node, left, right]))
         }
-    } else if gor_tip_compare(key, node_key) {
-        let new_left = canonical_zmap_put(alloc, left, key, value);
-        let (new_left_node, new_left_left, new_left_right) = decompose_map(new_left);
-        let (new_left_key, _) = decompose_pair(new_left_node);
+    } else if gor_tip_compare(key, node_key, &space)? {
+        let new_left = canonical_zmap_put(alloc, left, key, value)?;
+        let space = alloc.noun_space();
+        let (new_left_node, new_left_left, new_left_right) = decompose_map(new_left, &space)?;
+        let (new_left_key, _) = decompose_pair(new_left_node, &space)?;
 
-        if mor_tip_compare(node_key, new_left_key) {
+        if mor_tip_compare(node_key, new_left_key, &space)? {
             let children = nockvm::noun::T(alloc, &[new_left, right]);
-            nockvm::noun::T(alloc, &[node, children])
+            Ok(nockvm::noun::T(alloc, &[node, children]))
         } else {
             let right_children = nockvm::noun::T(alloc, &[new_left_right, right]);
             let new_right_branch = nockvm::noun::T(alloc, &[node, right_children]);
             let left_children = nockvm::noun::T(alloc, &[new_left_left, new_right_branch]);
-            nockvm::noun::T(alloc, &[new_left_node, left_children])
+            Ok(nockvm::noun::T(alloc, &[new_left_node, left_children]))
         }
     } else {
-        let new_right = canonical_zmap_put(alloc, right, key, value);
-        let (new_right_node, new_right_left, new_right_right) = decompose_map(new_right);
-        let (new_right_key, _) = decompose_pair(new_right_node);
+        let new_right = canonical_zmap_put(alloc, right, key, value)?;
+        let space = alloc.noun_space();
+        let (new_right_node, new_right_left, new_right_right) = decompose_map(new_right, &space)?;
+        let (new_right_key, _) = decompose_pair(new_right_node, &space)?;
 
-        if mor_tip_compare(node_key, new_right_key) {
+        if mor_tip_compare(node_key, new_right_key, &space)? {
             let children = nockvm::noun::T(alloc, &[left, new_right]);
-            nockvm::noun::T(alloc, &[node, children])
+            Ok(nockvm::noun::T(alloc, &[node, children]))
         } else {
             let left_children = nockvm::noun::T(alloc, &[left, new_right_left]);
             let new_left_branch = nockvm::noun::T(alloc, &[node, left_children]);
             let right_children = nockvm::noun::T(alloc, &[new_left_branch, new_right_right]);
-            nockvm::noun::T(alloc, &[new_right_node, right_children])
+            Ok(nockvm::noun::T(alloc, &[new_right_node, right_children]))
         }
     }
 }
@@ -301,7 +318,7 @@ fn build_canonical_zmap_from_pairs<A, I, K, V, KF, VF>(
     entries: I,
     mut key_fn: KF,
     mut value_fn: VF,
-) -> Noun
+) -> Result<Noun, Tip5Error>
 where
     A: nockvm::noun::NounAllocator,
     I: IntoIterator<Item = (K, V)>,
@@ -312,15 +329,15 @@ where
     for (key, value) in entries {
         let key_noun = key_fn(alloc, key);
         let value_noun = value_fn(alloc, value);
-        root = canonical_zmap_put(alloc, root, key_noun, value_noun);
+        root = canonical_zmap_put(alloc, root, key_noun, value_noun)?;
     }
-    root
+    Ok(root)
 }
 
 fn build_canonical_note_data_noun<A: nockvm::noun::NounAllocator>(
     alloc: &mut A,
     map: &ZMap<String, UntypedNoun>,
-) -> Noun {
+) -> Result<Noun, Tip5Error> {
     build_canonical_zmap_from_pairs(
         alloc,
         map.tap().into_iter(),
@@ -332,7 +349,7 @@ fn build_canonical_note_data_noun<A: nockvm::noun::NounAllocator>(
 fn build_canonical_spends_noun<A: nockvm::noun::NounAllocator>(
     alloc: &mut A,
     map: &ZMap<NName, Spend>,
-) -> Noun {
+) -> Result<Noun, Tip5Error> {
     build_canonical_zmap_from_pairs(
         alloc,
         map.tap().into_iter(),
@@ -358,12 +375,12 @@ pub struct NNoteV1 {
 }
 
 impl NNoteV1 {
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()?)
     }
 
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         /*
             :*  leaf+version.form
                 leaf+origin-page.form
@@ -372,13 +389,13 @@ impl NNoteV1 {
                 leaf+assets.form
             ==
         */
-        Hashable::cell_chain([
+        Ok(Hashable::cell_chain([
             Hashable::leaf_from_atom(&self.version.to_le_bytes()),
             self.origin_page.to_hashable(),
             Hashable::Hash(self.name.to_hash()),
-            Hashable::Hash(self.note_data.to_hash()),
+            Hashable::Hash(self.note_data.to_hash()?),
             self.assets.to_hashable(),
-        ])
+        ]))
     }
 }
 
@@ -390,28 +407,31 @@ pub struct NoteData {
 impl NounEncode for NoteData {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
         build_canonical_note_data_noun(alloc, &self.map)
+            .expect("note-data z-map keys are u64-based")
     }
 }
 
 impl NoteData {
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()?)
     }
 
     /// Compute hashable for note-data
     ///
     /// From Hoon, note-data is a z-map of @tas to *
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         let mut slab: NounSlab = NounSlab::new();
-        let noun = build_canonical_note_data_noun(&mut slab, &self.map);
-        hashable_note_data_from_zmap(noun)
+        let noun = build_canonical_note_data_noun(&mut slab, &self.map)?;
+        let space = slab.noun_space();
+        hashable_note_data_from_zmap(noun, &space)
     }
 
     /// Return the canonical note-data noun jam used for hashing/debugging.
     pub fn jam_canonical(&self) -> Vec<u8> {
         let mut slab: NounSlab = NounSlab::new();
-        let noun = build_canonical_note_data_noun(&mut slab, &self.map);
+        let noun = build_canonical_note_data_noun(&mut slab, &self.map)
+            .expect("note-data z-map keys are u64-based");
         slab.set_root(noun);
         slab.jam().to_vec()
     }
@@ -441,7 +461,7 @@ impl SeedV1 {
     ///       hash+parent-hash.sed
     ///   ==
     /// ```
-    pub fn to_sig_hashable(&self) -> Hashable {
+    pub fn to_sig_hashable(&self) -> Result<Hashable, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
 
         // Compute output_source hashable
@@ -451,17 +471,17 @@ impl SeedV1 {
         };
 
         // Hash the note_data
-        let note_data_hash = hash_hashable(&self.note_data.to_hashable());
+        let note_data_hash = hash_hashable(&self.note_data.to_hashable()?)?;
 
         // Build the 5-element structure (quint)
         // Using nested cells: [a [b [c [d e]]]]
-        Hashable::cell_chain([
+        Ok(Hashable::cell_chain([
             output_source_hashable,
             Hashable::Hash(self.lock_root.clone()),
             Hashable::Hash(note_data_hash),
             self.gift.to_hashable(),
             Hashable::Hash(self.parent_hash.clone()),
-        ])
+        ]))
     }
 
     /// Compute the regular hashable for a V1 seed (used in spend hashable, not signatures)
@@ -476,15 +496,15 @@ impl SeedV1 {
     ///     leaf+gift.sed
     ///   hash+parent-hash.sed
     /// ```
-    pub fn to_regular_hashable(&self) -> Hashable {
+    pub fn to_regular_hashable(&self) -> Result<Hashable, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
 
         // Hash the note_data
-        let note_data_hash = hash_hashable(&self.note_data.to_hashable());
+        let note_data_hash = hash_hashable(&self.note_data.to_hashable()?)?;
 
         // Build the 4-element structure (quad): [a b c d]
         // In Hoon, :^ creates a quad which is [a [b [c d]]]
-        Hashable::cell(
+        Ok(Hashable::cell(
             Hashable::Hash(self.lock_root.clone()),
             Hashable::cell(
                 Hashable::Hash(note_data_hash),
@@ -493,7 +513,7 @@ impl SeedV1 {
                     Hashable::Hash(self.parent_hash.clone()),
                 ),
             ),
-        )
+        ))
     }
 }
 
@@ -515,9 +535,9 @@ impl SeedsV1 {
     ///     $(form l.form)
     ///   $(form r.form)
     /// ```
-    pub fn to_sig_hashable(&self) -> Hashable {
-        // Use ZSet's to_hashable method with sig_hashable for each seed
-        self.set.to_hashable(|seed| seed.to_sig_hashable())
+    pub fn to_sig_hashable(&self) -> Result<Hashable, Tip5Error> {
+        // Use ZSet's fallible hashable builder with sig_hashable for each seed
+        self.set.try_to_hashable(|seed| seed.to_sig_hashable())
     }
 
     /// Compute the regular hashable for V1 seeds (used in spend hashable, not signatures)
@@ -532,9 +552,9 @@ impl SeedsV1 {
     ///     $(form l.form)
     ///   $(form r.form)
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
-        // Use ZSet's to_hashable method with regular hashable for each seed
-        self.set.to_hashable(|seed| seed.to_regular_hashable())
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
+        // Use ZSet's fallible hashable builder with regular hashable for each seed
+        self.set.try_to_hashable(|seed| seed.to_regular_hashable())
     }
 }
 
@@ -583,10 +603,12 @@ impl SpendsV1 {
     ///     $(form l.form)
     ///   $(form r.form)
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         let mut slab: NounSlab = NounSlab::new();
-        let noun = build_canonical_spends_noun(&mut slab, &self.map);
-        hashable_spends_from_raw(noun).expect("invalid spends noun")
+        let noun = build_canonical_spends_noun(&mut slab, &self.map)?;
+        let space = slab.noun_space();
+        hashable_spends_from_raw(noun, &space)
+            .map_err(|e| Tip5Error::InvalidNoun(format!("invalid spends noun: {:?}", e)))
     }
 
     /// Compute hash of spends
@@ -598,15 +620,16 @@ impl SpendsV1 {
     ///   %-  hash-hashable:tip5
     ///   (hashable form)
     /// ```
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()?)
     }
 
     /// Return the raw spends noun jam used for hashing/debugging.
     pub fn jam_canonical(&self) -> Vec<u8> {
         let mut slab: NounSlab = NounSlab::new();
-        let noun = build_canonical_spends_noun(&mut slab, &self.map);
+        let noun = build_canonical_spends_noun(&mut slab, &self.map)
+            .expect("spend z-map keys are u64-based");
         slab.set_root(noun);
         slab.jam().to_vec()
     }
@@ -614,7 +637,7 @@ impl SpendsV1 {
 
 impl NounEncode for SpendsV1 {
     fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> Noun {
-        build_canonical_spends_noun(alloc, &self.map)
+        build_canonical_spends_noun(alloc, &self.map).expect("spend z-map keys are u64-based")
     }
 }
 
@@ -623,27 +646,31 @@ fn version_leaf_hashable() -> Hashable {
 }
 
 /// Compute a tx-id from an already computed spends hashable structure.
-fn compute_tx_id_from_spends_hashable(spends_hashable: Hashable) -> Hash {
+fn compute_tx_id_from_spends_hashable(spends_hashable: Hashable) -> Result<Hash, Tip5Error> {
     let hashable = Hashable::cell(version_leaf_hashable(), spends_hashable);
     hash_hashable(&hashable)
 }
 
 /// Compute the tx-id from an in-memory spends map.
-pub fn compute_tx_id_v1(spends: &SpendsV1) -> Hash {
-    compute_tx_id_from_spends_hashable(spends.to_hashable())
+pub fn compute_tx_id_v1(spends: &SpendsV1) -> Result<Hash, Tip5Error> {
+    compute_tx_id_from_spends_hashable(spends.to_hashable()?)
 }
 
 /// Compute the tx-id from the raw noun representation of the spends map.
-pub fn compute_tx_id_v1_from_noun(spends_noun: Noun) -> Hash {
-    let spends = SpendsV1::from_noun(&spends_noun).expect("invalid spends noun");
+pub fn compute_tx_id_v1_from_noun(spends_noun: Noun, space: &NounSpace) -> Result<Hash, Tip5Error> {
+    let spends = SpendsV1::from_noun(&spends_noun, space)
+        .map_err(|e| Tip5Error::InvalidNoun(format!("invalid spends noun: {:?}", e)))?;
     compute_tx_id_v1(&spends)
 }
 
 /// Compute the tx-id directly from the jammed noun bytes of the spends map.
-pub fn compute_tx_id_v1_from_jam(spends_jam: &[u8]) -> Result<Hash, CueError> {
+pub fn compute_tx_id_v1_from_jam(spends_jam: &[u8]) -> Result<Hash, Tip5Error> {
     let mut slab: NounSlab = NounSlab::new();
-    let noun = slab.cue_into(Bytes::copy_from_slice(spends_jam))?;
-    Ok(compute_tx_id_v1_from_noun(noun))
+    let noun = slab
+        .cue_into(Bytes::copy_from_slice(spends_jam))
+        .map_err(|e| Tip5Error::SerializationError(format!("failed to cue spends: {:?}", e)))?;
+    let space = slab.noun_space();
+    compute_tx_id_v1_from_noun(noun, &space)
 }
 
 #[derive(Debug, Clone, NounDecode, NounEncode)]
@@ -675,10 +702,10 @@ impl SpendV1 {
     ///   %-  hash-hashable:tip5
     ///   [(sig-hashable:seeds seeds.sen) leaf+fee.sen]
     /// ```
-    pub fn compute_sig_hash(&self) -> Hash {
+    pub fn compute_sig_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
 
-        let hashable = Hashable::cell(self.seeds.to_sig_hashable(), self.fee.to_hashable());
+        let hashable = Hashable::cell(self.seeds.to_sig_hashable()?, self.fee.to_hashable());
 
         hash_hashable(&hashable)
     }
@@ -692,19 +719,19 @@ impl SpendV1 {
     ///   ^-  hashable:tip5
     ///   [(hashable:witness witness.sen) (hashable:seeds seeds.sen) leaf+fee.sen]
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         // Build the triple: [witness-hashable seeds-hashable fee-leaf]
         // Note: seeds hashable uses regular hashable, not sig-hashable
-        Hashable::triple(
-            self.witness.to_hashable(),
-            self.seeds.to_hashable(),
+        Ok(Hashable::triple(
+            self.witness.to_hashable()?,
+            self.seeds.to_hashable()?,
             self.fee.to_hashable(),
-        )
+        ))
     }
 
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()?)
     }
 }
 
@@ -730,10 +757,10 @@ impl SpendV0ToV1 {
     ///   %-  hash-hashable:tip5
     ///   [(sig-hashable:seeds seeds.form) leaf+fee.form]
     /// ```
-    pub fn compute_sig_hash(&self) -> Hash {
+    pub fn compute_sig_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
 
-        let hashable = Hashable::cell(self.seeds.to_sig_hashable(), self.fee.to_hashable());
+        let hashable = Hashable::cell(self.seeds.to_sig_hashable()?, self.fee.to_hashable());
 
         hash_hashable(&hashable)
     }
@@ -747,7 +774,7 @@ impl SpendV0ToV1 {
     ///   ^-  hashable:tip5
     ///   [(hashable:signature:v0 signature.form) (hashable:seeds seeds.form) leaf+fee.form]
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         // For V0 signatures, we need to traverse the ZMap properly
         let sig_hashable = self.signature.to_hashable(
             |pubkey| Hashable::Hash(pubkey.to_hash()),
@@ -755,27 +782,12 @@ impl SpendV0ToV1 {
         );
 
         // For seeds, use the regular hashable (not sig_hashable)
-        let seeds_hashable = self.seeds.set.to_hashable(|seed| {
-            // Regular hashable for seed (without output_source)
-            use crate::hashing::hasher::hash_hashable;
-            let note_data_hash = hash_hashable(&seed.note_data.to_hashable());
+        let seeds_hashable = self.seeds.to_hashable()?;
 
-            Hashable::cell(
-                Hashable::Hash(seed.lock_root.clone()),
-                Hashable::cell(
-                    Hashable::Hash(note_data_hash),
-                    Hashable::cell(
-                        seed.gift.to_hashable(),
-                        Hashable::Hash(seed.parent_hash.clone()),
-                    ),
-                ),
-            )
-        });
-
-        Hashable::cell(
+        Ok(Hashable::cell(
             sig_hashable,
             Hashable::cell(seeds_hashable, self.fee.to_hashable()),
-        )
+        ))
     }
 }
 
@@ -849,12 +861,51 @@ impl ZSetDorTip for OutputV1 {
     }
 }
 
-#[derive(Debug, Clone, NounDecode, NounEncode)]
+#[derive(Debug, Clone, NounEncode)]
 pub struct Witness {
     pub lmp: LockMerkleProof,
     pub pkh: PkhSignature,
     pub hax: ZMap<Hash, UntypedNoun>,
     pub tim: u64,
+}
+
+impl NounDecode for Witness {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
+        use noun_serde::NounDecodeError;
+
+        let cell = noun
+            .in_space(space)
+            .as_cell()
+            .map_err(|_| NounDecodeError::ExpectedCell)?;
+        let lmp = LockMerkleProof::from_noun(&cell.head().noun(), space)?;
+
+        let rest = cell
+            .tail()
+            .as_cell()
+            .map_err(|_| NounDecodeError::ExpectedCell)?;
+        let pkh = PkhSignature::from_noun(&rest.head().noun(), space)?;
+
+        let rest = rest
+            .tail()
+            .as_cell()
+            .map_err(|_| NounDecodeError::ExpectedCell)?;
+        let hax = ZMap::<Hash, UntypedNoun>::from_noun(&rest.head().noun(), space)?;
+
+        let tim = rest
+            .tail()
+            .as_atom()
+            .map_err(|_| NounDecodeError::ExpectedAtom)?
+            .as_u64()
+            .map_err(|_| NounDecodeError::Custom("witness tim must fit in u64".into()))?;
+
+        // Upstream `Witness::from_noun` hardcodes `tim: 0` and Hoon requires
+        // `~`; a non-zero value is not a valid witness encoding.
+        if tim != 0 {
+            return Err(NounDecodeError::Custom("witness tim must be 0 (~)".into()));
+        }
+
+        Ok(Self { lmp, pkh, hax, tim })
+    }
 }
 
 impl Witness {
@@ -871,7 +922,7 @@ impl Witness {
     ///       leaf+tim.form
     ///   ==
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
 
         // Hash the lock merkle proof
@@ -881,15 +932,15 @@ impl Witness {
         let pkh_hash = self.pkh.to_hash();
 
         // Hash the hax map
-        let hax_hashable = self.hashable_hax();
-        let hax_hash = hash_hashable(&hax_hashable);
+        let hax_hashable = self.hashable_hax()?;
+        let hax_hash = hash_hashable(&hax_hashable)?;
 
-        Hashable::cell_chain([
+        Ok(Hashable::cell_chain([
             Hashable::Hash(lmp_hash),
             Hashable::Hash(pkh_hash),
             Hashable::Hash(hax_hash),
             Hashable::leaf_from_atom(&self.tim.to_le_bytes()),
-        ])
+        ]))
     }
 
     /// Compute hashable for hax map
@@ -904,9 +955,9 @@ impl Witness {
     ///       $(m l.m)
     ///   $(m r.m)
     /// ```
-    fn hashable_hax(&self) -> Hashable {
-        self.hax.to_hashable(
-            |hash| Hashable::Hash(hash.clone()),
+    fn hashable_hax(&self) -> Result<Hashable, Tip5Error> {
+        self.hax.try_to_hashable(
+            |hash| Ok(Hashable::Hash(hash.clone())),
             |untyped_noun| {
                 // hashable-noun recursively builds cells for cells, leaves for atoms
                 // But since UntypedNoun is just jammed bytes, we treat it as a leaf
@@ -915,14 +966,15 @@ impl Witness {
         )
     }
 
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()?)
     }
 }
 
 fn decode_hoon_list<T, F>(
     noun: &Noun,
+    space: &NounSpace,
     context: &'static str,
     mut decode_item: F,
 ) -> Result<Vec<T>, noun_serde::NounDecodeError>
@@ -933,13 +985,14 @@ where
     let mut current = *noun;
 
     loop {
-        if let Ok(cell) = current.as_cell() {
-            items.push(decode_item(&cell.head())?);
-            current = cell.tail();
+        let handle = current.in_space(space);
+        if let Ok(cell) = handle.as_cell() {
+            items.push(decode_item(&cell.head().noun())?);
+            current = cell.tail().noun();
             continue;
         }
 
-        let atom = current
+        let atom = handle
             .as_atom()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;
         match atom.as_u64()? {
@@ -1035,7 +1088,8 @@ impl LockMerkleProof {
     pub fn to_hashable(&self) -> Hashable {
         use crate::hashing::hasher::hash_hashable;
 
-        let spend_condition_hash = hash_hashable(&self.spend_condition().to_hashable());
+        let spend_condition_hash = hash_hashable(&self.spend_condition().to_hashable())
+            .expect("spend-condition hashable is u64-based");
 
         match self {
             Self::Full(proof) => Hashable::cell_chain([
@@ -1054,13 +1108,13 @@ impl LockMerkleProof {
 
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("lock-merkle-proof hashable is u64-based")
     }
 }
 
 impl NounDecode for LockMerkleProof {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        if let Ok(full) = LockMerkleProofFull::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
+        if let Ok(full) = LockMerkleProofFull::from_noun(noun, space) {
             if full.version != nockvm_macros::tas!(b"full") {
                 return Err(noun_serde::NounDecodeError::Custom(
                     "lock-merkle-proof version must be %full".into(),
@@ -1069,7 +1123,7 @@ impl NounDecode for LockMerkleProof {
             return Ok(Self::Full(full));
         }
 
-        Ok(Self::Stub(LockMerkleProofStub::from_noun(noun)?))
+        Ok(Self::Stub(LockMerkleProofStub::from_noun(noun, space)?))
     }
 }
 
@@ -1134,14 +1188,16 @@ impl SpendCondition {
 
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("spend-condition hashable is u64-based")
     }
 }
 
 impl NounDecode for SpendCondition {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
         Ok(Self {
-            p: decode_hoon_list(noun, "spend-condition", LockPrimitive::from_noun)?,
+            p: decode_hoon_list(noun, space, "spend-condition", |item| {
+                LockPrimitive::from_noun(item, space)
+            })?,
         })
     }
 }
@@ -1257,37 +1313,37 @@ pub struct LockPrimitive {
     pub body: LockPrimitiveBody,
 }
 
-use nockapp::AtomExt;
-
 impl NounDecode for LockPrimitive {
-    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        let head = noun
+    fn from_noun(
+        noun: &nockvm::noun::Noun,
+        space: &nockvm::noun::NounSpace,
+    ) -> Result<Self, noun_serde::NounDecodeError> {
+        let cell = noun
+            .in_space(space)
             .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+        let head = cell
             .head()
             .as_atom()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?
             .into_string()?;
-        let body = noun
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
-            .tail();
+        let body = cell.tail().noun();
         match head.as_str() {
             "pkh" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Pkh(Pkh::from_noun(&body)?),
+                body: LockPrimitiveBody::Pkh(Pkh::from_noun(&body, space)?),
             }),
             "tim" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Tim(Tim::from_noun(&body)?),
+                body: LockPrimitiveBody::Tim(Tim::from_noun(&body, space)?),
             }),
             "hax" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Hax(Hax::from_noun(&body)?),
+                body: LockPrimitiveBody::Hax(Hax::from_noun(&body, space)?),
             }),
             "brn" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Brn(Brn::from_noun(&body)?),
+                body: LockPrimitiveBody::Brn(Brn::from_noun(&body, space)?),
             }),
             _ => Err(noun_serde::NounDecodeError::InvalidEnumVariant),
         }
@@ -1371,17 +1427,20 @@ impl MerkleProof {
 
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("merkle-proof hashable is u64-based")
     }
 }
 
 impl NounDecode for MerkleProof {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
         let cell = noun
+            .in_space(space)
             .as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        let root = Hash::from_noun(&cell.head())?;
-        let path = decode_hoon_list(&cell.tail(), "merkle proof path", Hash::from_noun)?;
+        let root = Hash::from_noun(&cell.head().noun(), space)?;
+        let path = decode_hoon_list(&cell.tail().noun(), space, "merkle proof path", |item| {
+            Hash::from_noun(item, space)
+        })?;
         Ok(Self { root, path })
     }
 }
@@ -1429,7 +1488,7 @@ impl PkhSignature {
 
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("pkh-signature hashable is u64-based")
     }
 }
 
@@ -1456,7 +1515,7 @@ impl PkhSignatureValue {
 
     pub fn to_hash(&self) -> Hash {
         use crate::hashing::hasher::hash_hashable;
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("pkh-signature-value hashable is u64-based")
     }
 }
 
@@ -1504,7 +1563,9 @@ mod tests {
             &[version_noun, spend_condition_noun, D(7), merkle_proof_noun],
         );
 
-        let decoded = LockMerkleProof::from_noun(&full_lmp).expect("full lmp should decode");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&full_lmp, &space).expect("full lmp should decode");
 
         match decoded {
             LockMerkleProof::Full(full) => {
@@ -1529,7 +1590,9 @@ mod tests {
         let mut slab: NounSlab = NounSlab::new();
         let encoded = full.to_noun(&mut slab);
 
-        let decoded = LockMerkleProof::from_noun(&encoded).expect("full lmp should round-trip");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&encoded, &space).expect("full lmp should round-trip");
 
         match decoded {
             LockMerkleProof::Full(full) => {
@@ -1550,7 +1613,9 @@ mod tests {
         let mut slab: NounSlab = NounSlab::new();
         let encoded = stub.to_noun(&mut slab);
 
-        let decoded = LockMerkleProof::from_noun(&encoded).expect("stub lmp should round-trip");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&encoded, &space).expect("stub lmp should round-trip");
 
         match decoded {
             LockMerkleProof::Stub(stub) => {
@@ -1571,7 +1636,8 @@ mod tests {
         let primitive_noun = primitive.to_noun(&mut slab);
         let malformed_list = T(&mut slab, &[primitive_noun, D(1)]);
 
-        let err = SpendCondition::from_noun(&malformed_list)
+        let space = slab.noun_space();
+        let err = SpendCondition::from_noun(&malformed_list, &space)
             .expect_err("spend-condition decode should reject improper list");
 
         assert!(err.to_string().contains("spend-condition must be a list"));
@@ -1586,9 +1652,114 @@ mod tests {
         .to_noun(&mut slab);
         let malformed = T(&mut slab, &[hash_noun, D(1)]);
 
-        let err =
-            MerkleProof::from_noun(&malformed).expect_err("merkle proof path should reject atom");
+        let space = slab.noun_space();
+        let err = MerkleProof::from_noun(&malformed, &space)
+            .expect_err("merkle proof path should reject atom");
 
         assert!(err.to_string().contains("merkle proof path must be a list"));
+    }
+}
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+    use nockapp::AtomExt;
+    use nockvm::noun::{D, T};
+
+    fn unbased_note_data() -> NoteData {
+        let mut slab: NounSlab = NounSlab::new();
+        // A 72-bit atom: legal in a jam, but not belt-based.
+        let bytes = Bytes::copy_from_slice(&[1u8; 9]);
+        let atom = nockvm::noun::Atom::from_bytes(&mut slab, &bytes).as_noun();
+        slab.set_root(atom);
+
+        let mut map = ZMap::new();
+        map.put("big".to_string(), UntypedNoun { p: slab.jam() });
+        NoteData { map }
+    }
+
+    #[test]
+    fn note_data_with_unbased_atom_returns_error() {
+        let note_data = unbased_note_data();
+        let err = note_data
+            .to_hash()
+            .expect_err("unbased note-data must not fabricate a digest");
+        assert!(
+            matches!(err, Tip5Error::HashingError(_)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn spends_with_unbased_note_data_return_error() {
+        let mut spends = ZMap::new();
+        let spend = Spend {
+            version: 1,
+            body: SpendBody::V1(SpendV1 {
+                witness: Witness {
+                    lmp: LockMerkleProof::new_stub(
+                        SpendCondition { p: Vec::new() },
+                        1,
+                        MerkleProof {
+                            root: Hash { values: [0; 5] },
+                            path: Vec::new(),
+                        },
+                    ),
+                    pkh: PkhSignature { map: ZMap::new() },
+                    hax: ZMap::new(),
+                    tim: 0,
+                },
+                seeds: SeedsV1 {
+                    set: {
+                        let mut set = ZSet::new();
+                        set.put(SeedV1 {
+                            output_source: None,
+                            lock_root: Hash { values: [1; 5] },
+                            note_data: unbased_note_data(),
+                            gift: Coins { value: 1 },
+                            parent_hash: Hash { values: [2; 5] },
+                        });
+                        set
+                    },
+                },
+                fee: Coins { value: 1 },
+            }),
+        };
+        let name = NName {
+            p: vec![Hash { values: [3; 5] }, Hash { values: [4; 5] }],
+        };
+        spends.put(name, spend);
+
+        let result = compute_tx_id_v1(&SpendsV1 { map: spends });
+        assert!(
+            result.is_err(),
+            "unbased note-data must error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn witness_rejects_nonzero_tim() {
+        let mut slab: NounSlab = NounSlab::new();
+        let witness = Witness {
+            lmp: LockMerkleProof::new_stub(
+                SpendCondition { p: Vec::new() },
+                1,
+                MerkleProof {
+                    root: Hash { values: [0; 5] },
+                    path: Vec::new(),
+                },
+            ),
+            pkh: PkhSignature { map: ZMap::new() },
+            hax: ZMap::new(),
+            tim: 0,
+        };
+
+        let lmp = witness.lmp.to_noun(&mut slab);
+        let pkh = witness.pkh.to_noun(&mut slab);
+        let hax = witness.hax.to_noun(&mut slab);
+        let bad = T(&mut slab, &[lmp, pkh, hax, D(1)]);
+
+        let space = slab.noun_space();
+        let err = Witness::from_noun(&bad, &space).expect_err("non-zero tim must be rejected");
+        assert!(err.to_string().contains("tim must be 0"));
     }
 }

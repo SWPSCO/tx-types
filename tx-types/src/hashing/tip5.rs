@@ -1,15 +1,14 @@
 use nockapp::noun::slab::NounSlab;
 use nockapp::Noun;
-use nockchain_libp2p_io::tip5_util;
-
 // Re-export for use by other modules in this crate
+use nockapp::noun::NounAllocatorExt;
 pub use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+use nockchain_math::shape::do_leaf_sequence;
+use nockchain_math::tip5::hash::{hash_belts_slice, hash_noun_varlen_digest, hash_ten_cell};
 use nockvm::jets::util::test::init_context;
 use nockvm::jets::JetErr;
-use nockvm::noun::{D, T};
-use zkvm_jetpack::jets::tip5_jets::{
-    hash_10_jet, hash_hashable_jet, hash_noun_varlen_jet, hash_varlen_jet,
-};
+use nockvm::noun::{NounAllocator, NounSpace};
+use zkvm_jetpack::jets::tip5_jets::hash_hashable as hash_hashable_noun;
 
 use crate::transaction_types::Hash;
 
@@ -49,13 +48,14 @@ impl Tip5Hasher {
     /// Parse a hash noun which can be either:
     /// - A 5-tuple: [a [b [c [d e]]]] (from digest_to_noundigest)
     /// - A Hoon list with terminator: [a [b [c [d [e 0]]]]] (from vec_to_hoon_list)
-    fn digest_from_noun(hash_noun: Noun) -> Result<Hash, Tip5Error> {
+    fn digest_from_noun(hash_noun: Noun, space: &NounSpace) -> Result<Hash, Tip5Error> {
         let mut values = [0u64; 5];
         let mut current = hash_noun;
 
         // Parse first 4 elements (always in cells)
         for i in 0..4 {
             let cell = current
+                .in_space(space)
                 .as_cell()
                 .map_err(|_| Tip5Error::HashingError(format!("Expected cell at position {}", i)))?;
 
@@ -68,26 +68,27 @@ impl Tip5Hasher {
                 Tip5Error::HashingError(format!("Atom too large at position {}", i))
             })?;
 
-            current = cell.tail();
+            current = cell.tail().noun();
         }
 
         // The 5th element: could be either:
         // - An atom (5-tuple format: [a [b [c [d e]]]])
         // - A cell [e 0] (Hoon list format: [a [b [c [d [e 0]]]]])
-        if let Ok(atom) = current.as_atom() {
+        let current_handle = current.in_space(space);
+        if let Ok(atom) = current_handle.as_atom() {
             // 5-tuple format - current is already the 5th element
-            values[4] = atom.as_u64().map_err(|_| {
-                Tip5Error::HashingError("Atom too large at position 4".to_string())
-            })?;
-        } else if let Ok(cell) = current.as_cell() {
+            values[4] = atom
+                .as_u64()
+                .map_err(|_| Tip5Error::HashingError("Atom too large at position 4".to_string()))?;
+        } else if let Ok(cell) = current_handle.as_cell() {
             // Hoon list format - extract head of [e 0]
             let atom = cell
                 .head()
                 .as_atom()
                 .map_err(|_| Tip5Error::HashingError("Expected atom at position 4".to_string()))?;
-            values[4] = atom.as_u64().map_err(|_| {
-                Tip5Error::HashingError("Atom too large at position 4".to_string())
-            })?;
+            values[4] = atom
+                .as_u64()
+                .map_err(|_| Tip5Error::HashingError("Atom too large at position 4".to_string()))?;
         } else {
             return Err(Tip5Error::HashingError(
                 "Invalid hash noun structure at position 4".to_string(),
@@ -104,21 +105,17 @@ impl Tip5Hasher {
     ///
     /// # Arguments
     /// * `noun` - The noun to hash
+    /// * `space` - The [`NounSpace`] `noun` was allocated in
     ///
     /// # Returns
     /// * `Result<Hash, Tip5Error>` - The hash as a Hash struct or an error
-    pub fn hash_noun_varlen(noun: Noun) -> Result<Hash, Tip5Error> {
-        // Create a test context (includes NockStack and other needed components)
+    pub fn hash_noun_varlen(noun: Noun, space: &NounSpace) -> Result<Hash, Tip5Error> {
+        // The digest walk reads the noun directly in its own space and does not
+        // allocate, so no scratch stack copy is needed.
         let context = &mut init_context();
-
-        // Create the proper subject structure for jets: [formula sample payload]
-        // The jet expects the sample at slot 6, so we need [0 sample 0]
-        let subject = T(&mut context.stack, &[D(0), noun, D(0)]);
-
-        let hash_noun = hash_noun_varlen_jet(context, subject)
+        let values = hash_noun_varlen_digest(&mut context.stack, noun, space)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hashing failed: {:?}", e)))?;
-
-        Self::digest_from_noun(hash_noun)
+        Ok(Hash { values })
     }
 
     /// Hash a 10-tuple using the TIP5 hash_10 algorithm
@@ -128,21 +125,20 @@ impl Tip5Hasher {
     ///
     /// # Arguments
     /// * `ten_list` - A noun that should be a 10-element list
+    /// * `space` - The [`NounSpace`] `ten_list` was allocated in
     ///
     /// # Returns
     /// * `Result<Hash, Tip5Error>` - The hash as a Hash struct or an error
-    pub fn hash_10(ten_list: Noun) -> Result<Hash, Tip5Error> {
-        // Create a test context (includes NockStack and other needed components)
-        let context = &mut init_context();
-
-        // Create the proper subject structure for jets: [formula sample payload]
-        // The jet expects the sample at slot 6, so we need [0 sample 0]
-        let subject = T(&mut context.stack, &[D(0), ten_list, D(0)]);
-
-        let hash_noun = hash_10_jet(context, subject)
+    pub fn hash_10(ten_list: Noun, space: &NounSpace) -> Result<Hash, Tip5Error> {
+        let mut leaf = Vec::<u64>::new();
+        do_leaf_sequence(ten_list, &mut leaf, space)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_10 failed: {:?}", e)))?;
-
-        Self::digest_from_noun(hash_noun)
+        let leaf: [u64; nockchain_math::tip5::RATE] = leaf.try_into().map_err(|_| {
+            Tip5Error::HashingError("hash_10 expects exactly 10 leaves".to_string())
+        })?;
+        Ok(Hash {
+            values: hash_ten_cell(leaf),
+        })
     }
 
     /// Hash 10 u64 values using the TIP5 hash_10 algorithm
@@ -155,42 +151,27 @@ impl Tip5Hasher {
     /// # Returns
     /// * `Result<Hash, Tip5Error>` - The hash as a Hash struct or an error
     pub fn hash_10_from_values(values: &[u64; 10]) -> Result<Hash, Tip5Error> {
-        use nockvm::noun::Atom;
-
-        // Create a test context (includes NockStack and other needed components)
-        let context = &mut init_context();
-        let stack = &mut context.stack;
-
-        // Build a proper Hoon list directly in the NockStack
-        // [v0 [v1 [v2 [v3 [v4 [v5 [v6 [v7 [v8 [v9 0]]]]]]]]]]
-        let mut list = D(0);
-        for &val in values.iter().rev() {
-            // Use Atom::new to handle large values that exceed DIRECT_MAX
-            let atom = Atom::new(stack, val).as_noun();
-            list = T(stack, &[atom, list]);
-        }
-
-        // Create the proper subject structure for jets: [formula sample payload]
-        let subject = T(stack, &[D(0), list, D(0)]);
-
-        let hash_noun = hash_10_jet(context, subject)
-            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_10 failed: {:?}", e)))?;
-
-        Self::digest_from_noun(hash_noun)
+        Ok(Hash {
+            values: hash_ten_cell(*values),
+        })
     }
 
     /// Hash a Hashable structure using the TIP5 jet.
     pub fn hash_hashable(hashable: &crate::hashing::hashable::Hashable) -> Result<Hash, Tip5Error> {
+        hashable.validate_leaves()?;
         let mut slab: NounSlab = NounSlab::new();
         let noun = hashable.to_noun(&mut slab);
         slab.set_root(noun);
+        let slab_space = slab.noun_space();
 
         let context = &mut init_context();
-        let subject = T(&mut context.stack, &[D(0), noun, D(0)]);
-        let hash_noun = hash_hashable_jet(context, subject)
+        let copied = context.stack.copy_into(noun, &slab_space);
+        let stack_space = context.stack.noun_space();
+        let hash_noun = hash_hashable_noun(&mut context.stack, copied, &stack_space)
             .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_hashable failed: {:?}", e)))?;
 
-        Self::digest_from_noun(hash_noun)
+        let result_space = context.stack.noun_space();
+        Self::digest_from_noun(hash_noun, &result_space)
     }
 
     /// Hash a noun and convert to base58 string
@@ -199,24 +180,13 @@ impl Tip5Hasher {
     ///
     /// # Arguments
     /// * `noun` - The noun to hash
+    /// * `space` - The [`NounSpace`] `noun` was allocated in
     ///
     /// # Returns
     /// * `Result<String, Tip5Error>` - The base58-encoded hash or an error
-    pub fn hash_noun_varlen_to_base58(noun: Noun) -> Result<String, Tip5Error> {
-        // Create a test context (includes NockStack and other needed components)
-        let context = &mut init_context();
-
-        // Create the proper subject structure for jets: [formula sample payload]
-        // The jet expects the sample at slot 6, so we need [0 sample 0]
-        let subject = T(&mut context.stack, &[D(0), noun, D(0)]);
-
-        // Call the TIP5 hash jet
-        let hash_noun = hash_noun_varlen_jet(context, subject)
-            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hashing failed: {:?}", e)))?;
-
-        // Convert the 5-tuple hash to base58 string
-        tip5_util::tip5_hash_to_base58(hash_noun)
-            .map_err(|e| Tip5Error::HashingError(format!("Base58 conversion failed: {:?}", e)))
+    pub fn hash_noun_varlen_to_base58(noun: Noun, space: &NounSpace) -> Result<String, Tip5Error> {
+        let hash = Self::hash_noun_varlen(noun, space)?;
+        Ok(hash.to_b58())
     }
 
     /// Hash a list of field elements using the TIP5 algorithm
@@ -229,67 +199,40 @@ impl Tip5Hasher {
     ///
     /// # Returns
     /// * `Result<Hash, Tip5Error>` - The hash as a Hash struct or an error
-    pub fn hash_varlen(belts_list: Noun) -> Result<Hash, Tip5Error> {
-        // Create a test context (includes NockStack and other needed components)
-        let context = &mut init_context();
+    pub fn hash_varlen(belts_list: Noun, space: &NounSpace) -> Result<Hash, Tip5Error> {
+        let mut values = Vec::new();
+        let mut current = belts_list;
 
-        // Create the proper subject structure for jets: [formula sample payload]
-        // The jet expects the sample at slot 6, so we need [0 sample 0]
-        let subject = T(&mut context.stack, &[D(0), belts_list, D(0)]);
+        loop {
+            let handle = current.in_space(space);
+            if let Ok(cell) = handle.as_cell() {
+                let atom = cell
+                    .head()
+                    .as_atom()
+                    .map_err(|_| Tip5Error::HashingError("Expected atom in list".to_string()))?;
+                values.push(
+                    atom.as_u64().map_err(|_| {
+                        Tip5Error::HashingError("Atom too large in list".to_string())
+                    })?,
+                );
+                current = cell.tail().noun();
+                continue;
+            }
 
-        // Call the TIP5 hash_varlen jet - returns a list (not a tuple)
-        let hash_noun = hash_varlen_jet(context, subject)
-            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_varlen failed: {:?}", e)))?;
-
-        // Extract the 5 u64 values from the list
-        // The result is a list structure: [a [b [c [d [e 0]]]]]]
-        let mut values = [0u64; 5];
-        let mut current = hash_noun;
-
-        for i in 0..5 {
-            let cell = current
-                .as_cell()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected cell at position {}", i)))?;
-
-            // Get the atom
-            let atom = cell
-                .head()
+            let atom = handle
                 .as_atom()
-                .map_err(|_| Tip5Error::HashingError(format!("Expected atom at position {}", i)))?;
-
-            // Handle the conversion properly
-            values[i] = if atom.is_direct() {
-                atom.as_u64().map_err(|_| {
-                    Tip5Error::HashingError(format!("Atom too large at position {}", i))
-                })?
-            } else {
-                // For indirect atoms, we need to handle the bytes properly
-                let bytes = atom.as_ne_bytes();
-                if bytes.len() > 8 {
-                    return Err(Tip5Error::HashingError(format!(
-                        "Atom too large at position {}",
-                        i
-                    )));
-                }
-                // Reconstruct u64 from little-endian bytes
-                let mut result = 0u64;
-                for (j, &byte) in bytes.iter().enumerate() {
-                    result |= (byte as u64) << (j * 8);
-                }
-                result
-            };
-
-            current = cell.tail();
-        }
-
-        // current should now be 0 (end of list)
-        if current.as_atom().is_ok() && current.as_atom().unwrap().as_u64().unwrap_or(1) != 0 {
+                .map_err(|_| Tip5Error::HashingError("Expected atom or cell".to_string()))?;
+            if atom.as_u64().unwrap_or(1) == 0 {
+                break;
+            }
             return Err(Tip5Error::HashingError(
                 "Expected list to end with 0".to_string(),
             ));
         }
 
-        Ok(Hash { values })
+        Ok(Hash {
+            values: hash_belts_slice(&values),
+        })
     }
 }
 
@@ -298,12 +241,13 @@ impl Tip5Hasher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nockvm::noun::D;
+    use nockvm::noun::{D, T};
 
     #[test]
     fn test_hash_simple_atom() {
         let noun = D(42);
-        let hash = Tip5Hasher::hash_noun_varlen(noun).expect("Should hash successfully");
+        let space = NounSpace::empty();
+        let hash = Tip5Hasher::hash_noun_varlen(noun, &space).expect("Should hash successfully");
 
         // Hash should have 5 u64 values
         assert_eq!(hash.values.len(), 5);
@@ -316,7 +260,7 @@ mod tests {
 
         // Test the base58 conversion function
         let hash_str =
-            Tip5Hasher::hash_noun_varlen_to_base58(noun).expect("Should convert to base58");
+            Tip5Hasher::hash_noun_varlen_to_base58(noun, &space).expect("Should convert to base58");
         assert!(!hash_str.is_empty());
         assert!(hash_str
             .chars()
@@ -326,8 +270,9 @@ mod tests {
     #[test]
     fn test_hash_consistency() {
         let noun = D(123);
-        let hash1 = Tip5Hasher::hash_noun_varlen(noun).expect("Should hash successfully");
-        let hash2 = Tip5Hasher::hash_noun_varlen(noun).expect("Should hash successfully");
+        let space = NounSpace::empty();
+        let hash1 = Tip5Hasher::hash_noun_varlen(noun, &space).expect("Should hash successfully");
+        let hash2 = Tip5Hasher::hash_noun_varlen(noun, &space).expect("Should hash successfully");
 
         // Same input should produce same hash
         assert_eq!(hash1.values, hash2.values);
@@ -335,8 +280,9 @@ mod tests {
 
     #[test]
     fn test_hash_different_values() {
-        let hash1 = Tip5Hasher::hash_noun_varlen(D(42)).expect("Should hash successfully");
-        let hash2 = Tip5Hasher::hash_noun_varlen(D(43)).expect("Should hash successfully");
+        let space = NounSpace::empty();
+        let hash1 = Tip5Hasher::hash_noun_varlen(D(42), &space).expect("Should hash successfully");
+        let hash2 = Tip5Hasher::hash_noun_varlen(D(43), &space).expect("Should hash successfully");
 
         // Different inputs should produce different hashes
         assert_ne!(hash1.values, hash2.values);
@@ -351,7 +297,9 @@ mod tests {
         // In Hoon list format: [1 [2 [3 0]]]
         let list_noun = T(&mut context.stack, &[D(1), D(2), D(3), D(0)]);
 
-        let hash = Tip5Hasher::hash_varlen(list_noun).expect("Should hash successfully");
+        let stack_space = context.stack.noun_space();
+        let hash =
+            Tip5Hasher::hash_varlen(list_noun, &stack_space).expect("Should hash successfully");
 
         // Hash should have 5 u64 values
         assert_eq!(hash.values.len(), 5);
@@ -363,7 +311,8 @@ mod tests {
         );
 
         // Test consistency - same input should produce same hash
-        let hash2 = Tip5Hasher::hash_varlen(list_noun).expect("Should hash successfully");
+        let hash2 =
+            Tip5Hasher::hash_varlen(list_noun, &stack_space).expect("Should hash successfully");
         assert_eq!(hash.values, hash2.values, "Hash should be deterministic");
 
         println!("hash_varlen([1, 2, 3]) = {:x?}", hash.values);

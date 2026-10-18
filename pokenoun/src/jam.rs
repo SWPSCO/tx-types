@@ -26,6 +26,12 @@ impl<'a> BitReader<'a> {
         self.bit as u64
     }
 
+    /// Number of unread bits remaining in the input.
+    fn remaining_bits(&self) -> u64 {
+        let total = (self.bytes.len() as u64).saturating_mul(8);
+        total.saturating_sub(self.bit as u64)
+    }
+
     fn read_bit(&mut self) -> Result<bool, CodecError> {
         let byte_i = self.bit / 8;
         if byte_i >= self.bytes.len() {
@@ -51,8 +57,8 @@ impl<'a> BitReader<'a> {
     }
 }
 
-fn get_size(reader: &mut BitReader<'_>) -> Result<usize, CodecError> {
-    let mut zeros = 0usize;
+fn get_size(reader: &mut BitReader<'_>) -> Result<u64, CodecError> {
+    let mut zeros = 0u32;
     loop {
         let b = reader.read_bit()?;
         if b {
@@ -66,9 +72,14 @@ fn get_size(reader: &mut BitReader<'_>) -> Result<usize, CodecError> {
     if zeros == 0 {
         return Ok(0);
     }
-    let bitsize = zeros;
-    let low = reader.read_bits_u64(bitsize.saturating_sub(1))? as usize;
-    Ok(low + (1usize << (bitsize - 1)))
+    let low = reader.read_bits_u64((zeros - 1) as usize)?;
+    // `zeros` is at most 64, so `zeros - 1` is at most 63 and the shift is
+    // well-defined for u64 on every target (including 32-bit ESP32 where a
+    // `usize` shift of 63 would overflow).
+    let high = 1u64
+        .checked_shl(zeros - 1)
+        .ok_or(CodecError::AtomTooLarge)?;
+    high.checked_add(low).ok_or(CodecError::AtomTooLarge)
 }
 
 fn rub_backref(reader: &mut BitReader<'_>) -> Result<u64, CodecError> {
@@ -79,7 +90,7 @@ fn rub_backref(reader: &mut BitReader<'_>) -> Result<u64, CodecError> {
     if size > 64 {
         return Err(CodecError::InvalidBackref);
     }
-    reader.read_bits_u64(size)
+    reader.read_bits_u64(size as usize)
 }
 
 fn met0_u64(x: u64) -> usize {
@@ -120,12 +131,27 @@ pub fn cue(bytes: &[u8], arena: &mut Arena) -> Result<Noun, CodecError> {
             let noun = if size == 0 {
                 arena.atom0()
             } else {
+                // Never allocate based on an unchecked size header: the atom
+                // bits must actually be present in the remaining input.
+                if size > reader.remaining_bits() {
+                    return Err(CodecError::UnexpectedEof);
+                }
                 let nbytes = (size + 7) / 8;
+                let nbytes = usize::try_from(nbytes).map_err(|_| CodecError::AtomTooLarge)?;
                 let off = arena.atom_data.len();
-                arena.atom_data.resize(off + nbytes, 0u8);
+                let new_len = off.checked_add(nbytes).ok_or(CodecError::AtomTooLarge)?;
+                // `size <= remaining_bits` bounds the allocation by the input
+                // size; `try_reserve` still reports allocation failure instead
+                // of aborting on tiny targets.
+                arena
+                    .atom_data
+                    .try_reserve(nbytes)
+                    .map_err(|_| CodecError::AtomTooLarge)?;
+                arena.atom_data.resize(new_len, 0u8);
                 for i in 0..size {
                     if reader.read_bit()? {
-                        arena.atom_data[off + (i / 8)] |= 1u8 << (i % 8);
+                        let byte_i = (i / 8) as usize;
+                        arena.atom_data[off + byte_i] |= 1u8 << (i % 8);
                     }
                 }
                 let id = arena.push_atom_slice(off as u32, nbytes as u32);
@@ -278,3 +304,92 @@ pub fn jam(noun: Noun, arena: &Arena) -> Vec<u8> {
     writer.bytes
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cue_rejects_empty_input_without_panicking() {
+        let mut arena = Arena::new();
+        assert!(matches!(
+            cue(&[], &mut arena),
+            Err(CodecError::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn cue_rejects_size_larger_than_remaining_bits() {
+        // Atom tag (0), then a size header claiming 1024 atom bits, then EOF.
+        let mut writer = BitWriter::new();
+        writer.write_bit(false); // atom
+        for _ in 0..11 {
+            writer.write_bit(false); // met0(1024) == 11
+        }
+        writer.write_bit(true);
+        for _ in 0..10 {
+            writer.write_bit(false); // low size bits
+        }
+
+        let mut arena = Arena::new();
+        assert!(matches!(
+            cue(&writer.bytes, &mut arena),
+            Err(CodecError::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn cue_rejects_oversized_atom_header_before_allocating() {
+        // Header claims ~2^32 bits; the decoder must reject it before any
+        // multi-gigabyte allocation.
+        let mut writer = BitWriter::new();
+        writer.write_bit(false);
+        for _ in 0..33 {
+            writer.write_bit(false);
+        }
+        writer.write_bit(true);
+
+        let mut arena = Arena::new();
+        let err = cue(&writer.bytes, &mut arena).unwrap_err();
+        assert!(matches!(
+            err,
+            CodecError::UnexpectedEof | CodecError::AtomTooLarge
+        ));
+        assert!(arena.atom_data.len() < 1024);
+    }
+
+    #[test]
+    fn cue_round_trips_atoms_and_cells() {
+        let mut arena = Arena::new();
+        let atom = arena.alloc_atom_u64(42);
+        let bytes_atom = arena.alloc_atom_bytes(b"hello");
+        let cell = arena.alloc_cell(atom, bytes_atom);
+        let encoded = jam(cell, &arena);
+
+        let mut decoded_arena = Arena::new();
+        let decoded = cue(&encoded, &mut decoded_arena).expect("valid jam must cue");
+        let Noun::Cell(id) = decoded else {
+            panic!("expected cell");
+        };
+        let cell = decoded_arena.cell(id);
+        assert_eq!(
+            decoded_arena.atom_u64(match cell.head {
+                Noun::Atom(a) => a,
+                _ => panic!("expected atom head"),
+            }),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn shared_dag_walk_is_bounded() {
+        // A cell whose tail is a backreference to itself: legal jam, but its
+        // logical expansion is infinite. The walk must return an error.
+        let encoded = [0xf1, 0x01];
+        let mut arena = Arena::new();
+        let noun = cue(&encoded, &mut arena).expect("cyclic jam is decodable");
+        assert!(matches!(
+            crate::tip5::hash_noun_varlen(noun, &arena),
+            Err(crate::tip5::Tip5Error::WalkTooLarge)
+        ));
+    }
+}

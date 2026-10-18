@@ -47,6 +47,7 @@ impl U320 {
 mod tests {
     use super::U320;
     use crate::transaction_types::Hash;
+    use num_bigint::BigUint;
 
     #[test]
     fn test_u320_from_b58_basic() {
@@ -90,5 +91,42 @@ mod tests {
         let result = Hash::from_b58(&huge_b58);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn test_from_b58_rejects_out_of_domain_high_quotient() {
+        // p^5 needs a sixth base-p limb, so it is outside the five-limb tip5
+        // domain. It used to be truncated to the all-zero digest.
+        let p5 = BigUint::from(0xFFFF_FFFF_0000_0001u64).pow(5);
+        let s = bs58::encode(p5.to_bytes_be()).into_string();
+        let err = Hash::from_b58(&s).expect_err("p^5 must be rejected");
+        assert!(err.contains("too large"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_from_b58_rejects_non_canonical_leading_one() {
+        let canonical = Hash {
+            values: [1, 2, 3, 4, 1000],
+        }
+        .to_b58();
+        Hash::from_b58(&canonical).expect("canonical hash decodes");
+
+        // A leading '1' is a leading zero byte: same limbs, non-canonical
+        // spelling, and must not alias the canonical hash.
+        let padded = format!("1{canonical}");
+        let err = Hash::from_b58(&padded).expect_err("padded spelling must be rejected");
+        assert!(err.contains("Non-canonical"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_from_b58_rejects_non_canonical_trailing_zero_limb_value() {
+        // Limb 4 equal to the prime is out of the canonical limb range even
+        // though it fits in a u64: to_b58 spells it as six limbs, so the
+        // re-encode check must reject it.
+        let non_canonical = Hash {
+            values: [0, 0, 0, 0, 0xFFFF_FFFF_0000_0001],
+        }
+        .to_b58();
+        assert!(Hash::from_b58(&non_canonical).is_err());
     }
 }

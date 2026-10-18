@@ -25,9 +25,12 @@ mod tests {
             use crate::hashing::tip5::Tip5Hasher;
             use nockapp::noun::slab::NounSlab;
 
+            use nockvm::noun::NounAllocator;
+
             let mut slab: NounSlab = NounSlab::new();
             let noun = self.to_noun(&mut slab);
-            Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            let space = slab.noun_space();
+            Tip5Hasher::hash_noun_varlen(noun, &space).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
 
@@ -83,7 +86,7 @@ mod tests {
             Hashable::Hash(hash)
         });
 
-        let set_hash = hash_hashable(&hashable);
+        let set_hash = hash_hashable(&hashable).expect("z-set hashable is u64-based");
         println!("Final ZSet hash: {:016x?}", set_hash.values);
 
         // Verify we have 2 elements
@@ -157,7 +160,7 @@ mod tests {
             Hashable::Hash(hash)
         });
 
-        let set_hash = hash_hashable(&hashable);
+        let set_hash = hash_hashable(&hashable).expect("z-set hashable is u64-based");
         println!("Final ZSet hash: {:016x?}", set_hash.values);
 
         // Verify we have 3 elements

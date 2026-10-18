@@ -1,7 +1,23 @@
+#[cfg(feature = "embedded")]
+extern crate nockapp_minimal as nockapp;
+#[cfg(feature = "embedded")]
+extern crate nockvm_minimal as nockvm;
+#[cfg(feature = "embedded")]
+extern crate noun_serde_minimal as noun_serde;
+
+#[cfg(feature = "native")]
+extern crate nockapp_upstream as nockapp;
+#[cfg(feature = "native")]
+extern crate nockvm_upstream as nockvm;
+#[cfg(feature = "native")]
+extern crate noun_serde_upstream as noun_serde;
+
 #[cfg(feature = "std")]
 use bytes::Bytes;
 #[cfg(feature = "std")]
 use nockapp::noun::slab::{NockJammer, NounSlab};
+#[cfg(feature = "std")]
+use nockvm::noun::NounAllocator;
 #[cfg(feature = "std")]
 use noun_serde::{NounDecode, NounEncode};
 #[cfg(feature = "std")]
@@ -119,11 +135,20 @@ fn main() {
             std::process::exit(1);
         });
 
-    let (out_bytes, report_lines) = if let Ok(mut raw_tx) = RawTransactionV1::from_noun(&noun) {
+    let space = slab.noun_space();
+    let (out_bytes, report_lines) = if let Ok(mut raw_tx) =
+        RawTransactionV1::from_noun(&noun, &space)
+    {
         let (signed_spends, spends_signed) =
             sign_spends_v1(raw_tx.spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
         raw_tx.spends = signed_spends;
-        let tx_id_hash = compute_tx_id_v1(&raw_tx.spends);
+        let tx_id_hash = match compute_tx_id_v1(&raw_tx.spends) {
+            Ok(hash) => hash,
+            Err(err) => {
+                eprintln!("error: failed to compute tx id: {err}");
+                std::process::exit(1);
+            }
+        };
         raw_tx.id = tx_id_hash.clone();
 
         let out_bytes = jam_to_vec(&raw_tx);
@@ -134,10 +159,16 @@ fn main() {
             format!("spends_signed: {}", spends_signed),
         ];
         (out_bytes, report)
-    } else if let Ok(spends) = SpendsV1::from_noun(&noun) {
+    } else if let Ok(spends) = SpendsV1::from_noun(&noun, &space) {
         let (signed_spends, spends_signed) =
             sign_spends_v1(spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
-        let tx_id_hash = compute_tx_id_v1(&signed_spends);
+        let tx_id_hash = match compute_tx_id_v1(&signed_spends) {
+            Ok(hash) => hash,
+            Err(err) => {
+                eprintln!("error: failed to compute tx id: {err}");
+                std::process::exit(1);
+            }
+        };
 
         let out_bytes = jam_to_vec(&signed_spends);
         let report = vec![
@@ -147,7 +178,7 @@ fn main() {
             format!("spends_signed: {}", spends_signed),
         ];
         (out_bytes, report)
-    } else if let Ok(mut spend) = Spend::from_noun(&noun) {
+    } else if let Ok(mut spend) = Spend::from_noun(&noun, &space) {
         let spend_signed =
             sign_spend_in_place(&mut spend, &signing_key, &schnorr_pubkey, &pubkey_hash);
         let out_bytes = jam_to_vec(&spend);
@@ -211,7 +242,10 @@ fn sign_spend_in_place(
         return false;
     }
 
-    let sig_hash = spend.body.sig_hash();
+    let sig_hash = spend
+        .body
+        .sig_hash()
+        .expect("spend signature hashable is u64-based");
     let (chal, sig) = schnorr_sign_digest(signing_key.clone(), schnorr_pubkey.clone(), sig_hash);
     let schnorr_sig = SchnorrSignature {
         chal: Chal { values: chal },

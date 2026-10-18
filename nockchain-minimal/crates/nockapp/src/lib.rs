@@ -13,7 +13,7 @@ pub mod noun;
 pub mod utils;
 
 pub use bytes::*;
-pub use nockvm::noun::Noun;
+pub use nockvm::noun::{Noun, NounAllocator, NounSpace};
 pub use noun::{AtomExt, JammedNoun, NounExt};
 pub use utils::bytes::{ToBytes, ToBytesExt};
 pub use utils::error::{CrownError, NockAppError, Result};
