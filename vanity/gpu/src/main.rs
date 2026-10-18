@@ -40,7 +40,7 @@ A device self-test runs before every search. Every match is verified in Rust.
 Only the public address and statistics are printed. Keep the JSON backup private.
 Two terminal lines refresh: progress every 5s, average duration every 30s.
 The estimate is an average, not a countdown. Redirected output uses plain lines.
-Ctrl+C stops after the current GPU batch. No match leaves the reserved file empty.
+Ctrl+C stops after the current GPU batch. No match leaves an empty file, or [] with --continuous.
 Exit codes: 0 match/self-test, 1 error, 2 attempt limit, 130 interrupted.";
 
 struct Args {

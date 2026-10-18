@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 const HELP: &str = "Usage: vanity-pkh [PREFIX | --suffix TEXT | --contains TEXT] --output <FILE> [--insensitive] [--raw-key] [--threads <N>] [--max-attempts <N>]
 
-Mine a Base58 Nockchain public-key hash prefix (exact matching by default).
+Mine a Base58 Nockchain public-key hash pattern (exact matching by default).
 Search 24-word BIP39 phrases using Nockster's master address (path m, empty passphrase).
 
   --prefix TEXT      Match the start (also accepted as a positional argument)

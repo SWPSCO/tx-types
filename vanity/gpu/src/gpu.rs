@@ -333,17 +333,38 @@ impl Gpu {
                 c => c,
             })
             .collect();
-        for prefix in [
-            Pattern::new(address.as_str(), MatchPosition::Prefix).unwrap(),
-            Pattern::with_mode(&insensitive, MatchPosition::Prefix, MatchMode::Insensitive)
-                .unwrap(),
+        for position in [
+            MatchPosition::Prefix,
+            MatchPosition::Suffix,
+            MatchPosition::Contains,
         ] {
-            let mut buffers = self.initialize(&seeds, &prefix)?;
-            let results = self.dispatch(&mut buffers, 1, 2)?;
-            if results.len() != 1 || results[0].offset != 1 || results[0].tested != 2 {
-                return Err("GPU self-test failed: partial batch or prefix match".into());
+            for mode in [MatchMode::Exact, MatchMode::Insensitive] {
+                let source = if mode == MatchMode::Exact {
+                    address.as_str()
+                } else {
+                    &insensitive
+                };
+                let needle = match position {
+                    MatchPosition::Prefix => &source[..8],
+                    MatchPosition::Suffix => &source[source.len() - 8..],
+                    MatchPosition::Contains => &source[10..18],
+                };
+                let pattern = Pattern::with_mode(needle, position, mode).unwrap();
+                let mut buffers = self.initialize(&seeds, &pattern)?;
+                let results = self.dispatch(&mut buffers, 1, 2)?;
+                if results.len() != 1 || results[0].offset != 1 || results[0].tested != 2 {
+                    return Err("GPU self-test failed: partial batch or pattern match".into());
+                }
+                verify(&seeds[0], &results[0], &pattern)?;
+                let resumed = self.dispatch(&mut buffers, 1, 1)?;
+                let key = offset_key(&seeds[0], 2).unwrap();
+                if resumed[0].offset != 2
+                    || resumed[0].tested != 1
+                    || resumed[0].digest != pkh_from_public_key(&cheetah_pub_from_sk(*key))
+                {
+                    return Err("GPU self-test failed: search does not advance past a match".into());
+                }
             }
-            verify(&seeds[0], &results[0], &prefix)?;
         }
         Ok(())
     }

@@ -433,6 +433,59 @@ mod tests {
     }
 
     #[test]
+    fn patterns_match_positions_and_canonical_boundaries() {
+        let address = encode_pkh([123456789, 987654321, 1234, 5678, 9012]);
+        let text = address.as_str();
+        for position in [
+            MatchPosition::Prefix,
+            MatchPosition::Suffix,
+            MatchPosition::Contains,
+        ] {
+            for size in [1, 3, text.len()] {
+                let needle = match position {
+                    MatchPosition::Prefix => &text[..size],
+                    MatchPosition::Suffix => &text[text.len() - size..],
+                    MatchPosition::Contains => {
+                        &text[(text.len() - size) / 2..(text.len() - size) / 2 + size]
+                    }
+                };
+                assert!(Pattern::new(needle, position).unwrap().matches(&address));
+                assert!(Pattern::with_mode(
+                    &needle.to_ascii_lowercase(),
+                    position,
+                    MatchMode::Insensitive
+                )
+                .unwrap()
+                .matches(&address));
+            }
+            assert!(!Pattern::new("zzzzzzzzzz", position)
+                .unwrap()
+                .matches(&address));
+            for invalid in [
+                "",
+                "0",
+                "é",
+                "11111111111111111111111111111111111111111111111111111111",
+            ] {
+                assert!(Pattern::new(invalid, position).is_err());
+            }
+        }
+        let multiple_of_58 = encode_pkh([58, 0, 0, 0, 0]);
+        assert!(Pattern::new("1", MatchPosition::Suffix)
+            .unwrap()
+            .matches(&multiple_of_58));
+        assert!(!Pattern::new("1", MatchPosition::Prefix)
+            .unwrap()
+            .matches(&multiple_of_58));
+        assert!(Pattern::new("11", MatchPosition::Suffix).is_ok());
+        assert!(Pattern::new("11", MatchPosition::Contains).is_ok());
+        assert!(Pattern::new("11", MatchPosition::Prefix).is_err());
+        assert!(!Pattern::new("11", MatchPosition::Contains)
+            .unwrap()
+            .matches(&encode_pkh([0; 5])));
+    }
+
+    #[test]
     fn pkh_matches_hoon_vector_and_generic_noun_hash() {
         let public_key = (
             [

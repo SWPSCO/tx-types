@@ -1,6 +1,6 @@
 # Vanity address mining
 
-The `vanity` crate searches for Nockchain address prefixes using the shared
+The `vanity` crate searches Nockchain addresses by prefix, suffix, or substring using the shared
 `tx-types` curve and hash primitives. Its raw-key search and mnemonic derivation
 run without heap allocation or `std`. Callers supply cryptographic entropy and
 choose how often to yield between search batches.
@@ -12,10 +12,10 @@ choose how often to yield between search batches.
 vanity = { git = "https://github.com/SWPSCO/tx-types", features = ["export"] }
 ```
 
-- The default library provides `Prefix`, `Search`, address encoding, and public-key hashing.
+- The default library provides `Prefix`, `Pattern`, `Search`, address encoding, and public-key hashing.
 - `mnemonic` adds `MnemonicSearch` and 24-word BIP39 recovery at path `m` with an empty passphrase.
 - `export` includes mnemonic support and private JSON serialization.
-- `std` enables hosted `tx-types` integration and reference checks.
+- `std` enables hosted integration; with `export`, it adds atomic `KeyOutput` backups.
 
 Secret search state and exported JSON use zeroizing buffers. A raw search walks
 consecutive scalars from its secret starting key; give parallel workers independent
@@ -46,14 +46,14 @@ backup. Only the public address reaches stdout. Two lines on stderr refresh in
 place: speed, attempts, and elapsed time every 5 seconds, and an estimated average
 duration every 30 seconds. Durations use seconds, minutes, hours, or days as
 appropriate. Redirected output uses plain log lines. The estimate uses
-the measured candidate rate and prefix probability; it is not a countdown.
-Backups use mode 0600 on Unix and never overwrite an existing file.
+the measured candidate rate and pattern probability; it is not a countdown.
+Backups use mode 0600 on Unix and require a new output path.
 
 `--lanes` controls independent GPU walks (default 1024), and `--steps` controls
 candidates per lane per dispatch (default 16). `--max-attempts N` bounds the total
 work exactly, including partial batches. Ctrl+C stops after the current GPU batch.
-An interrupted or exhausted search leaves its reserved output file empty; use a
-new output path for the next run. Run `--help` for all options and exit codes.
+Without a match, the output is empty (`[]` with `--continuous`). Run `--help`
+for all options and exit codes.
 
 ## Command line
 
@@ -69,6 +69,19 @@ for thread and attempt limits.
 Two terminal lines refresh in place: progress every 5 seconds and an estimated
 average duration every 30 seconds. Elapsed time uses minutes and hours as needed.
 A final summary appears immediately when the search finishes.
+
+Both runners accept one positional prefix or one of `--prefix TEXT`, `--suffix TEXT`,
+and `--contains TEXT`. Each works with `--insensitive`. Searches exit after the first
+match by default. `--continuous` keeps searching until Ctrl+C or the attempt limit:
+
+```sh
+./target/release/vanity-gpu --suffix nock --insensitive --continuous --output keys.json
+```
+
+Continuous output is a JSON array. Each match is written to a private temporary file,
+synced, and atomically replaces the checkpoint; the containing directory is synced on
+Unix. Saved matches survive interruption or a failed write. The Nockster equivalent is
+`nockster-cli vanity --contains nock --continuous --out keys.json`.
 
 ## Browser library
 
