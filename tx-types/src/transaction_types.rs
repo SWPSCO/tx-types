@@ -1,7 +1,7 @@
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
 use nockapp::Noun;
-use nockvm::noun::{Atom, NounAllocator, D, T};
+use nockvm::noun::{Atom, NounAllocator, NounSpace, D, T};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use std::collections::HashMap;
 
@@ -354,8 +354,8 @@ impl NounEncode for Timelock {
 }
 
 impl NounDecode for Timelock {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        let intent = TimelockIntent::from_noun(noun)?;
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        let intent = TimelockIntent::from_noun(noun, space)?;
         Timelock::new(intent).map_err(|e| NounDecodeError::Custom(e))
     }
 }
@@ -406,13 +406,14 @@ impl NounEncode for F6LT {
 }
 
 impl NounDecode for F6LT {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Extract 6 values from nested cell structure
         let mut values = [0u64; 6];
         let mut current = *noun;
 
         for i in 0..5 {
             let cell = current
+                .in_space(space)
                 .as_cell()
                 .map_err(|_| NounDecodeError::ExpectedCell)?;
             values[i] = cell
@@ -420,11 +421,12 @@ impl NounDecode for F6LT {
                 .as_atom()
                 .map_err(|_| NounDecodeError::ExpectedAtom)?
                 .as_u64()?;
-            current = cell.tail();
+            current = cell.tail().noun();
         }
 
         // Last element
         values[5] = current
+            .in_space(space)
             .as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;
@@ -676,7 +678,8 @@ impl Lock {
             // Hash each pubkey
             let mut slab: NounSlab = NounSlab::new();
             let pubkey_noun = pubkey.to_noun(&mut slab);
-            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun)
+            let space = slab.noun_space();
+            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun, &space)
                 .unwrap_or_else(|_| Hash { values: [0; 5] });
             Hashable::Hash(pubkey_hash)
         });
@@ -803,11 +806,11 @@ impl NNote {
 }
 
 impl NounDecode for NNote {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = NNoteV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = NNoteV0::from_noun(noun, space) {
             return Ok(NNote::V0(v0));
         }
-        if let Ok(v1) = NNoteV1::from_noun(noun) {
+        if let Ok(v1) = NNoteV1::from_noun(noun, space) {
             return Ok(NNote::V1(v1));
         }
         Err(NounDecodeError::Custom(
@@ -924,17 +927,17 @@ impl NounEncode for SpendBody {
 }
 
 impl NounDecode for SpendBody {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Try V0 first
-        if let Ok(v0) = SpendV0::from_noun(noun) {
+        if let Ok(v0) = SpendV0::from_noun(noun, space) {
             return Ok(SpendBody::V0(v0));
         }
         // Try V0ToV1
-        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun) {
+        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun, space) {
             return Ok(SpendBody::V0ToV1(v0tov1));
         }
         // Try V1
-        if let Ok(v1) = SpendV1::from_noun(noun) {
+        if let Ok(v1) = SpendV1::from_noun(noun, space) {
             return Ok(SpendBody::V1(v1));
         }
         Err(NounDecodeError::Custom(
@@ -980,8 +983,8 @@ impl NounEncode for Input {
 }
 
 impl NounDecode for Input {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = InputV0::from_noun(noun, space) {
             return Ok(Input::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1025,8 +1028,8 @@ impl NounEncode for Inputs {
 }
 
 impl NounDecode for Inputs {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputsV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = InputsV0::from_noun(noun, space) {
             return Ok(Inputs::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1063,9 +1066,10 @@ pub enum Tx {
 }
 
 impl NounDecode for Tx {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // First, peek at the version field (first field of the struct)
         let cell = noun
+            .in_space(space)
             .as_cell()
             .map_err(|_| NounDecodeError::Custom("Tx must be a cell".into()))?;
 
@@ -1080,8 +1084,8 @@ impl NounDecode for Tx {
 
         // Dispatch based on version
         match version {
-            0 => TxV0::from_noun(noun).map(Tx::V0),
-            1 => TxV1::from_noun(noun).map(Tx::V1),
+            0 => TxV0::from_noun(noun, space).map(Tx::V0),
+            1 => TxV1::from_noun(noun, space).map(Tx::V1),
             _ => Err(NounDecodeError::Custom(format!(
                 "Tx enum decode: unsupported version {}",
                 version
@@ -1106,8 +1110,8 @@ impl NounEncode for Outputs {
 }
 
 impl NounDecode for Outputs {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputsV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = OutputsV0::from_noun(noun, space) {
             return Ok(Outputs::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1132,8 +1136,8 @@ impl NounEncode for Output {
 }
 
 impl NounDecode for Output {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = OutputV0::from_noun(noun, space) {
             return Ok(Output::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1156,13 +1160,13 @@ pub enum RawTransaction {
 }
 
 impl NounDecode for RawTransaction {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // Try V1 first (has version field)
-        if let Ok(v1) = RawTransactionV1::from_noun(noun) {
+        if let Ok(v1) = RawTransactionV1::from_noun(noun, space) {
             return Ok(RawTransaction::V1(v1));
         }
         // Fall back to V0
-        if let Ok(v0) = RawTransactionV0::from_noun(noun) {
+        if let Ok(v0) = RawTransactionV0::from_noun(noun, space) {
             return Ok(RawTransaction::V0(v0));
         }
         Err(NounDecodeError::Custom(
@@ -1172,19 +1176,23 @@ impl NounDecode for RawTransaction {
 }
 
 impl NounDecode for T8 {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         let mut ret: [u64; 8] = [0; 8];
         let mut cur = *noun;
         for i in 0..7 {
-            let cur_cell = cur.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
+            let cur_cell = cur
+                .in_space(space)
+                .as_cell()
+                .map_err(|_| NounDecodeError::ExpectedCell)?;
             ret[i] = cur_cell
                 .head()
                 .as_atom()
                 .map_err(|_| NounDecodeError::ExpectedAtom)?
                 .as_u64()?;
-            cur = cur_cell.tail();
+            cur = cur_cell.tail().noun();
         }
         ret[7] = cur
+            .in_space(space)
             .as_atom()
             .map_err(|_| NounDecodeError::ExpectedAtom)?
             .as_u64()?;

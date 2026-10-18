@@ -25,9 +25,12 @@ mod tests {
             use crate::hashing::tip5::Tip5Hasher;
             use nockapp::noun::slab::NounSlab;
 
+            use nockvm::noun::NounAllocator;
+
             let mut slab: NounSlab = NounSlab::new();
             let noun = self.to_noun(&mut slab);
-            Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_| Hash { values: [0; 5] })
+            let space = slab.noun_space();
+            Tip5Hasher::hash_noun_varlen(noun, &space).unwrap_or_else(|_| Hash { values: [0; 5] })
         }
     }
 

@@ -3,6 +3,8 @@ use bytes::Bytes;
 #[cfg(feature = "std")]
 use nockapp::noun::slab::{NockJammer, NounSlab};
 #[cfg(feature = "std")]
+use nockvm::noun::NounAllocator;
+#[cfg(feature = "std")]
 use noun_serde::{NounDecode, NounEncode};
 #[cfg(feature = "std")]
 use std::io::{Read, Write};
@@ -119,7 +121,10 @@ fn main() {
             std::process::exit(1);
         });
 
-    let (out_bytes, report_lines) = if let Ok(mut raw_tx) = RawTransactionV1::from_noun(&noun) {
+    let space = slab.noun_space();
+    let (out_bytes, report_lines) = if let Ok(mut raw_tx) =
+        RawTransactionV1::from_noun(&noun, &space)
+    {
         let (signed_spends, spends_signed) =
             sign_spends_v1(raw_tx.spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
         raw_tx.spends = signed_spends;
@@ -134,7 +139,7 @@ fn main() {
             format!("spends_signed: {}", spends_signed),
         ];
         (out_bytes, report)
-    } else if let Ok(spends) = SpendsV1::from_noun(&noun) {
+    } else if let Ok(spends) = SpendsV1::from_noun(&noun, &space) {
         let (signed_spends, spends_signed) =
             sign_spends_v1(spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
         let tx_id_hash = compute_tx_id_v1(&signed_spends);
@@ -147,7 +152,7 @@ fn main() {
             format!("spends_signed: {}", spends_signed),
         ];
         (out_bytes, report)
-    } else if let Ok(mut spend) = Spend::from_noun(&noun) {
+    } else if let Ok(mut spend) = Spend::from_noun(&noun, &space) {
         let spend_signed =
             sign_spend_in_place(&mut spend, &signing_key, &schnorr_pubkey, &pubkey_hash);
         let out_bytes = jam_to_vec(&spend);

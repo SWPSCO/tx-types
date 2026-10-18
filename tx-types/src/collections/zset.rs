@@ -419,13 +419,16 @@ where
         use crate::transaction_types::Hash;
         use nockapp::noun::slab::NounSlab;
 
+        use nockvm::noun::NounAllocator;
+
         // Create a noun slab and convert value to noun
         let mut slab: NounSlab = NounSlab::new();
         let value_noun = value.to_noun(&mut slab);
+        let space = slab.noun_space();
 
         // Compute the TIP5 hash
-        let hash =
-            Tip5Hasher::hash_noun_varlen(value_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+        let hash = Tip5Hasher::hash_noun_varlen(value_noun, &space)
+            .unwrap_or_else(|_| Hash { values: [0; 5] });
 
         // Convert Hash to UBig using our new method
         hash.to_ubig()
@@ -464,12 +467,15 @@ where
         use crate::transaction_types::Hash;
         use nockapp::noun::slab::NounSlab;
 
+        use nockvm::noun::NounAllocator;
+
         // First compute the regular hash
         let mut slab: NounSlab = NounSlab::new();
         let value_noun = value.to_noun(&mut slab);
+        let space = slab.noun_space();
 
-        let hash =
-            Tip5Hasher::hash_noun_varlen(value_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+        let hash = Tip5Hasher::hash_noun_varlen(value_noun, &space)
+            .unwrap_or_else(|_| Hash { values: [0; 5] });
 
         // Use hash_ten_cell with two copies of the hash
         let double_hash = hash_ten_cell(hash.clone(), hash);
@@ -667,7 +673,7 @@ where
 }
 
 // Implement NounDecode for ZSet
-use nockvm::noun::{Noun, NounAllocator};
+use nockvm::noun::Noun;
 use noun_serde::{NounDecode, NounDecodeError};
 
 impl<T> ZSet<T>
@@ -675,17 +681,26 @@ where
     T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
 {
     /// Decode a node from noun recursively for NounDecode
-    fn node_from_noun(noun: &Noun) -> Result<Option<Box<Node<T>>>, NounDecodeError> {
+    fn node_from_noun(
+        noun: &Noun,
+        space: &nockvm::noun::NounSpace,
+    ) -> Result<Option<Box<Node<T>>>, NounDecodeError> {
+        let handle = noun.in_space(space);
+
         // Check if it's empty (~ = 0)
-        if noun.as_atom().is_ok() && noun.as_atom().unwrap().as_u64().unwrap_or(1) == 0 {
-            return Ok(None);
+        if let Ok(atom) = handle.as_atom() {
+            if atom.as_u64().unwrap_or(1) == 0 {
+                return Ok(None);
+            }
         }
 
         // Otherwise it should be a cell [value left right]
-        let cell = noun.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
+        let cell = handle
+            .as_cell()
+            .map_err(|_| NounDecodeError::ExpectedCell)?;
 
         // First element is the value
-        let value = T::from_noun(&cell.head())?;
+        let value = T::from_noun(&cell.head().noun(), space)?;
 
         // Second element should be a cell [left right]
         let tail_cell = cell
@@ -694,8 +709,8 @@ where
             .map_err(|_| NounDecodeError::ExpectedCell)?;
 
         // Recursively decode left and right subtrees
-        let left = Self::node_from_noun(&tail_cell.head())?;
-        let right = Self::node_from_noun(&tail_cell.tail())?;
+        let left = Self::node_from_noun(&tail_cell.head().noun(), space)?;
+        let right = Self::node_from_noun(&tail_cell.tail().noun(), space)?;
 
         Ok(Some(Box::new(Node { value, left, right })))
     }
@@ -705,9 +720,9 @@ impl<T> NounDecode for ZSet<T>
 where
     T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
 {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &nockvm::noun::NounSpace) -> Result<Self, NounDecodeError> {
         // Decode from tree structure matching Hoon's z-set
-        let root = Self::node_from_noun(noun)?;
+        let root = Self::node_from_noun(noun, space)?;
         Ok(ZSet { root })
     }
 }
@@ -860,9 +875,12 @@ mod tests {
         println!("\n--- In-order Traversal (based on gor-tip ordering) ---");
         for (idx, item) in items.iter().enumerate() {
             // Compute the hash for each value to understand ordering
+            use nockvm::noun::NounAllocator;
+
             let mut slab: NounSlab = NounSlab::new();
             let noun = item.to_noun(&mut slab);
-            let hash = Tip5Hasher::hash_noun_varlen(noun).unwrap();
+            let space = slab.noun_space();
+            let hash = Tip5Hasher::hash_noun_varlen(noun, &space).unwrap();
             println!("{}: value={}, hash={:x?}", idx, item.0, &hash.values[0..2]);
             // Show first 2 values of hash
         }

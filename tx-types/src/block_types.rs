@@ -8,7 +8,7 @@ use crate::transaction_types_v1::*;
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use nockapp::noun::slab::NounSlab;
-use nockvm::noun::Noun;
+use nockvm::noun::{Noun, NounSpace};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
@@ -333,11 +333,11 @@ pub enum Page {
 }
 
 impl NounDecode for Page {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = PageV0::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
+        if let Ok(v0) = PageV0::from_noun(noun, space) {
             return Ok(Page::V0(v0));
         }
-        if let Ok(v1) = PageV1::from_noun(noun) {
+        if let Ok(v1) = PageV1::from_noun(noun, space) {
             return Ok(Page::V1(v1));
         }
         Err(NounDecodeError::Custom(
@@ -374,17 +374,19 @@ pub struct Pow {
 }
 
 impl NounDecode for Pow {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         if noun.is_atom() {
             return Ok(Pow { p: None });
         }
         let proof = noun
+            .in_space(space)
             .as_cell()
             .map_err(|_| NounDecodeError::ExpectedCell)?
-            .tail();
+            .tail()
+            .noun();
 
         let mut slab: NounSlab = NounSlab::new();
-        slab.copy_into(proof);
+        slab.copy_into(proof, space);
         let noun_bytes: Bytes = slab.jam();
         Ok(Pow {
             p: Some(noun_bytes),
@@ -440,9 +442,9 @@ impl Timestamp {
 }
 
 impl NounDecode for Timestamp {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         let base_urbit_epoch = 0x8000000cce9e0d80u64;
-        let raw_value = u64::from_noun(noun)?;
+        let raw_value = u64::from_noun(noun, space)?;
         let unix_timestamp = (raw_value - base_urbit_epoch) as i64;
         let datetime_utc = Utc
             .timestamp_opt(unix_timestamp, 0)

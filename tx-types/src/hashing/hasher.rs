@@ -3,8 +3,7 @@
 use super::hashable::Hashable;
 use crate::transaction_types::Hash;
 use nockapp::noun::slab::NounSlab;
-use nockapp::Noun;
-use nockvm::noun::Atom;
+use nockvm::noun::NounAllocator;
 
 /// Goldilocks prime: 2^64 - 2^32 + 1
 pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
@@ -32,7 +31,9 @@ pub fn hash_noun_varlen(data: &[u8]) -> Hash {
         });
 
     // Use the real TIP5 hasher
-    let result = Tip5Hasher::hash_noun_varlen(noun).unwrap_or_else(|_e| Hash { values: [0; 5] });
+    let space = slab.noun_space();
+    let result =
+        Tip5Hasher::hash_noun_varlen(noun, &space).unwrap_or_else(|_e| Hash { values: [0; 5] });
     result
 }
 
@@ -129,7 +130,8 @@ pub fn hash_transcript_list(
     }
 
     // Hash the list using TIP5
-    Tip5Hasher::hash_varlen(list)
+    let space = slab.noun_space();
+    Tip5Hasher::hash_varlen(list, &space)
 }
 
 #[cfg(test)]

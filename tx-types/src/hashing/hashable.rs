@@ -1,8 +1,8 @@
 use crate::transaction_types::Hash;
 use nockapp::noun::slab::NounSlab;
 use nockapp::utils::make_tas;
-use nockapp::{AtomExt, Bytes};
-use nockvm::noun::{Noun, D, T};
+use nockapp::Bytes;
+use nockvm::noun::{Noun, NounAllocator, NounSpace, D, T};
 use noun_serde::{NounDecode, NounEncode};
 /// Hashable enum mirroring Hoon's hashable type
 /// This is an intermediate representation for hashing complex structures
@@ -165,7 +165,8 @@ impl Hashable {
                 let value_noun = cue_slab
                     .cue_into(Bytes::copy_from_slice(bytes))
                     .unwrap_or_else(|_| D(0));
-                let copied = slab.copy_into(value_noun);
+                let cue_space = cue_slab.noun_space();
+                let copied = slab.copy_into(value_noun, &cue_space);
                 T(slab, &[tag, copied])
             }
             Hashable::Hash(hash) => {
@@ -200,25 +201,26 @@ impl Hashable {
 
     /// Reconstruct a `Hashable` structure from a noun that follows the Hoon
     /// `%hashable` encoding (used by tx-engine and TIP5 hashing).
-    pub fn from_noun(noun: &Noun) -> Result<Self, String> {
-        if let Ok(cell) = noun.as_cell() {
+    pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, String> {
+        let handle = noun.in_space(space);
+        if let Ok(cell) = handle.as_cell() {
             if let Ok(tag_atom) = cell.head().as_atom() {
                 if tag_atom.eq_bytes(b"leaf") {
-                    let jam = jam_noun(cell.tail());
+                    let jam = jam_noun(cell.tail().noun(), space);
                     return Ok(Hashable::Leaf(jam));
                 } else if tag_atom.eq_bytes(b"hash") {
-                    let digest =
-                        Hash::from_noun(&cell.tail()).map_err(|e| format!("hash decode: {e}"))?;
+                    let digest = Hash::from_noun(&cell.tail().noun(), space)
+                        .map_err(|e| format!("hash decode: {e}"))?;
                     return Ok(Hashable::Hash(digest));
                 } else if tag_atom.eq_bytes(b"list") {
-                    let items = decode_hashable_list(cell.tail())?;
+                    let items = decode_hashable_list(cell.tail().noun(), space)?;
                     return Ok(Hashable::List(items));
                 }
             }
 
             Ok(Hashable::Cell(
-                Box::new(Hashable::from_noun(&cell.head())?),
-                Box::new(Hashable::from_noun(&cell.tail())?),
+                Box::new(Hashable::from_noun(&cell.head().noun(), space)?),
+                Box::new(Hashable::from_noun(&cell.tail().noun(), space)?),
             ))
         } else {
             Err("hashable noun must be a cell".into())
@@ -226,18 +228,19 @@ impl Hashable {
     }
 }
 
-fn jam_noun(noun: Noun) -> Vec<u8> {
+fn jam_noun(noun: Noun, space: &NounSpace) -> Vec<u8> {
     let mut slab: NounSlab = NounSlab::new();
-    let copied = slab.copy_into(noun);
+    let copied = slab.copy_into(noun, space);
     slab.set_root(copied);
     slab.jam().to_vec()
 }
 
-fn decode_hashable_list(noun: Noun) -> Result<Vec<Hashable>, String> {
+fn decode_hashable_list(noun: Noun, space: &NounSpace) -> Result<Vec<Hashable>, String> {
     let mut items = Vec::new();
     let mut cursor = noun;
     loop {
-        if let Ok(atom) = cursor.as_atom() {
+        let handle = cursor.in_space(space);
+        if let Ok(atom) = handle.as_atom() {
             let end = atom
                 .as_u64()
                 .map_err(|e| format!("list terminator decode: {e}"))?;
@@ -247,11 +250,11 @@ fn decode_hashable_list(noun: Noun) -> Result<Vec<Hashable>, String> {
             break;
         }
 
-        let cell = cursor
+        let cell = handle
             .as_cell()
             .map_err(|_| "expected cell while decoding hashable list".to_string())?;
-        items.push(Hashable::from_noun(&cell.head())?);
-        cursor = cell.tail();
+        items.push(Hashable::from_noun(&cell.head().noun(), space)?);
+        cursor = cell.tail().noun();
     }
     Ok(items)
 }

@@ -7,16 +7,12 @@ use crate::transaction_types::*;
 use nockapp::noun::slab::{CueError, NounSlab};
 use nockapp::utils::make_tas;
 use nockapp::Bytes;
-use nockvm::noun::{Atom, Noun, D};
+use nockvm::noun::{Noun, NounAllocator, NounSpace, D};
 use once_cell::sync::Lazy;
 
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
-use crate::hashing::raw::{
-    compute_tx_id_v1_from_raw_noun, hashable_note_data_from_raw, hashable_pkh_signature_direct,
-    hashable_pkh_signature_from_raw, hashable_seeds_from_raw, hashable_spend_from_raw,
-    hashable_spends_from_raw, hashable_witness_from_raw,
-};
+use crate::hashing::raw::hashable_spends_from_raw;
 use crate::hashing::tip5::Tip5Hasher;
 
 static LOCK_MERKLE_AXIS_HASH: Lazy<Hash> = Lazy::new(|| {
@@ -24,21 +20,22 @@ static LOCK_MERKLE_AXIS_HASH: Lazy<Hash> = Lazy::new(|| {
         .expect("valid lock merkle proof axis hash constant")
 });
 
-fn hashable_from_noun_recursive(noun: nockvm::noun::Noun) -> Hashable {
-    if let Ok(cell) = noun.as_cell() {
+fn hashable_from_noun_recursive(noun: nockvm::noun::Noun, space: &NounSpace) -> Hashable {
+    if let Ok(cell) = noun.in_space(space).as_cell() {
         Hashable::cell(
-            hashable_from_noun_recursive(cell.head()),
-            hashable_from_noun_recursive(cell.tail()),
+            hashable_from_noun_recursive(cell.head().noun(), space),
+            hashable_from_noun_recursive(cell.tail().noun(), space),
         )
     } else {
         let atom = noun
+            .in_space(space)
             .as_atom()
             .expect("hashable_from_noun_recursive: expected atom or cell");
         match atom.as_u64() {
             Ok(val) => Hashable::leaf_from_atom(&val.to_le_bytes()),
             Err(_) => {
                 let mut slab: NounSlab = NounSlab::new();
-                slab.copy_into(atom.as_noun());
+                slab.copy_into(atom.as_noun().noun(), space);
                 Hashable::Leaf(slab.jam().to_vec())
             }
         }
@@ -52,24 +49,28 @@ fn hashable_from_untyped_noun(untyped: &UntypedNoun) -> Hashable {
         Err(_) => return Hashable::Leaf(untyped.p.to_vec()),
     };
 
-    hashable_from_noun_recursive(noun)
+    let space = slab.noun_space();
+    hashable_from_noun_recursive(noun, &space)
 }
 
-fn hashable_leaf_from_noun(noun: Noun) -> Hashable {
+fn hashable_leaf_from_noun(noun: Noun, space: &NounSpace) -> Hashable {
     let mut slab: NounSlab = NounSlab::new();
-    let copy = slab.copy_into(noun);
+    let copy = slab.copy_into(noun, space);
     slab.set_root(copy);
     Hashable::Leaf(slab.jam().to_vec())
 }
 
-fn hashable_note_data_from_zmap(noun: Noun) -> Hashable {
-    if let Ok(atom) = noun.as_atom() {
+fn hashable_note_data_from_zmap(noun: Noun, space: &NounSpace) -> Hashable {
+    if let Ok(atom) = noun.in_space(space).as_atom() {
         if atom.as_u64().unwrap_or(1) == 0 {
             return Hashable::null();
         }
     }
 
-    let cell = noun.as_cell().expect("note-data node should be a cell");
+    let cell = noun
+        .in_space(space)
+        .as_cell()
+        .expect("note-data node should be a cell");
     let node = cell.head();
     let children = cell
         .tail()
@@ -87,34 +88,34 @@ fn hashable_note_data_from_zmap(noun: Noun) -> Hashable {
     let key_noun = pair.head();
     let value_noun = pair.tail();
 
-    let key_leaf = hashable_leaf_from_noun(key_noun);
-    let value_hashable = hashable_from_noun_recursive(value_noun);
+    let key_leaf = hashable_leaf_from_noun(key_noun.noun(), space);
+    let value_hashable = hashable_from_noun_recursive(value_noun.noun(), space);
     let node_hashable = Hashable::cell(key_leaf, value_hashable);
 
     Hashable::triple(
         node_hashable,
-        hashable_note_data_from_zmap(left),
-        hashable_note_data_from_zmap(right),
+        hashable_note_data_from_zmap(left.noun(), space),
+        hashable_note_data_from_zmap(right.noun(), space),
     )
 }
 
-pub fn hashable_spends_from_zmap(noun: Noun) -> Hashable {
+pub fn hashable_spends_from_zmap(noun: Noun, space: &NounSpace) -> Hashable {
     if noun_is_null(noun) {
         return Hashable::null();
     }
 
-    let (node, left, right) = decompose_map(noun);
-    let (name_noun, spend_noun) = decompose_pair(node);
+    let (node, left, right) = decompose_map(noun, space);
+    let (name_noun, spend_noun) = decompose_pair(node, space);
 
-    let name = NName::from_noun(&name_noun).expect("failed to decode spend name");
-    let spend = Spend::from_noun(&spend_noun).expect("failed to decode spend entry");
+    let name = NName::from_noun(&name_noun, space).expect("failed to decode spend name");
+    let spend = Spend::from_noun(&spend_noun, space).expect("failed to decode spend entry");
 
     let node_hashable = Hashable::cell(name.to_hashable(), spend.to_hashable());
 
     Hashable::triple(
         node_hashable,
-        hashable_spends_from_zmap(left),
-        hashable_spends_from_zmap(right),
+        hashable_spends_from_zmap(left, space),
+        hashable_spends_from_zmap(right, space),
     )
 }
 
@@ -122,7 +123,7 @@ fn noun_is_null(noun: Noun) -> bool {
     unsafe { noun.raw_equals(&D(0)) }
 }
 
-fn atom_trimmed_be(atom: Atom) -> Vec<u8> {
+fn atom_trimmed_be(atom: nockvm::noun::AtomHandle) -> Vec<u8> {
     let mut bytes = atom.to_be_bytes();
     let first_non_zero = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
     if first_non_zero == bytes.len() {
@@ -132,23 +133,26 @@ fn atom_trimmed_be(atom: Atom) -> Vec<u8> {
     }
 }
 
-fn nouns_equal(a: Noun, b: Noun) -> bool {
+fn nouns_equal(a: Noun, b: Noun, space: &NounSpace) -> bool {
     if unsafe { a.raw_equals(&b) } {
         return true;
     }
 
-    match (a.as_cell(), b.as_cell()) {
-        (Ok(ac), Ok(bc)) => nouns_equal(ac.head(), bc.head()) && nouns_equal(ac.tail(), bc.tail()),
+    match (a.in_space(space).as_cell(), b.in_space(space).as_cell()) {
+        (Ok(ac), Ok(bc)) => {
+            nouns_equal(ac.head().noun(), bc.head().noun(), space)
+                && nouns_equal(ac.tail().noun(), bc.tail().noun(), space)
+        }
         (Err(_), Err(_)) => {
-            let a_atom = a.as_atom().expect("noun should be atom");
-            let b_atom = b.as_atom().expect("noun should be atom");
+            let a_atom = a.in_space(space).as_atom().expect("noun should be atom");
+            let b_atom = b.in_space(space).as_atom().expect("noun should be atom");
             atom_trimmed_be(a_atom) == atom_trimmed_be(b_atom)
         }
         _ => false,
     }
 }
 
-fn atom_less_than(a: Atom, b: Atom) -> bool {
+fn atom_less_than(a: nockvm::noun::AtomHandle, b: nockvm::noun::AtomHandle) -> bool {
     let a_bytes = atom_trimmed_be(a);
     let b_bytes = atom_trimmed_be(b);
     match a_bytes.len().cmp(&b_bytes.len()) {
@@ -167,79 +171,85 @@ fn less_than_hash(a: &[u64; 5], b: &[u64; 5]) -> bool {
     hash_a.to_ubig() < hash_b.to_ubig()
 }
 
-fn tip_hash(noun: Noun) -> [u64; 5] {
-    Tip5Hasher::hash_noun_varlen(noun)
+fn tip_hash(noun: Noun, space: &NounSpace) -> [u64; 5] {
+    Tip5Hasher::hash_noun_varlen(noun, space)
         .map(|hash| hash.values)
         .unwrap_or([0; 5])
 }
 
-fn double_tip_hash(noun: Noun) -> [u64; 5] {
-    let tip = tip_hash(noun);
+fn double_tip_hash(noun: Noun, space: &NounSpace) -> [u64; 5] {
+    let tip = tip_hash(noun, space);
     let hash = Hash { values: tip };
     hash_ten_cell(hash.clone(), hash).values
 }
 
-fn dor_tip_compare(a: Noun, b: Noun) -> bool {
-    if nouns_equal(a, b) {
+fn dor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> bool {
+    if nouns_equal(a, b, space) {
         return true;
     }
 
-    match (a.as_cell(), b.as_cell()) {
+    match (a.in_space(space).as_cell(), b.in_space(space).as_cell()) {
         (Ok(ac), Ok(bc)) => {
-            if nouns_equal(ac.head(), bc.head()) {
-                dor_tip_compare(ac.tail(), bc.tail())
+            if nouns_equal(ac.head().noun(), bc.head().noun(), space) {
+                dor_tip_compare(ac.tail().noun(), bc.tail().noun(), space)
             } else {
-                dor_tip_compare(ac.head(), bc.head())
+                dor_tip_compare(ac.head().noun(), bc.head().noun(), space)
             }
         }
         (Ok(_), Err(_)) => false,
         (Err(_), Ok(_)) => false,
         (Err(_), Err(_)) => {
-            let a_atom = a.as_atom().expect("noun should be atom");
-            let b_atom = b.as_atom().expect("noun should be atom");
+            let a_atom = a.in_space(space).as_atom().expect("noun should be atom");
+            let b_atom = b.in_space(space).as_atom().expect("noun should be atom");
             atom_less_than(a_atom, b_atom)
         }
     }
 }
 
-fn gor_tip_compare(a: Noun, b: Noun) -> bool {
-    let a_tip = tip_hash(a);
-    let b_tip = tip_hash(b);
+fn gor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> bool {
+    let a_tip = tip_hash(a, space);
+    let b_tip = tip_hash(b, space);
     if a_tip == b_tip {
-        dor_tip_compare(a, b)
+        dor_tip_compare(a, b, space)
     } else {
         less_than_hash(&a_tip, &b_tip)
     }
 }
 
-fn mor_tip_compare(a: Noun, b: Noun) -> bool {
-    let a_tip = double_tip_hash(a);
-    let b_tip = double_tip_hash(b);
+fn mor_tip_compare(a: Noun, b: Noun, space: &NounSpace) -> bool {
+    let a_tip = double_tip_hash(a, space);
+    let b_tip = double_tip_hash(b, space);
     if a_tip == b_tip {
-        dor_tip_compare(a, b)
+        dor_tip_compare(a, b, space)
     } else {
         less_than_hash(&a_tip, &b_tip)
     }
 }
 
-fn decompose_map(noun: Noun) -> (Noun, Noun, Noun) {
-    let cell = noun.as_cell().expect("map node should be a cell");
-    let node = cell.head();
+fn decompose_map(noun: Noun, space: &NounSpace) -> (Noun, Noun, Noun) {
+    let cell = noun
+        .in_space(space)
+        .as_cell()
+        .expect("map node should be a cell");
+    let node = cell.head().noun();
     let tail = cell.tail();
 
     if let Ok(children) = tail.as_cell() {
-        let left = children.head();
-        let right = children.tail();
+        let left = children.head().noun();
+        let right = children.tail().noun();
         (node, left, right)
     } else {
-        (node, tail, D(0))
+        (node, tail.noun(), D(0))
     }
 }
 
-fn decompose_pair(noun: Noun) -> (Noun, Noun) {
-    let cell = noun.as_cell().expect("pair should be a cell");
-    let key = cell.head();
-    let value = cell.tail();
+fn decompose_pair(noun: Noun, space: &NounSpace) -> (Noun, Noun) {
+    let cell = noun
+        .in_space(space)
+        .as_cell()
+        .expect("pair should be a cell");
+    let key = cell.head().noun();
+    let value = cell.tail().noun();
     (key, value)
 }
 
@@ -255,22 +265,26 @@ fn canonical_zmap_put<A: nockvm::noun::NounAllocator>(
         return nockvm::noun::T(alloc, &[kv, children]);
     }
 
-    let (node, left, right) = decompose_map(map);
-    let (node_key, node_value) = decompose_pair(node);
+    // Refresh the space after any prior allocation; a stack-backed space holds
+    // an epoch snapshot that allocations advance.
+    let space = alloc.noun_space();
+    let (node, left, right) = decompose_map(map, &space);
+    let (node_key, node_value) = decompose_pair(node, &space);
 
-    if nouns_equal(key, node_key) {
-        if nouns_equal(value, node_value) {
+    if nouns_equal(key, node_key, &space) {
+        if nouns_equal(value, node_value, &space) {
             map
         } else {
             let new_node = nockvm::noun::T(alloc, &[key, value]);
             nockvm::noun::T(alloc, &[new_node, left, right])
         }
-    } else if gor_tip_compare(key, node_key) {
+    } else if gor_tip_compare(key, node_key, &space) {
         let new_left = canonical_zmap_put(alloc, left, key, value);
-        let (new_left_node, new_left_left, new_left_right) = decompose_map(new_left);
-        let (new_left_key, _) = decompose_pair(new_left_node);
+        let space = alloc.noun_space();
+        let (new_left_node, new_left_left, new_left_right) = decompose_map(new_left, &space);
+        let (new_left_key, _) = decompose_pair(new_left_node, &space);
 
-        if mor_tip_compare(node_key, new_left_key) {
+        if mor_tip_compare(node_key, new_left_key, &space) {
             let children = nockvm::noun::T(alloc, &[new_left, right]);
             nockvm::noun::T(alloc, &[node, children])
         } else {
@@ -281,10 +295,11 @@ fn canonical_zmap_put<A: nockvm::noun::NounAllocator>(
         }
     } else {
         let new_right = canonical_zmap_put(alloc, right, key, value);
-        let (new_right_node, new_right_left, new_right_right) = decompose_map(new_right);
-        let (new_right_key, _) = decompose_pair(new_right_node);
+        let space = alloc.noun_space();
+        let (new_right_node, new_right_left, new_right_right) = decompose_map(new_right, &space);
+        let (new_right_key, _) = decompose_pair(new_right_node, &space);
 
-        if mor_tip_compare(node_key, new_right_key) {
+        if mor_tip_compare(node_key, new_right_key, &space) {
             let children = nockvm::noun::T(alloc, &[left, new_right]);
             nockvm::noun::T(alloc, &[node, children])
         } else {
@@ -405,7 +420,8 @@ impl NoteData {
     pub fn to_hashable(&self) -> Hashable {
         let mut slab: NounSlab = NounSlab::new();
         let noun = build_canonical_note_data_noun(&mut slab, &self.map);
-        hashable_note_data_from_zmap(noun)
+        let space = slab.noun_space();
+        hashable_note_data_from_zmap(noun, &space)
     }
 
     /// Return the canonical note-data noun jam used for hashing/debugging.
@@ -586,7 +602,8 @@ impl SpendsV1 {
     pub fn to_hashable(&self) -> Hashable {
         let mut slab: NounSlab = NounSlab::new();
         let noun = build_canonical_spends_noun(&mut slab, &self.map);
-        hashable_spends_from_raw(noun).expect("invalid spends noun")
+        let space = slab.noun_space();
+        hashable_spends_from_raw(noun, &space).expect("invalid spends noun")
     }
 
     /// Compute hash of spends
@@ -634,8 +651,8 @@ pub fn compute_tx_id_v1(spends: &SpendsV1) -> Hash {
 }
 
 /// Compute the tx-id from the raw noun representation of the spends map.
-pub fn compute_tx_id_v1_from_noun(spends_noun: Noun) -> Hash {
-    let spends = SpendsV1::from_noun(&spends_noun).expect("invalid spends noun");
+pub fn compute_tx_id_v1_from_noun(spends_noun: Noun, space: &NounSpace) -> Hash {
+    let spends = SpendsV1::from_noun(&spends_noun, space).expect("invalid spends noun");
     compute_tx_id_v1(&spends)
 }
 
@@ -643,7 +660,8 @@ pub fn compute_tx_id_v1_from_noun(spends_noun: Noun) -> Hash {
 pub fn compute_tx_id_v1_from_jam(spends_jam: &[u8]) -> Result<Hash, CueError> {
     let mut slab: NounSlab = NounSlab::new();
     let noun = slab.cue_into(Bytes::copy_from_slice(spends_jam))?;
-    Ok(compute_tx_id_v1_from_noun(noun))
+    let space = slab.noun_space();
+    Ok(compute_tx_id_v1_from_noun(noun, &space))
 }
 
 #[derive(Debug, Clone, NounDecode, NounEncode)]
@@ -923,6 +941,7 @@ impl Witness {
 
 fn decode_hoon_list<T, F>(
     noun: &Noun,
+    space: &NounSpace,
     context: &'static str,
     mut decode_item: F,
 ) -> Result<Vec<T>, noun_serde::NounDecodeError>
@@ -933,13 +952,14 @@ where
     let mut current = *noun;
 
     loop {
-        if let Ok(cell) = current.as_cell() {
-            items.push(decode_item(&cell.head())?);
-            current = cell.tail();
+        let handle = current.in_space(space);
+        if let Ok(cell) = handle.as_cell() {
+            items.push(decode_item(&cell.head().noun())?);
+            current = cell.tail().noun();
             continue;
         }
 
-        let atom = current
+        let atom = handle
             .as_atom()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?;
         match atom.as_u64()? {
@@ -1059,8 +1079,8 @@ impl LockMerkleProof {
 }
 
 impl NounDecode for LockMerkleProof {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        if let Ok(full) = LockMerkleProofFull::from_noun(noun) {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
+        if let Ok(full) = LockMerkleProofFull::from_noun(noun, space) {
             if full.version != nockvm_macros::tas!(b"full") {
                 return Err(noun_serde::NounDecodeError::Custom(
                     "lock-merkle-proof version must be %full".into(),
@@ -1069,7 +1089,7 @@ impl NounDecode for LockMerkleProof {
             return Ok(Self::Full(full));
         }
 
-        Ok(Self::Stub(LockMerkleProofStub::from_noun(noun)?))
+        Ok(Self::Stub(LockMerkleProofStub::from_noun(noun, space)?))
     }
 }
 
@@ -1139,9 +1159,11 @@ impl SpendCondition {
 }
 
 impl NounDecode for SpendCondition {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
         Ok(Self {
-            p: decode_hoon_list(noun, "spend-condition", LockPrimitive::from_noun)?,
+            p: decode_hoon_list(noun, space, "spend-condition", |item| {
+                LockPrimitive::from_noun(item, space)
+            })?,
         })
     }
 }
@@ -1257,37 +1279,37 @@ pub struct LockPrimitive {
     pub body: LockPrimitiveBody,
 }
 
-use nockapp::AtomExt;
-
 impl NounDecode for LockPrimitive {
-    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        let head = noun
+    fn from_noun(
+        noun: &nockvm::noun::Noun,
+        space: &nockvm::noun::NounSpace,
+    ) -> Result<Self, noun_serde::NounDecodeError> {
+        let cell = noun
+            .in_space(space)
             .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
+            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
+        let head = cell
             .head()
             .as_atom()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedAtom)?
             .into_string()?;
-        let body = noun
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?
-            .tail();
+        let body = cell.tail().noun();
         match head.as_str() {
             "pkh" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Pkh(Pkh::from_noun(&body)?),
+                body: LockPrimitiveBody::Pkh(Pkh::from_noun(&body, space)?),
             }),
             "tim" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Tim(Tim::from_noun(&body)?),
+                body: LockPrimitiveBody::Tim(Tim::from_noun(&body, space)?),
             }),
             "hax" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Hax(Hax::from_noun(&body)?),
+                body: LockPrimitiveBody::Hax(Hax::from_noun(&body, space)?),
             }),
             "brn" => Ok(LockPrimitive {
                 header: head,
-                body: LockPrimitiveBody::Brn(Brn::from_noun(&body)?),
+                body: LockPrimitiveBody::Brn(Brn::from_noun(&body, space)?),
             }),
             _ => Err(noun_serde::NounDecodeError::InvalidEnumVariant),
         }
@@ -1376,12 +1398,15 @@ impl MerkleProof {
 }
 
 impl NounDecode for MerkleProof {
-    fn from_noun(noun: &Noun) -> Result<Self, noun_serde::NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, noun_serde::NounDecodeError> {
         let cell = noun
+            .in_space(space)
             .as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-        let root = Hash::from_noun(&cell.head())?;
-        let path = decode_hoon_list(&cell.tail(), "merkle proof path", Hash::from_noun)?;
+        let root = Hash::from_noun(&cell.head().noun(), space)?;
+        let path = decode_hoon_list(&cell.tail().noun(), space, "merkle proof path", |item| {
+            Hash::from_noun(item, space)
+        })?;
         Ok(Self { root, path })
     }
 }
@@ -1504,7 +1529,9 @@ mod tests {
             &[version_noun, spend_condition_noun, D(7), merkle_proof_noun],
         );
 
-        let decoded = LockMerkleProof::from_noun(&full_lmp).expect("full lmp should decode");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&full_lmp, &space).expect("full lmp should decode");
 
         match decoded {
             LockMerkleProof::Full(full) => {
@@ -1529,7 +1556,9 @@ mod tests {
         let mut slab: NounSlab = NounSlab::new();
         let encoded = full.to_noun(&mut slab);
 
-        let decoded = LockMerkleProof::from_noun(&encoded).expect("full lmp should round-trip");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&encoded, &space).expect("full lmp should round-trip");
 
         match decoded {
             LockMerkleProof::Full(full) => {
@@ -1550,7 +1579,9 @@ mod tests {
         let mut slab: NounSlab = NounSlab::new();
         let encoded = stub.to_noun(&mut slab);
 
-        let decoded = LockMerkleProof::from_noun(&encoded).expect("stub lmp should round-trip");
+        let space = slab.noun_space();
+        let decoded =
+            LockMerkleProof::from_noun(&encoded, &space).expect("stub lmp should round-trip");
 
         match decoded {
             LockMerkleProof::Stub(stub) => {
@@ -1571,7 +1602,8 @@ mod tests {
         let primitive_noun = primitive.to_noun(&mut slab);
         let malformed_list = T(&mut slab, &[primitive_noun, D(1)]);
 
-        let err = SpendCondition::from_noun(&malformed_list)
+        let space = slab.noun_space();
+        let err = SpendCondition::from_noun(&malformed_list, &space)
             .expect_err("spend-condition decode should reject improper list");
 
         assert!(err.to_string().contains("spend-condition must be a list"));
@@ -1586,8 +1618,9 @@ mod tests {
         .to_noun(&mut slab);
         let malformed = T(&mut slab, &[hash_noun, D(1)]);
 
-        let err =
-            MerkleProof::from_noun(&malformed).expect_err("merkle proof path should reject atom");
+        let space = slab.noun_space();
+        let err = MerkleProof::from_noun(&malformed, &space)
+            .expect_err("merkle proof path should reject atom");
 
         assert!(err.to_string().contains("merkle proof path must be a list"));
     }

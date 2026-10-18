@@ -259,13 +259,16 @@ where
         use crate::transaction_types::Hash;
         use nockapp::noun::slab::NounSlab;
 
+        use nockvm::noun::NounAllocator;
+
         // Create a noun slab and convert key to noun
         let mut slab: NounSlab = NounSlab::new();
         let key_noun = key.to_noun(&mut slab);
+        let space = slab.noun_space();
 
         // Compute the TIP5 hash
-        let hash =
-            Tip5Hasher::hash_noun_varlen(key_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)
+            .unwrap_or_else(|_| Hash { values: [0; 5] });
 
         // Convert Hash to UBig using our new method
         hash.to_ubig()
@@ -301,12 +304,15 @@ where
         use crate::transaction_types::Hash;
         use nockapp::noun::slab::NounSlab;
 
+        use nockvm::noun::NounAllocator;
+
         // First compute the regular hash
         let mut slab: NounSlab = NounSlab::new();
         let key_noun = key.to_noun(&mut slab);
+        let space = slab.noun_space();
 
-        let hash =
-            Tip5Hasher::hash_noun_varlen(key_noun).unwrap_or_else(|_| Hash { values: [0; 5] });
+        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)
+            .unwrap_or_else(|_| Hash { values: [0; 5] });
 
         // Use hash_ten_cell with two copies of the hash
         let double_hash = hash_ten_cell(hash.clone(), hash);
@@ -2234,22 +2240,26 @@ where
     K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
     V: noun_serde::NounDecode + Clone + Debug,
 {
-    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        use nockvm::noun::Noun;
-
+    fn from_noun(
+        noun: &nockvm::noun::Noun,
+        space: &nockvm::noun::NounSpace,
+    ) -> Result<Self, noun_serde::NounDecodeError> {
         // Check if it's ~ (empty map)
-        if noun.is_atom() && noun.as_atom().unwrap().as_u64()? == 0 {
-            return Ok(ZMap::new());
+        let handle = noun.in_space(space);
+        if let Ok(atom) = handle.as_atom() {
+            if atom.as_u64()? == 0 {
+                return Ok(ZMap::new());
+            }
         }
 
         // Otherwise it should be a cell [[key value] [left right]]
-        let cell = noun
+        handle
             .as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
 
         // Decode the node recursively
         let mut map = ZMap::new();
-        Self::decode_node_recursive(noun, &mut map)?;
+        Self::decode_node_recursive(noun, space, &mut map)?;
         Ok(map)
     }
 }
@@ -2261,15 +2271,20 @@ where
 {
     fn decode_node_recursive(
         noun: &nockvm::noun::Noun,
+        space: &nockvm::noun::NounSpace,
         map: &mut ZMap<K, V>,
     ) -> Result<(), noun_serde::NounDecodeError> {
+        let handle = noun.in_space(space);
+
         // If it's ~ (0), nothing to do
-        if noun.is_atom() && noun.as_atom().unwrap().as_u64()? == 0 {
-            return Ok(());
+        if let Ok(atom) = handle.as_atom() {
+            if atom.as_u64()? == 0 {
+                return Ok(());
+            }
         }
 
         // Otherwise it's [[key value] [left right]]
-        let cell = noun
+        let cell = handle
             .as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
 
@@ -2279,8 +2294,8 @@ where
             .as_cell()
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
 
-        let key = K::from_noun(&pair_cell.head())?;
-        let value = V::from_noun(&pair_cell.tail())?;
+        let key = K::from_noun(&pair_cell.head().noun(), space)?;
+        let value = V::from_noun(&pair_cell.tail().noun(), space)?;
 
         // Insert the key-value pair
         map.put(key, value);
@@ -2292,8 +2307,8 @@ where
             .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
 
         // Recursively decode left and right subtrees
-        Self::decode_node_recursive(&children_cell.head(), map)?;
-        Self::decode_node_recursive(&children_cell.tail(), map)?;
+        Self::decode_node_recursive(&children_cell.head().noun(), space, map)?;
+        Self::decode_node_recursive(&children_cell.tail().noun(), space, map)?;
 
         Ok(())
     }

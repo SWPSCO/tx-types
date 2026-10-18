@@ -22,7 +22,7 @@ use crate::transaction_types::{Coins, Hash, NName, Spend, SpendBody};
 use crate::transaction_types_v0::SpendV0;
 use crate::transaction_types_v1::{NoteData, SeedV1, SeedsV1, SpendV0ToV1, Witness};
 use nockapp::noun::slab::{NockJammer, NounSlab};
-use nockvm::noun::Noun;
+use nockvm::noun::{Noun, NounAllocator, NounSpace};
 use noun_serde::NounEncode;
 
 /// Activation height for the Bythos fee and witness-format upgrade.
@@ -181,12 +181,14 @@ where
 {
     let mut slab = NounSlab::<NockJammer>::new();
     let noun = build(&mut slab);
-    count_leaves_from_noun(noun)
+    let space = slab.noun_space();
+    count_leaves_from_noun(noun, &space)
 }
 
-fn count_leaves_from_noun(noun: Noun) -> u64 {
-    if let Ok(cell) = noun.as_cell() {
-        count_leaves_from_noun(cell.head()) + count_leaves_from_noun(cell.tail())
+fn count_leaves_from_noun(noun: Noun, space: &NounSpace) -> u64 {
+    if let Ok(cell) = noun.in_space(space).as_cell() {
+        count_leaves_from_noun(cell.head().noun(), space)
+            + count_leaves_from_noun(cell.tail().noun(), space)
     } else {
         1
     }
@@ -358,7 +360,8 @@ mod tests {
 
     fn untyped_atom(value: u64) -> UntypedNoun {
         let mut slab = NounSlab::<NockJammer>::new();
-        slab.copy_into(D(value));
+        let space = slab.noun_space();
+        slab.copy_into(D(value), &space);
         UntypedNoun { p: slab.jam() }
     }
 }

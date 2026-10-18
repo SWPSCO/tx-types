@@ -31,7 +31,7 @@ use crate::transaction_types::*;
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
 use nockapp::noun::slab::NounSlab;
-use nockvm::noun::{Noun, D, T};
+use nockvm::noun::{Noun, NounAllocator, NounSpace, D, T};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 /// Order structure representing a payment to a recipient
@@ -52,10 +52,10 @@ pub enum LockData {
 }
 
 impl NounDecode for LockData {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
         // lock-data is a cell: [version lock:transact]
         // For V0: [%0 =lock:transact] where lock is a spend-condition
-        let cell = match noun.as_cell() {
+        let cell = match noun.in_space(space).as_cell() {
             Ok(c) => c,
             Err(_) => return Err(NounDecodeError::ExpectedCell),
         };
@@ -90,7 +90,7 @@ impl NounDecode for LockData {
         }
 
         // Decode the spend-condition
-        let spend_condition = SpendCondition::from_noun(&lock_noun)?;
+        let spend_condition = SpendCondition::from_noun(&lock_noun.noun(), space)?;
 
         Ok(LockData::V0(spend_condition))
     }
@@ -125,7 +125,8 @@ pub fn lock_data_to_untyped_noun(lock_data: &LockData) -> UntypedNoun {
             let lock_data_noun = T(&mut slab, &[version_tag, lock_noun]);
 
             // Copy the noun into the slab and jam it
-            slab.copy_into(lock_data_noun);
+            let space = slab.noun_space();
+            slab.copy_into(lock_data_noun, &space);
             let jammed = slab.jam();
 
             UntypedNoun { p: jammed }
