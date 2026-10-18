@@ -44,12 +44,31 @@ pub fn schnorr_verify_digest(
     message: Hash,
     signature: SchnorrSignature,
 ) -> bool {
+    // 0. Reject non-canonical T8 encodings. The scalar is reconstructed as
+    // base-2^32 digits, so every limb must be < 2^32 (upstream
+    // `is_canonical`, Hoon `(levy ... (lth n b-32))`). Without this check the
+    // same scalar has malleable encodings.
+    const LIMB_BOUND: u64 = 1 << 32;
+    if signature
+        .chal
+        .values
+        .values
+        .iter()
+        .chain(signature.sig.values.values.iter())
+        .any(|&limb| limb >= LIMB_BOUND)
+    {
+        return false;
+    }
+
     // 1. Convert signature components to big-endian format
     let chal_be = t8_to_be32(&signature.chal.values);
     let sig_be = t8_to_be32(&signature.sig.values);
 
-    // 2. Validate that both components are < curve order
-    // This prevents malleability attacks and ensures valid scalars
+    // 2. Validate that both components are non-zero and < curve order
+    // This mirrors Hoon `(gth chal 0) (gth sig 0)` and prevents malleability.
+    if be32_is_zero(&chal_be) || be32_is_zero(&sig_be) {
+        return false;
+    }
     if !be32_lt(&chal_be, &CHEETAH_N) || !be32_lt(&sig_be, &CHEETAH_N) {
         return false;
     }
@@ -90,6 +109,10 @@ pub fn schnorr_verify_digest(
     // 6. Constant-time comparison of challenges
     // If the recomputed challenge matches the provided challenge, signature is valid
     chal_be == expected_chal_be
+}
+
+fn be32_is_zero(value: &[u8; 32]) -> bool {
+    value.iter().all(|&byte| byte == 0)
 }
 
 #[cfg(test)]
@@ -362,5 +385,68 @@ mod tests {
         assert!(!is_valid, "Wrong public key should fail verification");
 
         println!("✓ Wrong public key correctly fails verification");
+    }
+
+    fn dummy_pubkey() -> SchnorrPubkey {
+        SchnorrPubkey {
+            x: F6LT { values: [0; 6] },
+            y: F6LT { values: [0; 6] },
+            inf: false,
+        }
+    }
+
+    fn signature_with(chal: [u64; 8], sig: [u64; 8]) -> SchnorrSignature {
+        use crate::transaction_types::{Chal, Sig};
+        SchnorrSignature {
+            chal: Chal {
+                values: T8 { values: chal },
+            },
+            sig: Sig {
+                values: T8 { values: sig },
+            },
+        }
+    }
+
+    #[test]
+    fn test_rejects_zero_challenge() {
+        let signature = signature_with([0; 8], [1, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(!schnorr_verify_digest(
+            dummy_pubkey(),
+            Hash { values: [0; 5] },
+            signature
+        ));
+    }
+
+    #[test]
+    fn test_rejects_zero_signature() {
+        let signature = signature_with([1, 0, 0, 0, 0, 0, 0, 0], [0; 8]);
+        assert!(!schnorr_verify_digest(
+            dummy_pubkey(),
+            Hash { values: [0; 5] },
+            signature
+        ));
+    }
+
+    #[test]
+    fn test_rejects_non_canonical_limbs() {
+        // A limb >= 2^32 is not a canonical base-2^32 digit. The same scalar
+        // could otherwise be encoded many ways (malleability).
+        let mut chal = [1, 0, 0, 0, 0, 0, 0, 0];
+        chal[7] = 1 << 32;
+        let signature = signature_with(chal, [1, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(!schnorr_verify_digest(
+            dummy_pubkey(),
+            Hash { values: [0; 5] },
+            signature
+        ));
+
+        let mut sig = [1, 0, 0, 0, 0, 0, 0, 0];
+        sig[0] = 1 << 32;
+        let signature = signature_with([1, 0, 0, 0, 0, 0, 0, 0], sig);
+        assert!(!schnorr_verify_digest(
+            dummy_pubkey(),
+            Hash { values: [0; 5] },
+            signature
+        ));
     }
 }

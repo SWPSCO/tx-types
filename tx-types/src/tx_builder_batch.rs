@@ -524,7 +524,8 @@ fn create_batch_spends_1(
 
             // === Build lock merkle proof ===
             // Build a merkle proof showing that the spend-condition is in the lock tree
-            let lmp = build_lock_merkle_proof(input_lock.clone(), 1);
+            let lmp =
+                build_lock_merkle_proof(input_lock.clone(), 1, crate::fee_calculator::BYTHOS_PHASE);
 
             // Create witness with proper lock merkle proof
             let witness = Witness {
@@ -564,12 +565,12 @@ fn create_batch_spends_1(
 
 fn lock_hash(spend_condition: &SpendCondition) -> Hash {
     let hashable = spend_condition.to_hashable();
-    hash_hashable(&hashable)
+    hash_hashable(&hashable).expect("spend-condition hashable is u64-based")
 }
 
 fn note_hash_v0(note: &NNoteV0) -> Hash {
     let hashable = note.to_hashable();
-    hash_hashable(&hashable)
+    hash_hashable(&hashable).expect("v0 note hashable is u64-based")
 }
 
 fn note_hash_v1(note: &NNoteV1) -> Hash {
@@ -793,7 +794,8 @@ fn create_unsigned_batch_spends_1(
 
             // === Build lock merkle proof ===
             // Build a merkle proof showing that the spend-condition is in the lock tree
-            let lmp = build_lock_merkle_proof(input_lock.clone(), 1);
+            let lmp =
+                build_lock_merkle_proof(input_lock.clone(), 1, crate::fee_calculator::BYTHOS_PHASE);
 
             // Create witness with proper lock merkle proof
             let witness = Witness {

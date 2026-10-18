@@ -142,7 +142,13 @@ fn main() {
         let (signed_spends, spends_signed) =
             sign_spends_v1(raw_tx.spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
         raw_tx.spends = signed_spends;
-        let tx_id_hash = compute_tx_id_v1(&raw_tx.spends);
+        let tx_id_hash = match compute_tx_id_v1(&raw_tx.spends) {
+            Ok(hash) => hash,
+            Err(err) => {
+                eprintln!("error: failed to compute tx id: {err}");
+                std::process::exit(1);
+            }
+        };
         raw_tx.id = tx_id_hash.clone();
 
         let out_bytes = jam_to_vec(&raw_tx);
@@ -156,7 +162,13 @@ fn main() {
     } else if let Ok(spends) = SpendsV1::from_noun(&noun, &space) {
         let (signed_spends, spends_signed) =
             sign_spends_v1(spends, &signing_key, &schnorr_pubkey, &pubkey_hash);
-        let tx_id_hash = compute_tx_id_v1(&signed_spends);
+        let tx_id_hash = match compute_tx_id_v1(&signed_spends) {
+            Ok(hash) => hash,
+            Err(err) => {
+                eprintln!("error: failed to compute tx id: {err}");
+                std::process::exit(1);
+            }
+        };
 
         let out_bytes = jam_to_vec(&signed_spends);
         let report = vec![
@@ -230,7 +242,10 @@ fn sign_spend_in_place(
         return false;
     }
 
-    let sig_hash = spend.body.sig_hash();
+    let sig_hash = spend
+        .body
+        .sig_hash()
+        .expect("spend signature hashable is u64-based");
     let (chal, sig) = schnorr_sign_digest(signing_key.clone(), schnorr_pubkey.clone(), sig_hash);
     let schnorr_sig = SchnorrSignature {
         chal: Chal { values: chal },

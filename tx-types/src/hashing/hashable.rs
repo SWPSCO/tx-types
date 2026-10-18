@@ -164,7 +164,7 @@ impl Hashable {
                 let mut cue_slab: NounSlab = NounSlab::new();
                 let value_noun = cue_slab
                     .cue_into(Bytes::copy_from_slice(bytes))
-                    .unwrap_or_else(|_| D(0));
+                    .expect("Hashable::Leaf must contain valid jam bytes");
                 let cue_space = cue_slab.noun_space();
                 let copied = slab.copy_into(value_noun, &cue_space);
                 T(slab, &[tag, copied])
@@ -188,6 +188,37 @@ impl Hashable {
                 }
                 T(slab, &[tag, tail])
             }
+        }
+    }
+
+    /// Reject leaves whose stored jam bytes cannot be decoded, so hashing can
+    /// return a real error instead of a fabricated digest.
+    pub(crate) fn validate_leaves(&self) -> Result<(), crate::hashing::tip5::Tip5Error> {
+        use crate::hashing::tip5::Tip5Error;
+
+        match self {
+            Hashable::Leaf(bytes) => {
+                let mut slab: NounSlab = NounSlab::new();
+                slab.cue_into(Bytes::copy_from_slice(bytes))
+                    .map(|_| ())
+                    .map_err(|err| {
+                        Tip5Error::SerializationError(format!(
+                            "Hashable::Leaf contains invalid jam bytes: {:?}",
+                            err
+                        ))
+                    })
+            }
+            Hashable::Cell(left, right) => {
+                left.validate_leaves()?;
+                right.validate_leaves()
+            }
+            Hashable::List(items) => {
+                for item in items {
+                    item.validate_leaves()?;
+                }
+                Ok(())
+            }
+            Hashable::Hash(_) => Ok(()),
         }
     }
 

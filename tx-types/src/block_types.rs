@@ -1,5 +1,6 @@
 use crate::collections::zmap::ZMap;
 use crate::collections::zset::ZSet;
+use crate::fee_calculator::BYTHOS_PHASE;
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
 use crate::transaction_types::*;
@@ -36,7 +37,7 @@ impl Coinbase {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("coinbase hashable is u64-based")
     }
 }
 
@@ -69,7 +70,7 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 
     let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
 
-    let lmp = build_lock_merkle_proof(lk, 1);
+    let lmp = build_lock_merkle_proof(lk, 1, BYTHOS_PHASE);
     let root = lmp.proof().root.clone();
 
     NName::new_v1(
@@ -81,8 +82,22 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
     )
 }
 
-pub fn build_lock_merkle_proof(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
-    build_lock_merkle_proof_full(form, leaf_number)
+/// Build a lock merkle proof appropriate for the given page.
+///
+/// Hoon rejects a `%full` proof before Bythos activation
+/// (`check-context.check: (gte now bythos-phase)`), so choose the stub form
+/// below `BYTHOS_PHASE` and the full form at/after it. Callers that know the
+/// current chain height should pass it here.
+pub fn build_lock_merkle_proof(
+    form: SpendCondition,
+    leaf_number: u64,
+    page: u64,
+) -> LockMerkleProof {
+    if page >= BYTHOS_PHASE {
+        build_lock_merkle_proof_full(form, leaf_number)
+    } else {
+        build_lock_merkle_proof_stub(form, leaf_number)
+    }
 }
 
 pub fn build_lock_merkle_proof_stub(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
@@ -145,7 +160,7 @@ fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
     match node {
         // Base case: non-cell node (Leaf, Hash, or List)
         Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => {
-            let root = hash_hashable(node);
+            let root = hash_hashable(node).expect("lock hashable is u64-based");
             (root, Vec::new(), 1)
         }
 
@@ -156,7 +171,7 @@ fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
             if index <= lc {
                 // The target leaf is in the left subtree
                 let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(left, index);
-                let sibling = hash_hashable(right);
+                let sibling = hash_hashable(right).expect("lock hashable is u64-based");
 
                 // Combine the recursive root with the sibling
                 let root = hash_ten_cell(rec_root, sibling.clone());
@@ -171,7 +186,7 @@ fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
             } else {
                 // The target leaf is in the right subtree
                 let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(right, index - lc);
-                let sibling = hash_hashable(left);
+                let sibling = hash_hashable(left).expect("lock hashable is u64-based");
 
                 // Combine sibling with the recursive root
                 let root = hash_ten_cell(sibling.clone(), rec_root);
@@ -230,7 +245,7 @@ impl TransactionIds {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("coinbase hashable is u64-based")
     }
 }
 
@@ -250,7 +265,7 @@ impl EpochCounter {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("coinbase hashable is u64-based")
     }
 }
 
@@ -280,7 +295,7 @@ impl PageMsg {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("coinbase hashable is u64-based")
     }
 }
 
@@ -567,6 +582,7 @@ impl PageV0 {
     /// This is the hash of the block commitment structure (everything after PoW)
     pub fn hash_block_commitment(&self) -> Hash {
         hash_hashable(&self.to_hashable_block_commitment())
+            .expect("block-commitment hashable is u64-based")
     }
 }
 

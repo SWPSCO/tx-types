@@ -158,6 +158,7 @@ impl Tip5Hasher {
 
     /// Hash a Hashable structure using the TIP5 jet.
     pub fn hash_hashable(hashable: &crate::hashing::hashable::Hashable) -> Result<Hash, Tip5Error> {
+        hashable.validate_leaves()?;
         let mut slab: NounSlab = NounSlab::new();
         let noun = hashable.to_noun(&mut slab);
         slab.set_root(noun);

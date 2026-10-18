@@ -26,6 +26,7 @@ use crate::collections::{ZMap, ZSet};
 use crate::generic_noun::UntypedNoun;
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
+use crate::hashing::tip5::Tip5Error;
 use crate::signer::schnorr_sign_digest;
 use crate::transaction_types::*;
 use crate::transaction_types_v0::*;
@@ -475,7 +476,7 @@ pub fn create_spends_0(
 
         // Add gift seed (lines 99-106)
         if gift_portion > 0 {
-            let lock_root = hash_hashable(&output_lock.to_hashable());
+            let lock_root = hash_hashable(&output_lock.to_hashable()).map_err(|e| e.to_string())?;
             let parent_hash = note.to_hash();
 
             let gift_seed = SeedV1 {
@@ -788,7 +789,7 @@ pub fn create_spends_1(
         // =?  seeds  (gth gift-portion 0)
         if gift_portion > 0 {
             // Compute lock root hash for the output lock
-            let lock_root = hash_hashable(&output_lock.to_hashable());
+            let lock_root = hash_hashable(&output_lock.to_hashable()).map_err(|e| e.to_string())?;
 
             // Get parent hash (hash of the note being spent)
             let parent_hash = note.name.to_hash();
@@ -829,7 +830,8 @@ pub fn create_spends_1(
         // Build a merkle proof showing that the spend-condition is in the lock tree
         // =/  lmp=lock-merkle-proof:transact
         //   (build-lock-merkle-proof:lock:transact p.input-lock 1)
-        let lmp = build_lock_merkle_proof(input_lock.clone(), 1);
+        let lmp =
+            build_lock_merkle_proof(input_lock.clone(), 1, crate::fee_calculator::BYTHOS_PHASE);
 
         // === Create spend and witness === (lines 208-215)
         // Build the Spend1 structure with witness
@@ -942,7 +944,7 @@ fn create_refund(
     let note_data = NoteData { map: note_data_map };
 
     // Calculate lock root hash
-    let lock_root = hash_hashable(&lok.to_hashable());
+    let lock_root = hash_hashable(&lok.to_hashable()).expect("refund lock hashable is u64-based");
 
     // Get parent hash
     let parent_hash = note.name.to_hash();
@@ -991,7 +993,7 @@ pub fn sign_spend_v1(
 ) -> Result<Spend, String> {
     // Calculate the signature hash for the spend
     // In Hoon: (sig-hash:spend:v1 sp)
-    let sig_hash = compute_spend_v1_sig_hash(&spend_body);
+    let sig_hash = compute_spend_v1_sig_hash(&spend_body).map_err(|e| e.to_string())?;
 
     // Sign the hash using Schnorr signature
     let (chal_t8, sig_t8) = schnorr_sign_digest(sign_key, pubkey.clone(), sig_hash);
@@ -1037,11 +1039,11 @@ pub fn sign_spend_v1(
 ///   %-  hash-hashable:tip5
 ///   [(sig-hashable:seeds seeds.sen) leaf+fee.sen]
 /// ```
-fn compute_spend_v1_sig_hash(spend: &SpendV1) -> Hash {
+fn compute_spend_v1_sig_hash(spend: &SpendV1) -> Result<Hash, Tip5Error> {
     use crate::hashing::hasher::hash_hashable;
 
     // Get the sig-hashable for seeds
-    let seeds_hashable = spend.seeds.to_sig_hashable();
+    let seeds_hashable = spend.seeds.to_sig_hashable()?;
 
     // Create the fee leaf
     let fee_hashable = spend.fee.to_hashable();
@@ -1109,7 +1111,7 @@ fn create_refund_v0_to_v1(
     let note_data = NoteData { map: note_data_map };
 
     // Calculate lock root hash
-    let lock_root = hash_hashable(&lok.to_hashable());
+    let lock_root = hash_hashable(&lok.to_hashable()).expect("refund lock hashable is u64-based");
 
     // Get parent hash
     let parent_hash = note.to_hash();
@@ -1153,7 +1155,7 @@ pub fn sign_spend_v0_to_v1(
     pubkey: SchnorrPubkey,
 ) -> Result<Spend, String> {
     // Calculate the signature hash using the SpendV0ToV1's method
-    let sig_hash = spend_body.compute_sig_hash();
+    let sig_hash = spend_body.compute_sig_hash().map_err(|e| e.to_string())?;
 
     // Sign the hash using Schnorr signature
     let (chal_t8, sig_t8) = schnorr_sign_digest(sign_key, pubkey.clone(), sig_hash);

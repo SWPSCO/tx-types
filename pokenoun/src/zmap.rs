@@ -19,11 +19,16 @@ fn noun_is_null(noun: Noun, arena: &Arena) -> bool {
 
 fn nouns_equal(a: Noun, b: Noun, arena: &Arena) -> bool {
     match (a, b) {
-        (Noun::Atom(x), Noun::Atom(y)) => arena.atom_bytes(x) == arena.atom_bytes(y),
+        // Compare atoms by numeric value: jam allows non-minimal encodings
+        // (e.g. a trailing zero byte), and those must not split z-map keys.
+        (Noun::Atom(x), Noun::Atom(y)) => {
+            arena.atom_bytes_trimmed(x) == arena.atom_bytes_trimmed(y)
+        }
         (Noun::Cell(ac), Noun::Cell(bc)) => {
             let a_cell = arena.cell(ac);
             let b_cell = arena.cell(bc);
-            nouns_equal(a_cell.head, b_cell.head, arena) && nouns_equal(a_cell.tail, b_cell.tail, arena)
+            nouns_equal(a_cell.head, b_cell.head, arena)
+                && nouns_equal(a_cell.tail, b_cell.tail, arena)
         }
         _ => false,
     }
@@ -33,8 +38,8 @@ fn atom_less_than(a: Noun, b: Noun, arena: &Arena) -> bool {
     let (Noun::Atom(a), Noun::Atom(b)) = (a, b) else {
         return false;
     };
-    let ab = arena.atom_bytes(a);
-    let bb = arena.atom_bytes(b);
+    let ab = arena.atom_bytes_trimmed(a);
+    let bb = arena.atom_bytes_trimmed(b);
     if ab.len() != bb.len() {
         return ab.len() < bb.len();
     }
@@ -200,3 +205,51 @@ pub fn canonical_zmap_put(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn non_minimal_atom(arena: &mut Arena, bytes: &[u8]) -> Noun {
+        let off = arena.atom_data.len();
+        arena.atom_data.extend_from_slice(bytes);
+        arena.atom_data.push(0);
+        let id = arena.push_atom_slice(off as u32, (bytes.len() + 1) as u32);
+        Noun::Atom(id)
+    }
+
+    #[test]
+    fn nouns_equal_treats_non_minimal_atoms_as_equal() {
+        let mut arena = Arena::new();
+        let minimal = arena.alloc_atom_bytes(b"pkh");
+        let padded = non_minimal_atom(&mut arena, b"pkh");
+
+        assert!(nouns_equal(minimal, padded, &arena));
+    }
+
+    #[test]
+    fn canonical_zmap_put_does_not_split_equivalent_key_spellings() {
+        let mut arena = Arena::new();
+        let key = arena.alloc_atom_bytes(b"lock");
+        let other_key = non_minimal_atom(&mut arena, b"lock");
+        let value_a = arena.alloc_atom_u64(1);
+        let value_b = arena.alloc_atom_u64(2);
+
+        let empty = arena.atom0();
+        let map = canonical_zmap_put(&mut arena, empty, key, value_a).unwrap();
+        let map = canonical_zmap_put(&mut arena, map, other_key, value_b).unwrap();
+
+        // Same key slot (and balanced children) means the value was replaced,
+        // not inserted as a second entry.
+        let (node, left, right) = decompose_map(map, &arena).unwrap();
+        let (_, value) = decompose_pair(node, &arena).unwrap();
+        assert_eq!(
+            arena.atom_u64(match value {
+                Noun::Atom(id) => id,
+                _ => panic!("expected atom value"),
+            }),
+            Some(2)
+        );
+        assert!(noun_is_null(left, &arena));
+        assert!(noun_is_null(right, &arena));
+    }
+}

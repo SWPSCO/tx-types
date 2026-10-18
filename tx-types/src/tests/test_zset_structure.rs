@@ -87,7 +87,7 @@ mod tests {
         });
 
         // Compute the final hash
-        let set_hash = hash_hashable(&hashable);
+        let set_hash = hash_hashable(&hashable).expect("z-set hashable is u64-based");
         println!("Final ZSet hash: {:016x?}", set_hash.values);
 
         // Print the tree structure

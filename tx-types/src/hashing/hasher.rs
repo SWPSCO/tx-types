@@ -1,6 +1,7 @@
 /// Core hashing functions for the transaction hashing system
 /// Implements TIP5 hashing compatible with the Hoon implementation
 use super::hashable::Hashable;
+use super::tip5::Tip5Error;
 use crate::transaction_types::Hash;
 use nockapp::noun::slab::NounSlab;
 use nockvm::noun::NounAllocator;
@@ -15,26 +16,20 @@ pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
 ///
 /// This mirrors the Hoon hash-noun-varlen function where the input is
 /// a noun that gets hashed directly.
-pub fn hash_noun_varlen(data: &[u8]) -> Hash {
+pub fn hash_noun_varlen(data: &[u8]) -> Result<Hash, Tip5Error> {
     use super::tip5::Tip5Hasher;
     use nockapp::Bytes;
 
     let mut slab: NounSlab = NounSlab::new();
 
-    // Cue the jammed bytes back to a noun
+    // Cue the jammed bytes back to a noun.
     let noun = slab
         .cue_into(Bytes::copy_from_slice(data))
-        .unwrap_or_else(|_e| {
-            // If cue fails, return atom 0 as fallback
-            use nockvm::noun::Atom;
-            Atom::new(&mut slab, 0).as_noun()
-        });
+        .map_err(|e| Tip5Error::SerializationError(format!("failed to cue noun: {:?}", e)))?;
 
     // Use the real TIP5 hasher
     let space = slab.noun_space();
-    let result =
-        Tip5Hasher::hash_noun_varlen(noun, &space).unwrap_or_else(|_e| Hash { values: [0; 5] });
-    result
+    Tip5Hasher::hash_noun_varlen(noun, &space)
 }
 
 /// Hash two digests together (hash-ten-cell in Hoon).
@@ -59,13 +54,18 @@ pub fn hash_ten_cell(left: Hash, right: Hash) -> Hash {
         right.values[4],
     ];
 
-    Tip5Hasher::hash_10_from_values(&values).unwrap_or_else(|_| Hash { values: [0; 5] })
+    // `hash_10_from_values` is pure arithmetic over already-validated limbs
+    // and cannot fail; keep the infallible signature.
+    Tip5Hasher::hash_10_from_values(&values).expect("hash_10 over 5+5 u64 limbs is infallible")
 }
 
 /// Recursively hash a Hashable structure
-/// This mirrors the Hoon hash-hashable function
-pub fn hash_hashable(h: &Hashable) -> Hash {
-    super::tip5::Tip5Hasher::hash_hashable(h).unwrap_or_else(|_| Hash { values: [0; 5] })
+/// This mirrors the Hoon hash-hashable function.
+///
+/// Returns an error instead of a fabricated digest when a leaf cannot be
+/// decoded or contains an unbased atom (an atom that does not fit in a belt).
+pub fn hash_hashable(h: &Hashable) -> Result<Hash, Tip5Error> {
+    super::tip5::Tip5Hasher::hash_hashable(h)
 }
 
 /// Convert a digest to a base58 string (for display)
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn test_hash_hashable_leaf() {
         let h = Hashable::leaf_from_tas("test");
-        let digest = hash_hashable(&h);
+        let digest = hash_hashable(&h).expect("leaf must hash");
         // Just check it doesn't panic and produces a digest
         assert_eq!(digest.values.len(), 5);
     }
@@ -152,7 +152,7 @@ mod tests {
             Hashable::leaf_from_tas("left"),
             Hashable::leaf_from_tas("right"),
         );
-        let digest = hash_hashable(&h);
+        let digest = hash_hashable(&h).expect("cell must hash");
         assert_eq!(digest.values.len(), 5);
     }
 
@@ -162,7 +162,7 @@ mod tests {
             values: [1, 2, 3, 4, 5],
         };
         let h = Hashable::Hash(digest.clone());
-        let result = hash_hashable(&h);
+        let result = hash_hashable(&h).expect("precomputed hash must pass through");
         assert_eq!(result, digest);
     }
 

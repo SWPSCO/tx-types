@@ -95,7 +95,7 @@ mod tests {
         );
 
         // Compute the final hash
-        let map_hash = hash_hashable(&hashable);
+        let map_hash = hash_hashable(&hashable).expect("z-map hashable is u64-based");
         println!("Final ZMap hash: {:016x?}", map_hash.values);
 
         // Verify we have all 10 elements

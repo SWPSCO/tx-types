@@ -32,6 +32,15 @@ impl TransactionValidator {
     pub fn validate_transaction(
         transaction: &RawTransaction,
     ) -> Result<(), TransactionValidationError> {
+        // The checks below are V0-shaped. Returning Ok(()) for V1 would claim
+        // a validation that never happened, so fail closed until full V1
+        // validation (sig-hash, m-of-n, hax preimages, Bythos LMP gate) lands.
+        if let RawTransaction::V1(_) = transaction {
+            return Err(TransactionValidationError::UnsupportedVersion(
+                "V1 transaction validation is not implemented".to_string(),
+            ));
+        }
+
         // 1. Validate all signatures
         Self::validate_signatures(transaction)?;
 
@@ -291,6 +300,8 @@ pub enum TransactionValidationError {
     InvalidTimelock(String),
     /// Invalid fee amount
     InvalidFee(String),
+    /// The transaction version cannot be validated by this validator
+    UnsupportedVersion(String),
     /// General validation error
     ValidationError(String),
 }
@@ -308,6 +319,9 @@ impl std::fmt::Display for TransactionValidationError {
                 write!(f, "Invalid timelock: {}", msg)
             }
             TransactionValidationError::InvalidFee(msg) => write!(f, "Invalid fee: {}", msg),
+            TransactionValidationError::UnsupportedVersion(msg) => {
+                write!(f, "Unsupported transaction version: {}", msg)
+            }
             TransactionValidationError::ValidationError(msg) => {
                 write!(f, "Validation error: {}", msg)
             }
@@ -316,6 +330,28 @@ impl std::fmt::Display for TransactionValidationError {
 }
 
 impl std::error::Error for TransactionValidationError {}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+    use crate::collections::ZMap;
+    use crate::transaction_types::Hash;
+    use crate::transaction_types_v1::{RawTransactionV1, SpendsV1};
+
+    #[test]
+    fn validate_transaction_rejects_v1_as_unsupported() {
+        let tx = RawTransaction::V1(RawTransactionV1 {
+            version: 1,
+            id: Hash { values: [0; 5] },
+            spends: SpendsV1 { map: ZMap::new() },
+        });
+
+        match TransactionValidator::validate_transaction(&tx) {
+            Err(TransactionValidationError::UnsupportedVersion(_)) => {}
+            other => panic!("expected UnsupportedVersion, got {other:?}"),
+        }
+    }
+}
 
 #[cfg(all(test, feature = "legacy-tests"))]
 mod tests {

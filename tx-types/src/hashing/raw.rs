@@ -6,6 +6,10 @@ use nockapp::noun::slab::NounSlab;
 use nockvm::noun::{CellHandle, Noun, NounSpace};
 use noun_serde::{NounDecode, NounDecodeError};
 
+fn tip5_decode_error(err: crate::hashing::tip5::Tip5Error) -> NounDecodeError {
+    NounDecodeError::Custom(format!("tip5 hashing failed: {}", err))
+}
+
 fn noun_to_hex(noun: Noun, space: &NounSpace) -> String {
     let mut slab: NounSlab = NounSlab::new();
     let copy = slab.copy_into(noun, space);
@@ -97,7 +101,8 @@ fn hashable_seed_regular_from_noun(
     let gift = tail3.head().noun();
     let parent_hash = Hash::from_noun(&tail3.tail().noun(), space)?;
 
-    let note_data_hash = hash_hashable(&hashable_note_data_from_noun(note_data, space)?);
+    let note_data_hash = hash_hashable(&hashable_note_data_from_noun(note_data, space)?)
+        .map_err(tip5_decode_error)?;
     let gift_leaf = hashable_leaf_from_noun(gift, space);
 
     Ok(Hashable::cell(
@@ -159,9 +164,11 @@ fn hashable_hax_from_noun(noun: Noun, space: &NounSpace) -> Result<Hashable, Nou
 fn hashable_witness_from_noun(noun: Noun, space: &NounSpace) -> Result<Hashable, NounDecodeError> {
     let (lmp_noun, pkh_noun, hax_noun, tim_noun) = split_witness_noun(noun, space)?;
     let lmp = LockMerkleProof::from_noun(&lmp_noun, space)?;
-    let hax_hash = hash_hashable(&hashable_hax_from_noun(hax_noun, space)?);
+    let hax_hash =
+        hash_hashable(&hashable_hax_from_noun(hax_noun, space)?).map_err(tip5_decode_error)?;
     let tim_leaf = hashable_leaf_from_noun(tim_noun, space);
-    let pkh_hash = hash_hashable(&hashable_pkh_signature_from_noun(pkh_noun, space)?);
+    let pkh_hash = hash_hashable(&hashable_pkh_signature_from_noun(pkh_noun, space)?)
+        .map_err(tip5_decode_error)?;
 
     Ok(Hashable::cell_chain([
         Hashable::Hash(lmp.to_hash()),
@@ -336,5 +343,5 @@ pub fn compute_tx_id_v1_from_raw_noun(
     let spends_hashable = hashable_spends_from_noun(spends_noun, space)?;
     let version_leaf = Hashable::leaf_from_atom(1u64.to_le_bytes());
     let hashable = Hashable::cell(version_leaf, spends_hashable);
-    Ok(hash_hashable(&hashable))
+    hash_hashable(&hashable).map_err(tip5_decode_error)
 }

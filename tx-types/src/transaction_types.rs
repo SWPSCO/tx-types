@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::collections::{ZMap, ZSet};
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
-use crate::hashing::tip5::Tip5Hasher;
+use crate::hashing::tip5::{Tip5Error, Tip5Hasher};
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
 
@@ -116,23 +116,40 @@ impl Hash {
     /// Convert base58 encoded string to Hash
     /// Implements the Hoon from-b58 function:
     /// ++  from-b58  |=(=cord `form`(atom-to-digest:tip5 (de-base58 (trip cord))))
+    ///
+    /// Decoding requires exactly five base-p limbs (so the value is in the
+    /// tip5 domain) and the canonical base58 spelling. Values with a non-zero
+    /// sixth quotient and aliases such as a leading `1` (zero byte) are
+    /// rejected instead of being silently truncated or re-encoded.
     pub fn from_b58(base58: &str) -> Result<Self, String> {
         use crate::hashing::u320::U320;
 
-        let n = U320::from_base58(base58).map_err(|e| format!("Invalid base58: {}", e))?;
+        let mut quotient =
+            U320::from_base58(base58).map_err(|e| format!("Invalid base58: {}", e))?;
 
-        // Four divmods by p: collect remainders a..d; final quotient e
-        let (q1, a) = n.divrem_p();
-        let (q2, b) = q1.divrem_p();
-        let (q3, c) = q2.divrem_p();
-        let (e_q, d) = q3.divrem_p();
-        let e = e_q
-            .as_single_u64()
-            .map_err(|e| format!("Hash value too large: {}", e))?;
+        // Exactly five divmods by p. Anything left over after five limbs is
+        // outside the tip5 digest domain.
+        let mut values = [0u64; 5];
+        for value in &mut values {
+            let (next, remainder) = quotient.divrem_p();
+            *value = remainder;
+            quotient = next;
+        }
 
-        Ok(Hash {
-            values: [a, b, c, d, e],
-        })
+        if quotient.as_single_u64().unwrap_or(1) != 0 {
+            return Err("Hash value too large: value does not fit in five base-p limbs".into());
+        }
+
+        let hash = Hash { values };
+
+        // Reject non-canonical spellings (for example a leading '1' zero
+        // byte) that decode to the same limbs. Without this check distinct
+        // strings would alias the same digest.
+        if hash.to_b58() != base58 {
+            return Err("Non-canonical base58 encoding".into());
+        }
+
+        Ok(hash)
     }
 
     /// Convert Hash to base58 encoded string
@@ -201,7 +218,7 @@ impl NName {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("NName hashable is u64-based")
     }
 
     // TODO: implement v1 hashing
@@ -234,12 +251,10 @@ impl NName {
             Hashable::Hash(owners.to_hash()),
             Hashable::null(),
         ]);
-        hash_hashable(&hashable)
+        hash_hashable(&hashable).expect("first_v0 hashable is u64-based")
     }
-
     /// Compute the last hash component of an NName
     /// Based on Hoon implementation:
-    /// |=  [=source =timelock]
     /// %-  hash-hashable:tip5
     /// :*  leaf+&                          :: outcome of second pact
     ///     (hashable:^source source)       :: source of note
@@ -253,7 +268,7 @@ impl NName {
             Hashable::Hash(timelock.to_hash()),
             Hashable::null(),
         ]);
-        hash_hashable(&hashable)
+        hash_hashable(&hashable).expect("last_v0 hashable is u64-based")
     }
 
     pub fn new_v1(lock: Hash, source: Source) -> Self {
@@ -267,6 +282,7 @@ impl NName {
         // & (loobean true/yes) = 0, so leaf+& = leaf+0 = Hashable::null()
         let loobean_yes = Hashable::null();
         hash_hashable(&Hashable::cell(loobean_yes, Hashable::Hash(lock)))
+            .expect("first_v1 hashable is u64-based")
     }
 
     pub fn last_v1(source: Source) -> Hash {
@@ -278,6 +294,7 @@ impl NName {
             source.to_hashable(),
             Hashable::null(),
         ]))
+        .expect("last_v1 hashable is u64-based")
     }
 
     pub fn display(&self) -> Vec<String> {
@@ -296,7 +313,7 @@ impl Timelock {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("timelock hashable is u64-based")
     }
 }
 
@@ -387,7 +404,7 @@ impl TimelockRange {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("timelock-range hashable is u64-based")
     }
 }
 // F6LT is a 6-element field type (a0-a5 in Hoon)
@@ -465,7 +482,7 @@ impl SchnorrPubkey {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("schnorr-pubkey hashable is u64-based")
     }
 
     /// Convert base58 encoded string to SchnorrPubkey
@@ -680,7 +697,7 @@ impl Lock {
             let pubkey_noun = pubkey.to_noun(&mut slab);
             let space = slab.noun_space();
             let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun, &space)
-                .unwrap_or_else(|_| Hash { values: [0; 5] });
+                .expect("schnorr pubkey noun is u64-based");
             Hashable::Hash(pubkey_hash)
         });
 
@@ -692,7 +709,7 @@ impl Lock {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("lock hashable is u64-based")
     }
 
     /// Convert base58 encoded multisig parameters to Lock
@@ -785,7 +802,7 @@ impl Source {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("source hashable is u64-based")
     }
 }
 
@@ -797,9 +814,9 @@ pub enum NNote {
 }
 
 impl NNote {
-    pub fn to_hash(&self) -> Hash {
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
         match self {
-            NNote::V0(v0) => v0.to_hash(),
+            NNote::V0(v0) => Ok(v0.to_hash()),
             NNote::V1(v1) => v1.to_hash(),
         }
     }
@@ -852,7 +869,7 @@ impl SchnorrSignature {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("schnorr-signature hashable is u64-based")
     }
 }
 // signature structure
@@ -898,14 +915,14 @@ impl Spend {
     ///     %1  [leaf+%1 (hashable:spend-1 +.form)]
     ///   ==
     /// ```
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         let version_leaf = Hashable::leaf_from_atom(&self.version.to_le_bytes());
 
         // Pair with the body's hashable: [version-leaf body-hashable]
-        Hashable::cell(version_leaf, self.body.to_hashable())
+        Ok(Hashable::cell(version_leaf, self.body.to_hashable()?))
     }
-    pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
+        hash_hashable(&self.to_hashable()?)
     }
 }
 
@@ -947,19 +964,19 @@ impl NounDecode for SpendBody {
 }
 
 impl SpendBody {
-    pub fn to_hashable(&self) -> Hashable {
+    pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         match self {
-            SpendBody::V0(v) => v.to_hashable(),
+            SpendBody::V0(v) => Ok(v.to_hashable()),
             SpendBody::V0ToV1(v) => v.to_hashable(),
             SpendBody::V1(v) => v.to_hashable(),
         }
     }
-    pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+    pub fn to_hash(&self) -> Result<Hash, Tip5Error> {
+        hash_hashable(&self.to_hashable()?)
     }
-    pub fn sig_hash(&self) -> Hash {
+    pub fn sig_hash(&self) -> Result<Hash, Tip5Error> {
         match self {
-            SpendBody::V0(v) => v.sig_hash(),
+            SpendBody::V0(v) => Ok(v.sig_hash()),
             SpendBody::V0ToV1(v) => v.compute_sig_hash(),
             SpendBody::V1(v) => v.compute_sig_hash(),
         }
@@ -1001,7 +1018,7 @@ impl Input {
         }
     }
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("input hashable is u64-based")
     }
     pub fn calculate_timelock_range(&self) -> (Option<u64>, Option<u64>) {
         match self {
@@ -1046,7 +1063,7 @@ impl Inputs {
         }
     }
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("inputs hashable is u64-based")
     }
 }
 

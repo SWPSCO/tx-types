@@ -1736,7 +1736,7 @@ mod tests {
         let inputs = Inputs { p: inputs_zmap };
 
         // Hash the inputs using the new to_hash() method
-        let computed_hash = inputs.to_hash();
+        let computed_hash = inputs.to_hash().expect("v0 inputs hashable is u64-based");
 
         // Expected hash from Hoon
         let expected_hash = Hash {

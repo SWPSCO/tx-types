@@ -29,7 +29,7 @@ impl NNoteV0 {
         let hashable = self.to_hashable();
 
         // Hash the structure
-        hash_hashable(&hashable)
+        hash_hashable(&hashable).expect("v0 hashable is u64-based")
     }
 
     pub fn to_hashable(&self) -> Hashable {
@@ -40,16 +40,27 @@ impl NNoteV0 {
             Hashable::triple(
                 Hashable::leaf_from_atom(&self.meta.version.to_le_bytes()),
                 self.meta.origin_page.to_hashable(),
-                Hashable::Hash(hash_hashable(&self.meta.timelock.to_hashable())),
+                Hashable::Hash(
+                    hash_hashable(&self.meta.timelock.to_hashable())
+                        .expect("v0 timelock hashable is u64-based"),
+                ),
             ),
             // Second part: [name-hash lock-hash source-hash assets]
             // Note: In Hoon this is a quad (4-element structure)
             Hashable::cell(
-                Hashable::Hash(hash_hashable(&self.name.to_hashable())),
+                Hashable::Hash(
+                    hash_hashable(&self.name.to_hashable()).expect("v0 name hashable is u64-based"),
+                ),
                 Hashable::cell(
-                    Hashable::Hash(hash_hashable(&self.lock.to_hashable())),
+                    Hashable::Hash(
+                        hash_hashable(&self.lock.to_hashable())
+                            .expect("v0 lock hashable is u64-based"),
+                    ),
                     Hashable::cell(
-                        Hashable::Hash(hash_hashable(&self.source.to_hashable())),
+                        Hashable::Hash(
+                            hash_hashable(&self.source.to_hashable())
+                                .expect("v0 source hashable is u64-based"),
+                        ),
                         self.assets.to_hashable(),
                     ),
                 ),
@@ -91,7 +102,7 @@ impl SeedV0 {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based")
     }
 
     pub fn to_sig_hashable(&self) -> Hashable {
@@ -155,7 +166,7 @@ impl SeedsV0 {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based")
     }
 }
 
@@ -176,7 +187,7 @@ impl Signature {
     pub fn to_hash(&self) -> Hash {
         match self.to_hashable() {
             Hashable::Hash(h) => h,
-            _ => hash_hashable(&self.to_hashable()),
+            _ => hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based"),
         }
     }
 }
@@ -201,12 +212,12 @@ impl SpendV0 {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based")
     }
 
     pub fn sig_hash(&self) -> Hash {
         let sig_hashable = Hashable::cell(self.seeds.to_sig_hashable(), self.fee.to_hashable());
-        hash_hashable(&sig_hashable)
+        hash_hashable(&sig_hashable).expect("v0 signature hashable is u64-based")
     }
 }
 
@@ -222,7 +233,7 @@ impl InputV0 {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based")
     }
 
     pub fn calculate_timelock_range(&self) -> (Option<u64>, Option<u64>) {
@@ -285,7 +296,7 @@ impl InputsV0 {
     }
 
     pub fn to_hash(&self) -> Hash {
-        hash_hashable(&self.to_hashable())
+        hash_hashable(&self.to_hashable()).expect("v0 hashable is u64-based")
     }
 }
 

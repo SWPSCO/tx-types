@@ -16,6 +16,7 @@
 extern crate alloc;
 
 use crate::collections::ZMap;
+use crate::generic_noun::UntypedNoun;
 #[cfg(test)]
 use crate::hashing::hashable::Hashable;
 use crate::transaction_types::{Coins, Hash, NName, Spend, SpendBody};
@@ -128,8 +129,34 @@ fn count_seeds_v1_words(seeds: &SeedsV1) -> u64 {
         .sum()
 }
 
+/// Count note-data words exactly as Hoon does:
+/// `num-of-leaves:shape (~(rep z-by note-data) |=([[k v] tree] [k v tree]))`.
+///
+/// The fold builds `[k1 v1 [k2 v2 ... [kn vn ~]]]`, so each entry contributes
+/// one word for its key plus the leaves of its value, and the terminal `~`
+/// contributes one more word. Counting the z-map noun itself would add the
+/// internal `[node left right]` cells and overcharge by one word per entry.
 fn count_note_data_words(note_data: &NoteData) -> u64 {
-    count_leaves_from_encoder(|slab| note_data.to_noun(slab))
+    let mut total = 1; // terminal ~
+    for (_key, value) in note_data.map.tap() {
+        total += 1; // key
+        total += count_untyped_noun_leaves(&value);
+    }
+    total
+}
+
+/// Count the leaves of an `UntypedNoun` value. Values stored in note-data are
+/// arbitrary nouns, so recurse through cells rather than treating the value as
+/// a single atom. A value that cannot be cued is counted as one atom.
+fn count_untyped_noun_leaves(value: &UntypedNoun) -> u64 {
+    let mut slab = NounSlab::<NockJammer>::new();
+    match slab.cue_into(value.p.clone()) {
+        Ok(noun) => {
+            let space = slab.noun_space();
+            count_leaves_from_noun(noun, &space)
+        }
+        Err(_) => 1,
+    }
 }
 
 fn count_witness_words(spends: &ZMap<NName, Spend>) -> u64 {
@@ -223,6 +250,34 @@ mod tests {
             alloc::boxed::Box::new(Hashable::Leaf(Vec::new())),
         );
         assert_eq!(count_leaves(&nested), 3);
+    }
+
+    #[test]
+    fn test_count_note_data_words_matches_hoon_rep_shape() {
+        // Empty note-data: just the terminal ~.
+        let empty = NoteData { map: ZMap::new() };
+        assert_eq!(count_note_data_words(&empty), 1);
+
+        // One entry: key + value + terminal ~ = 3 words (not the z-map noun's 4).
+        let one = note_data(&[("alpha", 1)]);
+        assert_eq!(count_note_data_words(&one), 3);
+
+        // Two entries: 2 * (key + atom value) + terminal ~ = 5 words
+        // (the z-map noun would count 7).
+        let two = note_data(&[("alpha", 1), ("beta", 2)]);
+        assert_eq!(count_note_data_words(&two), 5);
+    }
+
+    #[test]
+    fn test_note_data_words_count_value_cell_leaves() {
+        // A cell value contributes one word per leaf of the value noun.
+        let mut map = ZMap::new();
+        map.put("cell".to_string(), untyped_cell(1, 2));
+        let data = NoteData { map };
+        assert_eq!(
+            count_note_data_words(&data),
+            1 /* terminal */ + 1 /* key */ + 2
+        );
     }
 
     #[test]
@@ -362,6 +417,13 @@ mod tests {
         let mut slab = NounSlab::<NockJammer>::new();
         let space = slab.noun_space();
         slab.copy_into(D(value), &space);
+        UntypedNoun { p: slab.jam() }
+    }
+
+    fn untyped_cell(head: u64, tail: u64) -> UntypedNoun {
+        let mut slab = NounSlab::<NockJammer>::new();
+        let noun = nockvm::noun::T(&mut slab, &[D(head), D(tail)]);
+        slab.set_root(noun);
         UntypedNoun { p: slab.jam() }
     }
 }

@@ -1,3 +1,4 @@
+use crate::hashing::tip5::Tip5Error;
 use crate::hashing::tip5::Tip5Hasher;
 use ibig::UBig;
 use nockvm::noun::D;
@@ -60,57 +61,71 @@ where
         ZMap { root: None }
     }
 
-    /// Insert a key-value pair, maintaining treap invariants
+    /// Insert a key-value pair, maintaining treap invariants.
+    ///
+    /// Panics if the key's noun cannot be TIP5-hashed (for example an atom
+    /// that does not fit in a belt). Use [`Self::try_put`] to handle that.
     pub fn put(&mut self, key: K, value: V) {
-        self.root = Self::put_recursive(self.root.take(), key, value);
+        self.try_put(key, value)
+            .unwrap_or_else(|e| panic!("z-map key could not be tip5-hashed: {}", e));
+    }
+
+    /// Fallible insertion; see [`Self::put`].
+    pub fn try_put(&mut self, key: K, value: V) -> Result<(), Tip5Error> {
+        self.root = Self::put_recursive(self.root.take(), key, value)?;
+        Ok(())
     }
 
     /// Recursive insertion with rotations
-    fn put_recursive(node: Option<Box<Node<K, V>>>, key: K, value: V) -> Option<Box<Node<K, V>>> {
+    fn put_recursive(
+        node: Option<Box<Node<K, V>>>,
+        key: K,
+        value: V,
+    ) -> Result<Option<Box<Node<K, V>>>, Tip5Error> {
         match node {
             None => {
                 // Empty node, create new
-                Some(Box::new(Node::new(key, value)))
+                Ok(Some(Box::new(Node::new(key, value))))
             }
             Some(mut n) => {
-                let cmp = Self::gor_tip(&key, &n.key);
+                let cmp = Self::gor_tip(&key, &n.key)?;
 
                 match cmp {
                     Ordering::Equal => {
                         // Key exists, update value
                         n.value = value;
-                        Some(n)
+                        Ok(Some(n))
                     }
                     Ordering::Less => {
                         // Insert left
-                        n.left = Self::put_recursive(n.left, key, value);
+                        n.left = Self::put_recursive(n.left, key, value)?;
 
                         // Check if rotation needed (mor-tip comparison)
-                        if let Some(ref left_child) = n.left {
-                            if Self::mor_tip(&n.key, &left_child.key) != Ordering::Less {
+                        if let Some(left_child) = &n.left {
+                            if Self::mor_tip(&n.key, &left_child.key)? != Ordering::Less {
                                 // Left child has higher priority, rotate right
-                                Some(Self::rotate_right(n))
+                                Ok(Some(Self::rotate_right(n)))
                             } else {
-                                Some(n)
+                                Ok(Some(n))
                             }
                         } else {
-                            Some(n)
+                            Ok(Some(n))
                         }
                     }
                     Ordering::Greater => {
                         // Insert right
-                        n.right = Self::put_recursive(n.right, key, value);
+                        n.right = Self::put_recursive(n.right, key, value)?;
 
                         // Check if rotation needed (mor-tip comparison)
-                        if let Some(ref right_child) = n.right {
-                            if Self::mor_tip(&n.key, &right_child.key) != Ordering::Less {
+                        if let Some(right_child) = &n.right {
+                            if Self::mor_tip(&n.key, &right_child.key)? != Ordering::Less {
                                 // Right child has higher priority, rotate left
-                                Some(Self::rotate_left(n))
+                                Ok(Some(Self::rotate_left(n)))
                             } else {
-                                Some(n)
+                                Ok(Some(n))
                             }
                         } else {
-                            Some(n)
+                            Ok(Some(n))
                         }
                     }
                 }
@@ -154,48 +169,82 @@ where
         right
     }
 
-    /// Get a value by key
+    /// Get a value by key.
+    ///
+    /// Panics if the key's noun cannot be TIP5-hashed. Use [`Self::try_get`]
+    /// to handle that.
     pub fn get(&self, key: &K) -> Option<&V> {
+        self.try_get(key)
+            .unwrap_or_else(|e| panic!("z-map key could not be tip5-hashed: {}", e))
+    }
+
+    /// Fallible lookup; see [`Self::get`].
+    pub fn try_get(&self, key: &K) -> Result<Option<&V>, Tip5Error> {
         Self::get_recursive(&self.root, key)
     }
 
-    fn get_recursive<'a>(node: &'a Option<Box<Node<K, V>>>, key: &K) -> Option<&'a V> {
+    fn get_recursive<'a>(
+        node: &'a Option<Box<Node<K, V>>>,
+        key: &K,
+    ) -> Result<Option<&'a V>, Tip5Error> {
         match node {
-            None => None,
-            Some(n) => match Self::gor_tip(key, &n.key) {
-                Ordering::Equal => Some(&n.value),
+            None => Ok(None),
+            Some(n) => match Self::gor_tip(key, &n.key)? {
+                Ordering::Equal => Ok(Some(&n.value)),
                 Ordering::Less => Self::get_recursive(&n.left, key),
                 Ordering::Greater => Self::get_recursive(&n.right, key),
             },
         }
     }
 
-    /// Check if a key exists
+    /// Check if a key exists.
+    ///
+    /// Panics if the key's noun cannot be TIP5-hashed. Use [`Self::try_has`]
+    /// to handle that.
     pub fn has(&self, key: &K) -> bool {
-        self.get(key).is_some()
+        self.try_has(key)
+            .unwrap_or_else(|e| panic!("z-map key could not be tip5-hashed: {}", e))
     }
 
-    /// Delete a key from the tree
+    /// Fallible membership check; see [`Self::has`].
+    pub fn try_has(&self, key: &K) -> Result<bool, Tip5Error> {
+        Ok(self.try_get(key)?.is_some())
+    }
+
+    /// Delete a key from the tree.
+    ///
+    /// Panics if the key's noun cannot be TIP5-hashed. Use [`Self::try_del`]
+    /// to handle that.
     pub fn del(&mut self, key: &K) {
-        self.root = Self::del_recursive(self.root.take(), key);
+        self.try_del(key)
+            .unwrap_or_else(|e| panic!("z-map key could not be tip5-hashed: {}", e));
     }
 
-    fn del_recursive(node: Option<Box<Node<K, V>>>, key: &K) -> Option<Box<Node<K, V>>> {
+    /// Fallible deletion; see [`Self::del`].
+    pub fn try_del(&mut self, key: &K) -> Result<(), Tip5Error> {
+        self.root = Self::del_recursive(self.root.take(), key)?;
+        Ok(())
+    }
+
+    fn del_recursive(
+        node: Option<Box<Node<K, V>>>,
+        key: &K,
+    ) -> Result<Option<Box<Node<K, V>>>, Tip5Error> {
         match node {
-            None => None,
+            None => Ok(None),
             Some(mut n) => {
-                match Self::gor_tip(key, &n.key) {
+                match Self::gor_tip(key, &n.key)? {
                     Ordering::Equal => {
                         // Found node to delete, merge children
                         Self::merge_children(n.left, n.right)
                     }
                     Ordering::Less => {
-                        n.left = Self::del_recursive(n.left, key);
-                        Some(n)
+                        n.left = Self::del_recursive(n.left, key)?;
+                        Ok(Some(n))
                     }
                     Ordering::Greater => {
-                        n.right = Self::del_recursive(n.right, key);
-                        Some(n)
+                        n.right = Self::del_recursive(n.right, key)?;
+                        Ok(Some(n))
                     }
                 }
             }
@@ -206,21 +255,21 @@ where
     fn merge_children(
         left: Option<Box<Node<K, V>>>,
         right: Option<Box<Node<K, V>>>,
-    ) -> Option<Box<Node<K, V>>> {
+    ) -> Result<Option<Box<Node<K, V>>>, Tip5Error> {
         match (left, right) {
-            (None, None) => None,
-            (Some(l), None) => Some(l),
-            (None, Some(r)) => Some(r),
+            (None, None) => Ok(None),
+            (Some(l), None) => Ok(Some(l)),
+            (None, Some(r)) => Ok(Some(r)),
             (Some(mut l), Some(mut r)) => {
                 // Choose root based on mor-tip priority
-                if Self::mor_tip(&l.key, &r.key) == Ordering::Less {
+                if Self::mor_tip(&l.key, &r.key)? == Ordering::Less {
                     // l has higher priority (smaller mor-tip), make it root
-                    l.right = Self::merge_children(l.right, Some(r));
-                    Some(l)
+                    l.right = Self::merge_children(l.right, Some(r))?;
+                    Ok(Some(l))
                 } else {
                     // r has higher priority, make it root
-                    r.left = Self::merge_children(Some(l), r.left);
-                    Some(r)
+                    r.left = Self::merge_children(Some(l), r.left)?;
+                    Ok(Some(r))
                 }
             }
         }
@@ -254,9 +303,8 @@ where
     }
 
     /// Compute TIP5 hash of a key and convert to UBig integer
-    /// Returns a UBig representing the hash for comparison
-    fn compute_tip5_hash(key: &K) -> UBig {
-        use crate::transaction_types::Hash;
+    /// Returns a UBig representing the hash for comparison.
+    fn compute_tip5_hash(key: &K) -> Result<UBig, Tip5Error> {
         use nockapp::noun::slab::NounSlab;
 
         use nockvm::noun::NounAllocator;
@@ -267,41 +315,36 @@ where
         let space = slab.noun_space();
 
         // Compute the TIP5 hash
-        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
-
-        // Convert Hash to UBig using our new method
-        hash.to_ubig()
+        Tip5Hasher::hash_noun_varlen(key_noun, &space).map(|hash| hash.to_ubig())
     }
 
     /// gor-tip: Compare by single hash (UBig integer), fallback to dor-tip
-    fn gor_tip(a: &K, b: &K) -> Ordering {
-        let hash_a = Self::compute_tip5_hash(a);
-        let hash_b = Self::compute_tip5_hash(b);
+    fn gor_tip(a: &K, b: &K) -> Result<Ordering, Tip5Error> {
+        let hash_a = Self::compute_tip5_hash(a)?;
+        let hash_b = Self::compute_tip5_hash(b)?;
 
         // Compare the UBig integers
-        match hash_a.cmp(&hash_b) {
+        Ok(match hash_a.cmp(&hash_b) {
             Ordering::Equal => a.dor_tip(b),
             other => other,
-        }
+        })
     }
 
     /// mor-tip: Compare by double hash (hash of hash concatenated with itself), fallback to dor-tip
-    fn mor_tip(a: &K, b: &K) -> Ordering {
+    fn mor_tip(a: &K, b: &K) -> Result<Ordering, Tip5Error> {
         // Compute double-tip for each value
-        let double_a = Self::compute_double_tip5_hash(a);
-        let double_b = Self::compute_double_tip5_hash(b);
+        let double_a = Self::compute_double_tip5_hash(a)?;
+        let double_b = Self::compute_double_tip5_hash(b)?;
 
-        match double_a.cmp(&double_b) {
+        Ok(match double_a.cmp(&double_b) {
             Ordering::Equal => a.dor_tip(b),
             other => other,
-        }
+        })
     }
 
     /// Compute double-tip: hash(hash(value) ++ hash(value))
-    fn compute_double_tip5_hash(key: &K) -> UBig {
+    fn compute_double_tip5_hash(key: &K) -> Result<UBig, Tip5Error> {
         use crate::hashing::hasher::hash_ten_cell;
-        use crate::transaction_types::Hash;
         use nockapp::noun::slab::NounSlab;
 
         use nockvm::noun::NounAllocator;
@@ -311,14 +354,13 @@ where
         let key_noun = key.to_noun(&mut slab);
         let space = slab.noun_space();
 
-        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)
-            .unwrap_or_else(|_| Hash { values: [0; 5] });
+        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)?;
 
         // Use hash_ten_cell with two copies of the hash
         let double_hash = hash_ten_cell(hash.clone(), hash);
 
         // Convert to UBig
-        double_hash.to_ubig()
+        Ok(double_hash.to_ubig())
     }
 
     /// Build from an iterator (gas equivalent)
@@ -346,6 +388,52 @@ where
             None => Hashable::null(), // Empty tree
             Some(node) => Self::node_to_hashable(node, key_fn, val_fn),
         }
+    }
+
+    /// Fallible variant of [`Self::to_hashable`] for keys or values whose
+    /// hashable construction can fail (for example note-data with unbased
+    /// atoms).
+    pub fn try_to_hashable<F, G, E>(
+        &self,
+        key_fn: F,
+        val_fn: G,
+    ) -> Result<crate::hashing::hashable::Hashable, E>
+    where
+        F: Fn(&K) -> Result<crate::hashing::hashable::Hashable, E> + Copy,
+        G: Fn(&V) -> Result<crate::hashing::hashable::Hashable, E> + Copy,
+    {
+        use crate::hashing::hashable::Hashable;
+
+        match &self.root {
+            None => Ok(Hashable::null()),
+            Some(node) => Self::try_node_to_hashable(node, key_fn, val_fn),
+        }
+    }
+
+    fn try_node_to_hashable<F, G, E>(
+        node: &Box<Node<K, V>>,
+        key_fn: F,
+        val_fn: G,
+    ) -> Result<crate::hashing::hashable::Hashable, E>
+    where
+        F: Fn(&K) -> Result<crate::hashing::hashable::Hashable, E> + Copy,
+        G: Fn(&V) -> Result<crate::hashing::hashable::Hashable, E> + Copy,
+    {
+        use crate::hashing::hashable::Hashable;
+
+        let node_pair = Hashable::cell(key_fn(&node.key)?, val_fn(&node.value)?);
+
+        let left = match &node.left {
+            None => Hashable::null(),
+            Some(left_node) => Self::try_node_to_hashable(left_node, key_fn, val_fn)?,
+        };
+
+        let right = match &node.right {
+            None => Hashable::null(),
+            Some(right_node) => Self::try_node_to_hashable(right_node, key_fn, val_fn)?,
+        };
+
+        Ok(Hashable::triple(node_pair, left, right))
     }
 
     /// Convert a node to hashable recursively

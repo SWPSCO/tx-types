@@ -274,10 +274,19 @@ mod test_signature_hashable {
         // Hash both and compare
         let rust_hash = match rust_hashable {
             Hashable::Hash(h) => h,
-            _ => hash_hashable(&rust_hashable),
+            _ => hash_hashable(&rust_hashable).expect("signature hashable is u64-based"),
         };
 
-        let expected_hash_from_hashable = hash_hashable(&expected_hashable);
+        let expected_hash_from_hashable = match hash_hashable(&expected_hashable) {
+            Ok(hash) => hash,
+            Err(err) => {
+                // This fixture packs the whole 512-bit signature into one leaf
+                // atom, which is not belt-based; there is no valid TIP5 digest
+                // for it. The test is diagnostic (it only prints), so skip.
+                println!("Manually constructed hashable is unbased: {err}");
+                return;
+            }
+        };
 
         println!("\nRust Signature hash: {:016x?}", rust_hash.values);
         println!(
