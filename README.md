@@ -22,6 +22,12 @@ Add this to your `Cargo.toml`:
 tx-types = { git = "https://github.com/SWPSCO/tx-types" }
 ```
 
+## Migration / handoff
+
+See [`docs/wallet-builder-migration.md`](docs/wallet-builder-migration.md) for the
+gap between this crate, upstream `nockchain-types`/`wallet-tx-builder`, and the
+170,000 consensus validation rules.
+
 ## Vanity addresses
 
 [`vanity`](vanity/) provides allocation-free
