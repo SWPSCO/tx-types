@@ -1,19 +1,18 @@
 use crate::{ZMap, ZSet};
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
 use crate::transaction_types::*;
 
 // Note structure
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct NNoteHead {
     pub version: u64,
     pub origin_page: PageNumber,
     pub timelock: Timelock,
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct NNoteV0 {
     pub meta: NNoteHead,
     pub name: NName,
@@ -70,7 +69,7 @@ impl NNoteV0 {
 }
 
 // Seed structure
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SeedV0 {
     pub output_source: Option<Source>,
     pub recipient: Lock,
@@ -132,7 +131,7 @@ impl SeedV0 {
 }
 
 // Seeds structure
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct SeedsV0 {
     pub set: ZSet<SeedV0>,
 }
@@ -172,7 +171,7 @@ impl SeedsV0 {
 
 // ===================== V0 signature/spend/input/raw-tx wrappers =====================
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Signature {
     pub map: ZMap<SchnorrPubkey, SchnorrSignature>,
 }
@@ -192,7 +191,7 @@ impl Signature {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct SpendV0 {
     pub signature: Option<Signature>,
     pub seeds: SeedsV0,
@@ -221,7 +220,7 @@ impl SpendV0 {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct InputV0 {
     pub note: NNoteV0,
     pub spend: SpendV0,
@@ -284,7 +283,7 @@ impl InputV0 {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct InputsV0 {
     pub p: ZMap<NName, InputV0>,
 }
@@ -300,18 +299,18 @@ impl InputsV0 {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct OutputV0 {
     pub note: NNoteV0,
     pub seeds: SeedsV0,
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct OutputsV0 {
     pub map: ZMap<Lock, OutputV0>,
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct RawTransactionV0 {
     pub id: Hash,
     pub inputs: InputsV0,
@@ -319,10 +318,55 @@ pub struct RawTransactionV0 {
     pub total_fees: Coins,
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct TxV0 {
     pub version: u64,
     pub raw_tx: RawTransactionV0,
     pub total_size: u64,
     pub outputs: OutputsV0,
 }
+
+crate::noun_codec::noun_struct!(
+    NNoteHead {
+        version,
+        origin_page,
+        timelock
+    },
+    NNoteV0 {
+        meta,
+        name,
+        lock,
+        source,
+        assets
+    },
+    SeedV0 {
+        output_source,
+        recipient,
+        timelock_intent,
+        gift,
+        parent_hash
+    },
+    SeedsV0 { set },
+    Signature { map },
+    SpendV0 {
+        signature,
+        seeds,
+        fee
+    },
+    InputV0 { note, spend },
+    InputsV0 { p },
+    OutputV0 { note, seeds },
+    OutputsV0 { map },
+    RawTransactionV0 {
+        id,
+        inputs,
+        timelock_range,
+        total_fees
+    },
+    TxV0 {
+        version,
+        raw_tx,
+        total_size,
+        outputs
+    }
+);

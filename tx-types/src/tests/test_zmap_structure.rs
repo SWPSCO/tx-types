@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use crate::collections::zmap::ZMap;
-    use crate::collections::zset::DorTip;
     use crate::hashing::hashable::Hashable;
     use crate::hashing::hasher::hash_hashable;
     use crate::transaction_types::Hash;
@@ -10,6 +9,15 @@ mod tests {
     // Simple wrapper for u64 to implement required traits
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct NumKey(u64);
+
+    impl pokenoun::codec::Encode for NumKey {
+        fn encode(
+            &self,
+            arena: &mut pokenoun::Arena,
+        ) -> Result<pokenoun::Noun, pokenoun::codec::Error> {
+            pokenoun::codec::Encode::encode(&self.0, arena)
+        }
+    }
 
     impl noun_serde::NounEncode for NumKey {
         fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {

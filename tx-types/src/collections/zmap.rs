@@ -1,8 +1,10 @@
 use crate::hashing::tip5::Tip5Error;
-use crate::hashing::tip5::Tip5Hasher;
+use alloc::{boxed::Box, string::ToString, vec::Vec};
+use pokenoun::codec::{is_null, pair, Decode, Encode, Error};
+use pokenoun::{Arena, Noun};
+
 use ibig::UBig;
-use nockvm::noun::D;
-use noun_serde::NounEncode;
+
 /// Z-Map: A deterministic self-balancing binary search tree (treap)
 /// Based on the Hoon z-map implementation from nockchain
 ///
@@ -10,8 +12,8 @@ use noun_serde::NounEncode;
 /// - Ordering: gor-tip (single hash comparison)
 /// - Balancing: mor-tip (double hash comparison)
 /// - Fallback: dor-tip (structural comparison)
-use std::cmp::Ordering;
-use std::fmt::Debug;
+use core::cmp::Ordering;
+use core::fmt::Debug;
 
 /// A z-map is a self-balancing binary search tree
 #[derive(Clone)]
@@ -53,7 +55,7 @@ impl<T: Ord> DorTip for T {
 
 impl<K, V> ZMap<K, V>
 where
-    K: NounEncode + DorTip + Clone + Debug,
+    K: Encode + DorTip + Clone + Debug,
     V: Clone + Debug,
 {
     /// Create a new empty z-map
@@ -72,7 +74,9 @@ where
 
     /// Fallible insertion; see [`Self::put`].
     pub fn try_put(&mut self, key: K, value: V) -> Result<(), Tip5Error> {
-        self.root = Self::put_recursive(self.root.take(), key, value)?;
+        Self::compute_tip5_hash(&key)?;
+        let root = Self::put_recursive(self.root.clone(), key, value)?;
+        self.root = root;
         Ok(())
     }
 
@@ -284,9 +288,9 @@ where
 
     fn tap_recursive(node: &Option<Box<Node<K, V>>>, result: &mut Vec<(K, V)>) {
         if let Some(n) = node {
-            Self::tap_recursive(&n.left, result);
-            result.push((n.key.clone(), n.value.clone()));
             Self::tap_recursive(&n.right, result);
+            result.push((n.key.clone(), n.value.clone()));
+            Self::tap_recursive(&n.left, result);
         }
     }
 
@@ -305,17 +309,11 @@ where
     /// Compute TIP5 hash of a key and convert to UBig integer
     /// Returns a UBig representing the hash for comparison.
     fn compute_tip5_hash(key: &K) -> Result<UBig, Tip5Error> {
-        use nockapp::noun::slab::NounSlab;
-
-        use nockvm::noun::NounAllocator;
-
-        // Create a noun slab and convert key to noun
-        let mut slab: NounSlab = NounSlab::new();
-        let key_noun = key.to_noun(&mut slab);
-        let space = slab.noun_space();
-
-        // Compute the TIP5 hash
-        Tip5Hasher::hash_noun_varlen(key_noun, &space).map(|hash| hash.to_ubig())
+        let bytes = key
+            .to_jam()
+            .map_err(|error| Tip5Error::SerializationError(error.to_string()))?;
+        let hash = crate::hashing::hasher::hash_noun_varlen(&bytes)?;
+        Ok(hash.to_ubig())
     }
 
     /// gor-tip: Compare by single hash (UBig integer), fallback to dor-tip
@@ -344,23 +342,11 @@ where
 
     /// Compute double-tip: hash(hash(value) ++ hash(value))
     fn compute_double_tip5_hash(key: &K) -> Result<UBig, Tip5Error> {
-        use crate::hashing::hasher::hash_ten_cell;
-        use nockapp::noun::slab::NounSlab;
-
-        use nockvm::noun::NounAllocator;
-
-        // First compute the regular hash
-        let mut slab: NounSlab = NounSlab::new();
-        let key_noun = key.to_noun(&mut slab);
-        let space = slab.noun_space();
-
-        let hash = Tip5Hasher::hash_noun_varlen(key_noun, &space)?;
-
-        // Use hash_ten_cell with two copies of the hash
-        let double_hash = hash_ten_cell(hash.clone(), hash);
-
-        // Convert to UBig
-        Ok(double_hash.to_ubig())
+        let bytes = key
+            .to_jam()
+            .map_err(|error| Tip5Error::SerializationError(error.to_string()))?;
+        let hash = crate::hashing::hasher::hash_noun_varlen(&bytes)?;
+        Ok(crate::hashing::hash_ten_cell(hash.clone(), hash).to_ubig())
     }
 
     /// Build from an iterator (gas equivalent)
@@ -472,7 +458,7 @@ where
 // Implement Default
 impl<K, V> Default for ZMap<K, V>
 where
-    K: NounEncode + DorTip + Clone + Debug,
+    K: Encode + DorTip + Clone + Debug,
     V: Clone + Debug,
 {
     fn default() -> Self {
@@ -482,7 +468,7 @@ where
 
 // Debug implementation for visualization
 impl<K: Debug, V: Debug> Debug for ZMap<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "ZMap {{ root: ")?;
         fmt_node(&self.root, f, 0)?;
         write!(f, " }}")
@@ -492,9 +478,9 @@ impl<K: Debug, V: Debug> Debug for ZMap<K, V> {
 // Helper function for debug formatting
 fn fmt_node<K: Debug, V: Debug>(
     node: &Option<Box<Node<K, V>>>,
-    f: &mut std::fmt::Formatter<'_>,
+    f: &mut core::fmt::Formatter<'_>,
     depth: usize,
-) -> std::fmt::Result {
+) -> core::fmt::Result {
     match node {
         None => write!(f, "~"),
         Some(n) => {
@@ -520,6 +506,7 @@ fn fmt_node<K: Debug, V: Debug>(
 #[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use super::*;
+    use noun_serde::{NounDecode, NounEncode};
 
     // Wrapper for i32 to implement NounEncode
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -536,6 +523,14 @@ mod tests {
                 self.0 as u64
             };
             Atom::new(alloc, value).as_noun()
+        }
+    }
+    impl pokenoun::codec::Encode for TestInt {
+        fn encode(
+            &self,
+            arena: &mut pokenoun::Arena,
+        ) -> Result<pokenoun::Noun, pokenoun::codec::Error> {
+            (self.0 as i64 as u64).encode(arena)
         }
     }
 
@@ -2270,134 +2265,67 @@ mod tests {
     }
 }
 
-// Implement NounEncode for ZMap
-impl<K, V> noun_serde::NounEncode for ZMap<K, V>
-where
-    K: noun_serde::NounEncode + DorTip + Clone,
-    V: noun_serde::NounEncode + Clone,
-{
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        use nockvm::noun::{Noun, T};
-
-        // Convert to a tree structure matching Hoon's z-map
-        // Empty map is ~
-        // Node is [[key value] left-tree right-tree]
-        match &self.root {
-            None => D(0), // Empty map is ~
-            Some(node) => Self::node_to_noun_encode(node, alloc),
+impl<K: Encode, V: Encode> Encode for ZMap<K, V> {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        fn tree<K: Encode, V: Encode>(
+            node: &Option<Box<Node<K, V>>>,
+            arena: &mut Arena,
+        ) -> Result<Noun, Error> {
+            let Some(node) = node else {
+                return Ok(arena.atom0());
+            };
+            let key = node.key.encode(arena)?;
+            let value = node.value.encode(arena)?;
+            let pair = arena.alloc_cell(key, value);
+            let left = tree(&node.left, arena)?;
+            let right = tree(&node.right, arena)?;
+            let children = arena.alloc_cell(left, right);
+            Ok(arena.alloc_cell(pair, children))
         }
+        tree(&self.root, arena)
     }
 }
 
-impl<K, V> ZMap<K, V>
+impl<K, V> Decode for ZMap<K, V>
 where
-    K: noun_serde::NounEncode + Clone,
-    V: noun_serde::NounEncode + Clone,
+    K: Decode + Encode + DorTip + Clone + Debug,
+    V: Decode + Clone + Debug,
 {
-    fn node_to_noun_encode<A: nockvm::noun::NounAllocator>(
-        node: &Node<K, V>,
-        alloc: &mut A,
-    ) -> nockvm::noun::Noun {
-        use nockvm::noun::{Noun, T};
-
-        // Create [key value] pair
-        let key_noun = node.key.to_noun(alloc);
-        let value_noun = node.value.to_noun(alloc);
-        let pair = T(alloc, &[key_noun, value_noun]);
-
-        // Create left and right subtrees
-        let left_noun = match &node.left {
-            None => D(0),
-            Some(left) => Self::node_to_noun_encode(left, alloc),
-        };
-
-        let right_noun = match &node.right {
-            None => D(0),
-            Some(right) => Self::node_to_noun_encode(right, alloc),
-        };
-
-        // Create [[key value] [left right]]
-        let children = T(alloc, &[left_noun, right_noun]);
-        T(alloc, &[pair, children])
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        let mut map = Self::new();
+        let mut pending = alloc::vec![noun];
+        while let Some(noun) = pending.pop() {
+            if is_null(noun, arena) {
+                continue;
+            }
+            let (entry, children) = pair(noun, arena)?;
+            let (key, value) = pair(entry, arena)?;
+            let (left, right) = pair(children, arena)?;
+            map.try_put(K::decode(key, arena)?, V::decode(value, arena)?)
+                .map_err(|_| Error("unhashable z-map key"))?;
+            pending.extend([right, left]);
+        }
+        Ok(map)
     }
 }
 
-// Implement NounDecode for ZMap
+#[cfg(feature = "std")]
+impl<K: Encode, V: Encode> noun_serde::NounEncode for ZMap<K, V> {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        crate::noun_codec::encode_runtime(self, alloc)
+    }
+}
+
+#[cfg(feature = "std")]
 impl<K, V> noun_serde::NounDecode for ZMap<K, V>
 where
-    K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
-    V: noun_serde::NounDecode + Clone + Debug,
+    K: Decode + Encode + DorTip + Clone + Debug,
+    V: Decode + Clone + Debug,
 {
     fn from_noun(
         noun: &nockvm::noun::Noun,
         space: &nockvm::noun::NounSpace,
     ) -> Result<Self, noun_serde::NounDecodeError> {
-        // Check if it's ~ (empty map)
-        let handle = noun.in_space(space);
-        if let Ok(atom) = handle.as_atom() {
-            if atom.as_u64()? == 0 {
-                return Ok(ZMap::new());
-            }
-        }
-
-        // Otherwise it should be a cell [[key value] [left right]]
-        handle
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-
-        // Decode the node recursively
-        let mut map = ZMap::new();
-        Self::decode_node_recursive(noun, space, &mut map)?;
-        Ok(map)
-    }
-}
-
-impl<K, V> ZMap<K, V>
-where
-    K: noun_serde::NounDecode + DorTip + Clone + NounEncode + Debug,
-    V: noun_serde::NounDecode + Clone + Debug,
-{
-    fn decode_node_recursive(
-        noun: &nockvm::noun::Noun,
-        space: &nockvm::noun::NounSpace,
-        map: &mut ZMap<K, V>,
-    ) -> Result<(), noun_serde::NounDecodeError> {
-        let handle = noun.in_space(space);
-
-        // If it's ~ (0), nothing to do
-        if let Ok(atom) = handle.as_atom() {
-            if atom.as_u64()? == 0 {
-                return Ok(());
-            }
-        }
-
-        // Otherwise it's [[key value] [left right]]
-        let cell = handle
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-
-        // Get [key value] pair
-        let pair_cell = cell
-            .head()
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-
-        let key = K::from_noun(&pair_cell.head().noun(), space)?;
-        let value = V::from_noun(&pair_cell.tail().noun(), space)?;
-
-        // Insert the key-value pair
-        map.put(key, value);
-
-        // Get [left right] children
-        let children_cell = cell
-            .tail()
-            .as_cell()
-            .map_err(|_| noun_serde::NounDecodeError::ExpectedCell)?;
-
-        // Recursively decode left and right subtrees
-        Self::decode_node_recursive(&children_cell.head().noun(), space, map)?;
-        Self::decode_node_recursive(&children_cell.tail().noun(), space, map)?;
-
-        Ok(())
+        crate::noun_codec::decode_runtime(*noun, space)
     }
 }

@@ -1,7 +1,10 @@
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use bytes::Bytes;
-use nockapp::noun::slab::NounSlab;
-use nockvm::noun::{Noun, NounAllocator, NounSpace};
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use pokenoun::codec::{Decode, Encode, Error};
+use pokenoun::{Arena, Noun};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UntypedNoun {
@@ -9,60 +12,49 @@ pub struct UntypedNoun {
 }
 
 impl UntypedNoun {
-    /// Deserialize the UntypedNoun back to a typed value
-    ///
-    /// This method cues (unjams) the stored bytes and then decodes them
-    /// into the target type T.
-    ///
-    /// # Type Parameters
-    /// * `T` - The type to decode into. Must implement `NounDecode`.
-    ///
-    /// # Returns
-    /// * `Ok(T)` - Successfully deserialized value
-    /// * `Err(String)` - Error message if deserialization failed
-    ///
-    /// # Example
-    /// ```ignore
-    /// let untyped: UntypedNoun = ...;
-    /// let lock_data: LockData = untyped.to_typed()?;
-    /// ```
-    pub fn to_typed<T: NounDecode>(&self) -> Result<T, String> {
-        // Create a new slab for cueing
-        let mut slab: NounSlab = NounSlab::new();
+    pub fn from_value(value: &impl Encode) -> Result<Self, Error> {
+        Ok(Self {
+            p: value.to_jam()?.into(),
+        })
+    }
 
-        // Cue (unjam) the bytes to get back the noun
+    pub fn decode_as<T: Decode>(&self) -> Result<T, Error> {
+        T::from_jam(&self.p)
+    }
+
+    pub fn to_hashable(&self) -> Result<crate::hashing::Hashable, crate::hashing::Tip5Error> {
+        let mut arena = Arena::new();
+        let noun = pokenoun::cue(&self.p, &mut arena).map_err(|error| {
+            crate::hashing::Tip5Error::SerializationError(format!("invalid noun jam: {error:?}"))
+        })?;
+        Ok(crate::hashing::Hashable::from_value(noun, &arena))
+    }
+
+    #[cfg(feature = "std")]
+    pub fn to_typed<T: noun_serde::NounDecode>(&self) -> Result<T, String> {
+        use nockvm::noun::NounAllocator;
+        let mut slab: nockapp::noun::slab::NounSlab = nockapp::noun::slab::NounSlab::new();
         let noun = slab
             .cue_into(self.p.clone())
-            .map_err(|e| format!("Failed to cue noun: {:?}", e))?;
-
-        // Decode the noun into type T
-        let space = slab.noun_space();
-        T::from_noun(&noun, &space).map_err(|e| format!("Failed to decode noun: {:?}", e))
+            .map_err(|error| format!("invalid jam: {error:?}"))?;
+        T::from_noun(&noun, &slab.noun_space()).map_err(|error| error.to_string())
     }
 }
 
-impl NounDecode for UntypedNoun {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        let mut slab: NounSlab = NounSlab::new();
-        slab.copy_into(*noun, space);
-        let noun_bytes: Bytes = slab.jam();
-        Ok(UntypedNoun { p: noun_bytes })
+impl Encode for UntypedNoun {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        let mut source = Arena::new();
+        let noun = pokenoun::cue(&self.p, &mut source).map_err(|_| Error("invalid noun jam"))?;
+        Ok(pokenoun::codec::copy(noun, &source, arena))
     }
 }
 
-impl NounEncode for UntypedNoun {
-    fn to_noun<A: NounAllocator>(&self, alloc: &mut A) -> Noun {
-        // Try to downcast to NounSlab - this only works if the allocator IS a NounSlab
-        // We use a trick: attempt to call a NounSlab-specific method
-        // Since we can't downcast traits directly, we'll use std::any::Any if available
-
-        // For now, we require that the allocator is a NounSlab.
-        // If it's not, this will panic at runtime.
-        let slab_ptr = alloc as *mut A as *mut NounSlab;
-        let slab = unsafe { &mut *slab_ptr };
-
-        // Cue directly into the slab (which is the allocator)
-        slab.cue_into(self.p.clone())
-            .expect("Failed to cue UntypedNoun bytes into allocator - allocator must be a NounSlab")
+impl Decode for UntypedNoun {
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        Ok(Self {
+            p: pokenoun::jam(noun, arena).into(),
+        })
     }
 }
+
+crate::noun_codec::runtime_codec!(UntypedNoun);

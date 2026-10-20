@@ -2,16 +2,16 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Noun {
     Atom(AtomId),
     Cell(CellId),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AtomId(pub(crate) u32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CellId(pub(crate) u32);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -26,11 +26,17 @@ struct AtomSlice {
     len: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Arena {
     atoms: Vec<AtomSlice>,
     pub(crate) atom_data: Vec<u8>,
     cells: Vec<Cell>,
+}
+
+impl Default for Arena {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[inline]

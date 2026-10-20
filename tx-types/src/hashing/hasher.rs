@@ -1,140 +1,72 @@
-/// Core hashing functions for the transaction hashing system
-/// Implements TIP5 hashing compatible with the Hoon implementation
-use super::hashable::Hashable;
-use super::tip5::Tip5Error;
+//! TIP5 hashing over the shared noun arena.
+use super::{hashable::Hashable, tip5::Tip5Error};
 use crate::transaction_types::Hash;
-use nockapp::noun::slab::NounSlab;
-use nockvm::noun::NounAllocator;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use pokenoun::codec::Encode;
 
-/// Goldilocks prime: 2^64 - 2^32 + 1
-pub const GOLDILOCKS_PRIME: u64 = 0xffffffff00000001;
+pub const GOLDILOCKS_PRIME: u64 = pokenoun::GOLDILOCKS_P;
 
-/// Hash a jammed noun using variable-length hashing
-///
-/// This function expects `data` to contain jammed (serialized) noun bytes.
-/// It will cue (deserialize) the bytes back to a noun before hashing.
-///
-/// This mirrors the Hoon hash-noun-varlen function where the input is
-/// a noun that gets hashed directly.
 pub fn hash_noun_varlen(data: &[u8]) -> Result<Hash, Tip5Error> {
-    use super::tip5::Tip5Hasher;
-    use nockapp::Bytes;
-
-    let mut slab: NounSlab = NounSlab::new();
-
-    // Cue the jammed bytes back to a noun.
-    let noun = slab
-        .cue_into(Bytes::copy_from_slice(data))
-        .map_err(|e| Tip5Error::SerializationError(format!("failed to cue noun: {:?}", e)))?;
-
-    // Use the real TIP5 hasher
-    let space = slab.noun_space();
-    Tip5Hasher::hash_noun_varlen(noun, &space)
+    let mut arena = pokenoun::Arena::new();
+    let noun = pokenoun::cue(data, &mut arena)
+        .map_err(|error| Tip5Error::SerializationError(format!("invalid jam: {error:?}")))?;
+    hash_arena_noun(noun, &arena)
 }
 
-/// Hash two digests together (hash-ten-cell in Hoon).
-///
-/// The hash_10 jet expects a proper Hoon list of 10 belts: [a [b [c ... [j 0]...]]]
-/// This is created by flattening the ten-cell [[l0 l1 l2 l3 l4] [r0 r1 r2 r3 r4]]
-/// into a list [l0 l1 l2 l3 l4 r0 r1 r2 r3 r4].
+pub fn hash_arena_noun(noun: pokenoun::Noun, arena: &pokenoun::Arena) -> Result<Hash, Tip5Error> {
+    pokenoun::hash_noun_varlen(noun, arena)
+        .map(|values| Hash { values })
+        .map_err(Into::into)
+}
+
 pub fn hash_ten_cell(left: Hash, right: Hash) -> Hash {
-    use super::tip5::Tip5Hasher;
-
-    // Flatten left and right hash values into a single array
-    let values: [u64; 10] = [
-        left.values[0],
-        left.values[1],
-        left.values[2],
-        left.values[3],
-        left.values[4],
-        right.values[0],
-        right.values[1],
-        right.values[2],
-        right.values[3],
-        right.values[4],
-    ];
-
-    // `hash_10_from_values` is pure arithmetic over already-validated limbs
-    // and cannot fail; keep the infallible signature.
-    Tip5Hasher::hash_10_from_values(&values).expect("hash_10 over 5+5 u64 limbs is infallible")
+    Hash {
+        values: pokenoun::hash_ten_cell(left.values, right.values).expect("digest limbs are based"),
+    }
 }
 
-/// Recursively hash a Hashable structure
-/// This mirrors the Hoon hash-hashable function.
-///
-/// Returns an error instead of a fabricated digest when a leaf cannot be
-/// decoded or contains an unbased atom (an atom that does not fit in a belt).
 pub fn hash_hashable(h: &Hashable) -> Result<Hash, Tip5Error> {
-    super::tip5::Tip5Hasher::hash_hashable(h)
+    match h {
+        Hashable::Leaf(jam) => hash_noun_varlen(jam),
+        Hashable::Hash(hash) => Ok(hash.clone()),
+        Hashable::Cell(left, right) => {
+            Ok(hash_ten_cell(hash_hashable(left)?, hash_hashable(right)?))
+        }
+        Hashable::List(items) => {
+            let hashes = items
+                .iter()
+                .map(hash_hashable)
+                .collect::<Result<Vec<_>, _>>()?;
+            hash_noun_varlen(
+                &hashes
+                    .to_jam()
+                    .map_err(|error| Tip5Error::SerializationError(error.to_string()))?,
+            )
+        }
+    }
 }
 
-/// Convert a digest to a base58 string (for display)
+#[cfg(feature = "std")]
 pub fn digest_to_base58(digest: &Hash) -> String {
-    // This mirrors the Hoon digest-to-atom and then base58 encoding
-    // Following the formula: a + b*p + c*p² + d*p³ + e*p⁴
-
-    use bs58;
-    use num_bigint::BigUint;
-
-    let p = BigUint::from(GOLDILOCKS_PRIME);
-    let mut result = BigUint::from(digest.values[0]);
-
-    for i in 1..5 {
-        let power = p.pow(i as u32);
-        result += BigUint::from(digest.values[i]) * power;
-    }
-
-    bs58::encode(result.to_bytes_be()).into_string()
+    digest.to_b58()
 }
 
-/// Hash a transcript list using TIP5 with proper Hoon list structure
-///
-/// This function is used by the Schnorr signature process to generate nonces
-/// and challenges. It takes multiple arrays of u64 values, flattens them into
-/// a single list, and hashes the list using TIP5.
-///
-/// The list is constructed in Hoon format: [a [b [c [d ... 0]]]]
-/// (right-associative with nil terminator)
-///
-/// # Arguments
-/// * `element_arrays` - Arrays of u64 values to hash (e.g., public key coordinates, message)
-///
-/// # Returns
-/// * `Ok(Hash)` - The TIP5 hash of the transcript list
-/// * `Err(Tip5Error)` - If hashing fails
-///
-/// # Used in Schnorr signatures:
-/// - Nonce generation: TIP5([pubkey.x, pubkey.y, message])
-/// - Challenge generation: TIP5([R.x, R.y, pubkey.x, pubkey.y, message])
-pub fn hash_transcript_list(
-    element_arrays: &[&[u64]],
-) -> Result<Hash, crate::hashing::tip5::Tip5Error> {
-    use super::tip5::Tip5Hasher;
-    use nockvm::noun::Cell;
-
-    let mut slab: NounSlab<nockvm::noun::IndirectAtom> = NounSlab::new();
-
-    // Flatten all elements into a single list
-    let mut all_elements = Vec::new();
-    for array in element_arrays {
-        all_elements.extend_from_slice(array);
-    }
-
-    // Build Hoon list structure: [a [b [c [d ... 0]]]]
-    let mut list = nockvm::noun::Atom::new(&mut slab, 0).as_noun(); // Start with nil (0)
-
-    // Build list in reverse order (right-associative)
-    for &element in all_elements.iter().rev() {
-        let atom = nockvm::noun::Atom::new(&mut slab, element).as_noun();
-        list = Cell::new(&mut slab, atom, list).as_noun();
-    }
-
-    // Hash the list using TIP5
-    let space = slab.noun_space();
-    Tip5Hasher::hash_varlen(list, &space)
+pub fn hash_transcript_list(element_arrays: &[&[u64]]) -> Result<Hash, Tip5Error> {
+    let words: Vec<_> = element_arrays
+        .iter()
+        .flat_map(|array| array.iter().copied())
+        .collect();
+    pokenoun::hash_varlen_words(&words)
+        .map(|values| Hash { values })
+        .map_err(Into::into)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
+
 mod tests {
     use super::*;
 

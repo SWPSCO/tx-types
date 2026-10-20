@@ -1,7 +1,14 @@
-use crate::hashing::tip5::{Tip5Error, Tip5Hasher};
+use crate::hashing::tip5::Tip5Error;
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use ibig::UBig;
-use nockvm::noun::D;
-use noun_serde::NounEncode;
+use pokenoun::codec::{is_null, pair, Decode, Encode, Error};
+use pokenoun::{Arena, Noun};
+
 /// Z-Set: A deterministic self-balancing binary search tree (treap) for sets
 /// Based on the Hoon z-set implementation from nockchain
 ///
@@ -9,8 +16,8 @@ use noun_serde::NounEncode;
 /// - Ordering: gor-tip (single hash comparison)
 /// - Balancing: mor-tip (double hash comparison)
 /// - Fallback: dor-tip (structural comparison)
-use std::cmp::Ordering;
-use std::fmt::Debug;
+use core::cmp::Ordering;
+use core::fmt::Debug;
 
 /// A z-set is a self-balancing binary search tree for sets
 #[derive(Clone)]
@@ -50,7 +57,7 @@ impl<T: Ord> DorTip for T {
 
 impl<T> ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq,
+    T: Encode + DorTip + Clone + Debug + PartialEq,
 {
     /// Create a new empty z-set
     pub fn new() -> Self {
@@ -68,11 +75,14 @@ where
 
     /// Fallible insertion; see [`Self::put`].
     pub fn try_put(&mut self, value: T) -> Result<(), Tip5Error> {
-        self.root = Self::put_recursive(self.root.take(), value)?;
+        Self::compute_tip5_hash(&value)?;
+        let root = Self::put_recursive(self.root.clone(), value)?;
+        self.root = root;
         Ok(())
     }
 
     /// Insert a value with debug output
+    #[cfg(feature = "std")]
     pub fn put_with_debug(&mut self, value: T)
     where
         T: Debug,
@@ -125,6 +135,7 @@ where
     }
 
     /// Recursive insertion with debug output
+    #[cfg(feature = "std")]
     fn put_recursive_debug(
         node: Option<Box<Node<T>>>,
         value: T,
@@ -381,9 +392,9 @@ where
 
     fn tap_recursive(node: &Option<Box<Node<T>>>, result: &mut Vec<T>) {
         if let Some(n) = node {
-            Self::tap_recursive(&n.left, result);
-            result.push(n.value.clone());
             Self::tap_recursive(&n.right, result);
+            result.push(n.value.clone());
+            Self::tap_recursive(&n.left, result);
         }
     }
 
@@ -410,7 +421,7 @@ where
     }
 
     /// Create an iterator over the values
-    pub fn iter(&self) -> ZSetIter<T> {
+    pub fn iter(&self) -> ZSetIter<'_, T> {
         let mut stack = Vec::new();
         if let Some(ref root) = self.root {
             Self::push_left(&mut stack, root);
@@ -454,17 +465,11 @@ where
 
     /// Compute TIP5 hash of a value and convert to UBig integer
     fn compute_tip5_hash(value: &T) -> Result<UBig, Tip5Error> {
-        use nockapp::noun::slab::NounSlab;
-
-        use nockvm::noun::NounAllocator;
-
-        // Create a noun slab and convert value to noun
-        let mut slab: NounSlab = NounSlab::new();
-        let value_noun = value.to_noun(&mut slab);
-        let space = slab.noun_space();
-
-        // Compute the TIP5 hash
-        Tip5Hasher::hash_noun_varlen(value_noun, &space).map(|hash| hash.to_ubig())
+        let bytes = value
+            .to_jam()
+            .map_err(|error| Tip5Error::SerializationError(error.to_string()))?;
+        let hash = crate::hashing::hasher::hash_noun_varlen(&bytes)?;
+        Ok(hash.to_ubig())
     }
 
     /// gor-tip: Compare by single hash (UBig integer), fallback to dor-tip
@@ -496,23 +501,11 @@ where
 
     /// Compute double-tip: hash(hash(value) ++ hash(value))
     fn compute_double_tip5_hash(value: &T) -> Result<UBig, Tip5Error> {
-        use crate::hashing::hasher::hash_ten_cell;
-        use nockapp::noun::slab::NounSlab;
-
-        use nockvm::noun::NounAllocator;
-
-        // First compute the regular hash
-        let mut slab: NounSlab = NounSlab::new();
-        let value_noun = value.to_noun(&mut slab);
-        let space = slab.noun_space();
-
-        let hash = Tip5Hasher::hash_noun_varlen(value_noun, &space)?;
-
-        // Use hash_ten_cell with two copies of the hash
-        let double_hash = hash_ten_cell(hash.clone(), hash);
-
-        // Convert to UBig
-        Ok(double_hash.to_ubig())
+        let bytes = value
+            .to_jam()
+            .map_err(|error| Tip5Error::SerializationError(error.to_string()))?;
+        let hash = crate::hashing::hasher::hash_noun_varlen(&bytes)?;
+        Ok(crate::hashing::hash_ten_cell(hash.clone(), hash).to_ubig())
     }
 
     /// Build from an iterator (gas equivalent)
@@ -605,33 +598,6 @@ where
         // This matches the Hoon z-set hashable structure
         Hashable::triple(node_hashable, left, right)
     }
-
-    /// Convert a node to noun recursively for NounEncode
-    fn node_to_noun<A: nockvm::noun::NounAllocator>(
-        node: &Box<Node<T>>,
-        alloc: &mut A,
-    ) -> nockvm::noun::Noun {
-        use nockvm::noun::T;
-
-        // Get noun for the current node's value
-        let value_noun = node.value.to_noun(alloc);
-
-        // Process left subtree
-        let left_noun = match &node.left {
-            None => D(0),
-            Some(left_node) => Self::node_to_noun(left_node, alloc),
-        };
-
-        // Process right subtree
-        let right_noun = match &node.right {
-            None => D(0),
-            Some(right_node) => Self::node_to_noun(right_node, alloc),
-        };
-
-        // Return as triple: [value left-tree right-tree]
-        // This matches the Hoon z-set structure
-        T(alloc, &[value_noun, left_noun, right_noun])
-    }
 }
 
 /// Iterator over ZSet values
@@ -641,7 +607,7 @@ pub struct ZSetIter<'a, T> {
 
 impl<'a, T> Iterator for ZSetIter<'a, T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq,
+    T: Encode + DorTip + Clone + Debug + PartialEq,
 {
     type Item = &'a T;
 
@@ -661,7 +627,7 @@ where
 // Implement Default
 impl<T> Default for ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq,
+    T: Encode + DorTip + Clone + Debug + PartialEq,
 {
     fn default() -> Self {
         Self::new()
@@ -670,7 +636,7 @@ where
 
 // Debug implementation for visualization
 impl<T: Debug> Debug for ZSet<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "ZSet {{ root: ")?;
         fmt_node(&self.root, f, 0)?;
         write!(f, " }}")
@@ -680,7 +646,7 @@ impl<T: Debug> Debug for ZSet<T> {
 // Implement PartialEq for ZSet
 impl<T> PartialEq for ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq,
+    T: Encode + DorTip + Clone + Debug + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         // Two sets are equal if they contain the same elements
@@ -689,14 +655,14 @@ where
 }
 
 // Implement Eq for ZSet
-impl<T> Eq for ZSet<T> where T: NounEncode + DorTip + Clone + Debug + PartialEq + Eq {}
+impl<T> Eq for ZSet<T> where T: Encode + DorTip + Clone + Debug + PartialEq + Eq {}
 
 // Implement Hash for ZSet
-use std::hash::{Hash, Hasher};
+use core::hash::{Hash, Hasher};
 
 impl<T> Hash for ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq + Hash,
+    T: Encode + DorTip + Clone + Debug + PartialEq + Hash,
 {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash the elements in order
@@ -708,7 +674,7 @@ where
 // Implement PartialOrd for ZSet
 impl<T> PartialOrd for ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq + PartialOrd,
+    T: Encode + DorTip + Clone + Debug + PartialEq + PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.tap().partial_cmp(&other.tap())
@@ -718,90 +684,19 @@ where
 // Implement Ord for ZSet
 impl<T> Ord for ZSet<T>
 where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq + Eq + Ord,
+    T: Encode + DorTip + Clone + Debug + PartialEq + Eq + Ord,
 {
     fn cmp(&self, other: &Self) -> Ordering {
         self.tap().cmp(&other.tap())
     }
 }
 
-// Implement NounEncode for ZSet
-impl<T> NounEncode for ZSet<T>
-where
-    T: NounEncode + DorTip + Clone + Debug + PartialEq,
-{
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
-        // Convert to a tree structure matching Hoon's z-set
-        // Empty set is ~
-        // Node is [value left-tree right-tree]
-        match &self.root {
-            None => D(0), // Empty set is ~
-            Some(node) => Self::node_to_noun(node, alloc),
-        }
-    }
-}
-
-// Implement NounDecode for ZSet
-use nockvm::noun::Noun;
-use noun_serde::{NounDecode, NounDecodeError};
-
-impl<T> ZSet<T>
-where
-    T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
-{
-    /// Decode a node from noun recursively for NounDecode
-    fn node_from_noun(
-        noun: &Noun,
-        space: &nockvm::noun::NounSpace,
-    ) -> Result<Option<Box<Node<T>>>, NounDecodeError> {
-        let handle = noun.in_space(space);
-
-        // Check if it's empty (~ = 0)
-        if let Ok(atom) = handle.as_atom() {
-            if atom.as_u64().unwrap_or(1) == 0 {
-                return Ok(None);
-            }
-        }
-
-        // Otherwise it should be a cell [value left right]
-        let cell = handle
-            .as_cell()
-            .map_err(|_| NounDecodeError::ExpectedCell)?;
-
-        // First element is the value
-        let value = T::from_noun(&cell.head().noun(), space)?;
-
-        // Second element should be a cell [left right]
-        let tail_cell = cell
-            .tail()
-            .as_cell()
-            .map_err(|_| NounDecodeError::ExpectedCell)?;
-
-        // Recursively decode left and right subtrees
-        let left = Self::node_from_noun(&tail_cell.head().noun(), space)?;
-        let right = Self::node_from_noun(&tail_cell.tail().noun(), space)?;
-
-        Ok(Some(Box::new(Node { value, left, right })))
-    }
-}
-
-impl<T> NounDecode for ZSet<T>
-where
-    T: NounDecode + NounEncode + DorTip + Clone + Debug + PartialEq,
-{
-    fn from_noun(noun: &Noun, space: &nockvm::noun::NounSpace) -> Result<Self, NounDecodeError> {
-        // Decode from tree structure matching Hoon's z-set
-        let root = Self::node_from_noun(noun, space)?;
-        Ok(ZSet { root })
-    }
-}
-
 // Helper function for debug formatting
 fn fmt_node<T: Debug>(
     node: &Option<Box<Node<T>>>,
-    f: &mut std::fmt::Formatter<'_>,
+    f: &mut core::fmt::Formatter<'_>,
     depth: usize,
-) -> std::fmt::Result {
+) -> core::fmt::Result {
     match node {
         None => write!(f, "~"),
         Some(n) => {
@@ -817,9 +712,10 @@ fn fmt_node<T: Debug>(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use noun_serde::NounEncode;
 
     // Wrapper for i32 to implement NounEncode
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -836,6 +732,14 @@ mod tests {
                 self.0 as u64
             };
             Atom::new(alloc, value).as_noun()
+        }
+    }
+    impl pokenoun::codec::Encode for TestInt {
+        fn encode(
+            &self,
+            arena: &mut pokenoun::Arena,
+        ) -> Result<pokenoun::Noun, pokenoun::codec::Error> {
+            (self.0 as i64 as u64).encode(arena)
         }
     }
 
@@ -966,5 +870,64 @@ mod tests {
         let ordered_values: Vec<i32> = items.iter().map(|t| t.0).collect();
         println!("\n--- Final Order ---");
         println!("Order: {:?}", ordered_values);
+    }
+}
+
+impl<T: Encode> Encode for ZSet<T> {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        fn tree<T: Encode>(node: &Option<Box<Node<T>>>, arena: &mut Arena) -> Result<Noun, Error> {
+            let Some(node) = node else {
+                return Ok(arena.atom0());
+            };
+            let value = node.value.encode(arena)?;
+            let left = tree(&node.left, arena)?;
+            let right = tree(&node.right, arena)?;
+            let children = arena.alloc_cell(left, right);
+            Ok(arena.alloc_cell(value, children))
+        }
+        tree(&self.root, arena)
+    }
+}
+
+impl<T> Decode for ZSet<T>
+where
+    T: Decode + Encode + DorTip + Clone + Debug + PartialEq,
+{
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        fn tree<T: Decode>(noun: Noun, arena: &Arena) -> Result<Option<Box<Node<T>>>, Error> {
+            if is_null(noun, arena) {
+                return Ok(None);
+            }
+            let (value, children) = pair(noun, arena)?;
+            let (left, right) = pair(children, arena)?;
+            Ok(Some(Box::new(Node {
+                value: T::decode(value, arena)?,
+                left: tree(left, arena)?,
+                right: tree(right, arena)?,
+            })))
+        }
+        Ok(Self {
+            root: tree(noun, arena)?,
+        })
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T: Encode> noun_serde::NounEncode for ZSet<T> {
+    fn to_noun<A: nockvm::noun::NounAllocator>(&self, alloc: &mut A) -> nockvm::noun::Noun {
+        crate::noun_codec::encode_runtime(self, alloc)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> noun_serde::NounDecode for ZSet<T>
+where
+    T: Decode + Encode + DorTip + Clone + Debug + PartialEq,
+{
+    fn from_noun(
+        noun: &nockvm::noun::Noun,
+        space: &nockvm::noun::NounSpace,
+    ) -> Result<Self, noun_serde::NounDecodeError> {
+        crate::noun_codec::decode_runtime(*noun, space)
     }
 }
