@@ -16,8 +16,6 @@ pub mod test_schnorr_signature_hash;
 pub mod test_signature_hash;
 #[cfg(test)]
 pub mod test_signature_hashable;
-#[cfg(all(test, feature = "legacy-tests"))]
-pub mod test_tx_builder_sighash;
 #[cfg(test)]
 pub mod test_zmap_structure;
 #[cfg(test)]

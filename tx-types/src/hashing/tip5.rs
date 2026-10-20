@@ -1,15 +1,21 @@
-use nockapp::noun::slab::NounSlab;
+use alloc::{format, string::String};
+#[cfg(feature = "std")]
 use nockapp::Noun;
 // Re-export for use by other modules in this crate
-use nockapp::noun::NounAllocatorExt;
+#[cfg(feature = "std")]
 pub use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
+#[cfg(feature = "std")]
 use nockchain_math::shape::do_leaf_sequence;
+#[cfg(feature = "std")]
 use nockchain_math::tip5::hash::{hash_belts_slice, hash_noun_varlen_digest, hash_ten_cell};
+#[cfg(feature = "std")]
 use nockvm::jets::util::test::init_context;
+#[cfg(feature = "std")]
 use nockvm::jets::JetErr;
+#[cfg(feature = "std")]
 use nockvm::noun::{NounAllocator, NounSpace};
-use zkvm_jetpack::jets::tip5_jets::hash_hashable as hash_hashable_noun;
 
+#[cfg(feature = "std")]
 use crate::transaction_types::Hash;
 
 /// Errors that can occur during TIP5 hashing
@@ -23,8 +29,8 @@ pub enum Tip5Error {
     InvalidNoun(String),
 }
 
-impl std::fmt::Display for Tip5Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Tip5Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Tip5Error::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
             Tip5Error::HashingError(msg) => write!(f, "Hashing error: {}", msg),
@@ -33,8 +39,9 @@ impl std::fmt::Display for Tip5Error {
     }
 }
 
-impl std::error::Error for Tip5Error {}
+impl core::error::Error for Tip5Error {}
 
+#[cfg(feature = "std")]
 impl From<JetErr> for Tip5Error {
     fn from(err: JetErr) -> Self {
         Tip5Error::HashingError(format!("Jet error: {:?}", err))
@@ -44,6 +51,7 @@ impl From<JetErr> for Tip5Error {
 /// TIP5 hasher for Nock nouns
 pub struct Tip5Hasher;
 
+#[cfg(feature = "std")]
 impl Tip5Hasher {
     /// Parse a hash noun which can be either:
     /// - A 5-tuple: [a [b [c [d e]]]] (from digest_to_noundigest)
@@ -158,20 +166,7 @@ impl Tip5Hasher {
 
     /// Hash a Hashable structure using the TIP5 jet.
     pub fn hash_hashable(hashable: &crate::hashing::hashable::Hashable) -> Result<Hash, Tip5Error> {
-        hashable.validate_leaves()?;
-        let mut slab: NounSlab = NounSlab::new();
-        let noun = hashable.to_noun(&mut slab);
-        slab.set_root(noun);
-        let slab_space = slab.noun_space();
-
-        let context = &mut init_context();
-        let copied = context.stack.copy_into(noun, &slab_space);
-        let stack_space = context.stack.noun_space();
-        let hash_noun = hash_hashable_noun(&mut context.stack, copied, &stack_space)
-            .map_err(|e| Tip5Error::HashingError(format!("TIP5 hash_hashable failed: {:?}", e)))?;
-
-        let result_space = context.stack.noun_space();
-        Self::digest_from_noun(hash_noun, &result_space)
+        super::hasher::hash_hashable(hashable)
     }
 
     /// Hash a noun and convert to base58 string
@@ -238,7 +233,7 @@ impl Tip5Hasher {
 
 // Tests for the TIP5Hasher struct
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
     use nockvm::noun::{D, T};
@@ -316,5 +311,11 @@ mod tests {
         assert_eq!(hash.values, hash2.values, "Hash should be deterministic");
 
         println!("hash_varlen([1, 2, 3]) = {:x?}", hash.values);
+    }
+}
+
+impl From<pokenoun::Tip5Error> for Tip5Error {
+    fn from(error: pokenoun::Tip5Error) -> Self {
+        Self::HashingError(format!("TIP5: {error:?}"))
     }
 }

@@ -1,224 +1,41 @@
-//! Transaction Fee Calculator
-//!
-//! This module implements the current Bythos-aware minimum fee calculation logic for
-//! Nockchain transactions.
-//!
-//! The modern consensus rules are page-aware:
-//! - before `BYTHOS_PHASE`, fee accounting uses the legacy 2x base-fee rate
-//! - at and after `BYTHOS_PHASE`, the base fee drops to `BASE_FEE`
-//! - at and after `BYTHOS_PHASE`, witness inputs are discounted by
-//!   `INPUT_FEE_DIVISOR`
-//! - at and after `BYTHOS_PHASE`, note-data is charged once per `lock_root`,
-//!   matching output construction
-//!
-//! The canonical implementation lives in `hoon/common/tx-engine.hoon`.
+//! Minimum transaction fees from exact shared word accounting.
+use crate::fee::{compute_minimum_fee, FeeBreakdown, FeeInputs};
+use crate::word_count::transaction_words;
+use crate::{Coins, NName, Spend, ZMap};
+use pokenoun::codec::Error;
 
-extern crate alloc;
+pub use crate::fee::{BASE_FEE, BYTHOS_PHASE, INPUT_FEE_DIVISOR, MIN_FEE};
 
-use crate::collections::ZMap;
-use crate::generic_noun::UntypedNoun;
-#[cfg(test)]
-use crate::hashing::hashable::Hashable;
-use crate::transaction_types::{Coins, Hash, NName, Spend, SpendBody};
-use crate::transaction_types_v0::SpendV0;
-use crate::transaction_types_v1::{NoteData, SeedV1, SeedsV1, SpendV0ToV1, Witness};
-use nockapp::noun::slab::{NockJammer, NounSlab};
-use nockvm::noun::{Noun, NounAllocator, NounSpace};
-use noun_serde::NounEncode;
-
-/// Activation height for the Bythos fee and witness-format upgrade.
-pub const BYTHOS_PHASE: u64 = 54_000;
-
-/// Base fee per word for witness and note-data storage after Bythos.
-pub const BASE_FEE: u64 = 16_384;
-
-/// Inputs pay `1 / INPUT_FEE_DIVISOR` of the output rate at/after Bythos.
-pub const INPUT_FEE_DIVISOR: u64 = 4;
-
-/// Minimum fee in nicks (absolute floor)
-/// From blockchain-constants: min-fee=256
-pub const MIN_FEE: u64 = 256;
-
-const LEGACY_BASE_FEE_MULTIPLIER: u64 = 2;
-
-/// Calculate the minimum required fee for a set of spends using modern mainnet rules.
-///
-/// For height-sensitive callers, prefer `calculate_min_fee_for_page`.
 pub fn calculate_min_fee(spends: &ZMap<NName, Spend>) -> Coins {
     calculate_min_fee_for_page(spends, BYTHOS_PHASE)
 }
 
-/// Calculate the minimum required fee for a set of spends at a specific page.
 pub fn calculate_min_fee_for_page(spends: &ZMap<NName, Spend>, page_num: u64) -> Coins {
-    let bythos_active = page_num >= BYTHOS_PHASE;
-    let effective_base_fee = if bythos_active {
-        BASE_FEE
-    } else {
-        BASE_FEE * LEGACY_BASE_FEE_MULTIPLIER
+    let inputs = FeeInputs {
+        seed_words: 0,
+        witness_words: 0,
+        height: page_num,
+        bythos_phase: BYTHOS_PHASE,
+        base_fee: BASE_FEE,
+        input_fee_divisor: INPUT_FEE_DIVISOR,
+        min_fee: MIN_FEE,
     };
-
-    let seed_word_count = count_seed_words(spends, page_num);
-    let witness_word_count = count_witness_words(spends);
-    let witness_divisor = if bythos_active { INPUT_FEE_DIVISOR } else { 1 };
-
-    let seed_fee = seed_word_count * effective_base_fee;
-    let witness_fee = (witness_word_count * effective_base_fee) / witness_divisor;
-    let word_fee = seed_fee + witness_fee;
-    let min_fee = core::cmp::max(word_fee, MIN_FEE);
-
-    Coins { value: min_fee }
-}
-
-fn count_seed_words(spends: &ZMap<NName, Spend>, page_num: u64) -> u64 {
-    if page_num >= BYTHOS_PHASE {
-        count_seed_words_merged(spends)
-    } else {
-        count_seed_words_legacy(spends)
+    Coins {
+        value: calculate_fee(spends, inputs)
+            .expect("valid spend noun encoding")
+            .minimum_fee,
     }
 }
 
-fn count_seed_words_legacy(spends: &ZMap<NName, Spend>) -> u64 {
-    spends
-        .tap()
-        .iter()
-        .map(|(_name, spend)| match &spend.body {
-            SpendBody::V1(body) => count_seeds_v1_words(&body.seeds),
-            SpendBody::V0ToV1(body) => count_seeds_v1_words(&body.seeds),
-            SpendBody::V0(_) => 0,
-        })
-        .sum()
-}
-
-fn count_seed_words_merged(spends: &ZMap<NName, Spend>) -> u64 {
-    let mut note_data_by_lock_root: ZMap<Hash, NoteData> = ZMap::new();
-
-    for (_name, spend) in spends.tap() {
-        for seed in v1_seeds(&spend) {
-            if let Some(existing) = note_data_by_lock_root.get(&seed.lock_root).cloned() {
-                let mut merged = existing.map;
-                for (key, value) in seed.note_data.map.tap() {
-                    merged.put(key, value);
-                }
-                note_data_by_lock_root.put(seed.lock_root.clone(), NoteData { map: merged });
-            } else {
-                note_data_by_lock_root.put(seed.lock_root.clone(), seed.note_data.clone());
-            }
-        }
-    }
-
-    note_data_by_lock_root
-        .tap()
-        .iter()
-        .map(|(_lock_root, note_data)| count_note_data_words(note_data))
-        .sum()
-}
-
-fn v1_seeds(spend: &Spend) -> Vec<SeedV1> {
-    match &spend.body {
-        SpendBody::V1(body) => body.seeds.set.tap(),
-        SpendBody::V0ToV1(body) => body.seeds.set.tap(),
-        SpendBody::V0(_) => Vec::new(),
-    }
-}
-
-fn count_seeds_v1_words(seeds: &SeedsV1) -> u64 {
-    seeds
-        .set
-        .iter()
-        .map(|seed| count_note_data_words(&seed.note_data))
-        .sum()
-}
-
-/// Count note-data words exactly as Hoon does:
-/// `num-of-leaves:shape (~(rep z-by note-data) |=([[k v] tree] [k v tree]))`.
-///
-/// The fold builds `[k1 v1 [k2 v2 ... [kn vn ~]]]`, so each entry contributes
-/// one word for its key plus the leaves of its value, and the terminal `~`
-/// contributes one more word. Counting the z-map noun itself would add the
-/// internal `[node left right]` cells and overcharge by one word per entry.
-fn count_note_data_words(note_data: &NoteData) -> u64 {
-    let mut total = 1; // terminal ~
-    for (_key, value) in note_data.map.tap() {
-        total += 1; // key
-        total += count_untyped_noun_leaves(&value);
-    }
-    total
-}
-
-/// Count the leaves of an `UntypedNoun` value. Values stored in note-data are
-/// arbitrary nouns, so recurse through cells rather than treating the value as
-/// a single atom. A value that cannot be cued is counted as one atom.
-fn count_untyped_noun_leaves(value: &UntypedNoun) -> u64 {
-    let mut slab = NounSlab::<NockJammer>::new();
-    match slab.cue_into(value.p.clone()) {
-        Ok(noun) => {
-            let space = slab.noun_space();
-            count_leaves_from_noun(noun, &space)
-        }
-        Err(_) => 1,
-    }
-}
-
-fn count_witness_words(spends: &ZMap<NName, Spend>) -> u64 {
-    spends
-        .tap()
-        .iter()
-        .map(|(_name, spend)| count_spend_witness_words(spend))
-        .sum()
-}
-
-fn count_spend_witness_words(spend: &Spend) -> u64 {
-    match &spend.body {
-        SpendBody::V1(body) => count_v1_witness_words(&body.witness),
-        SpendBody::V0ToV1(body) => count_v0_to_v1_signature_words(body),
-        SpendBody::V0(body) => count_legacy_signature_words(body),
-    }
-}
-
-fn count_v1_witness_words(witness: &Witness) -> u64 {
-    count_leaves_from_encoder(|slab| witness.to_noun(slab))
-}
-
-fn count_v0_to_v1_signature_words(spend: &SpendV0ToV1) -> u64 {
-    count_leaves_from_encoder(|slab| spend.signature.to_noun(slab))
-}
-
-fn count_legacy_signature_words(spend: &SpendV0) -> u64 {
-    count_leaves_from_encoder(|slab| spend.signature.to_noun(slab))
-}
-
-/// Count the number of leaves in a Hashable tree
-///
-/// This mirrors the Hoon `num-of-leaves:shape` function.
-/// Leaves, Hashes, and Lists each count as 1.
-/// Cells recursively sum their left and right subtrees.
-#[cfg(test)]
-fn count_leaves(h: &Hashable) -> u64 {
-    match h {
-        // Non-cell cases: Leaf, Hash, and List all count as 1 leaf
-        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => 1,
-        // Cell case: sum of left and right subtrees
-        Hashable::Cell(left, right) => count_leaves(left) + count_leaves(right),
-    }
-}
-
-fn count_leaves_from_encoder<F>(build: F) -> u64
-where
-    F: Fn(&mut NounSlab<NockJammer>) -> Noun,
-{
-    let mut slab = NounSlab::<NockJammer>::new();
-    let noun = build(&mut slab);
-    let space = slab.noun_space();
-    count_leaves_from_noun(noun, &space)
-}
-
-fn count_leaves_from_noun(noun: Noun, space: &NounSpace) -> u64 {
-    if let Ok(cell) = noun.in_space(space).as_cell() {
-        count_leaves_from_noun(cell.head().noun(), space)
-            + count_leaves_from_noun(cell.tail().noun(), space)
-    } else {
-        1
-    }
+/// Fee rates and activation height come from the caller; word counts come from spends.
+pub fn calculate_fee(
+    spends: &ZMap<NName, Spend>,
+    mut inputs: FeeInputs,
+) -> Result<FeeBreakdown, Error> {
+    let counts = transaction_words(spends, inputs.height >= inputs.bythos_phase)?;
+    inputs.seed_words = counts.seed_words;
+    inputs.witness_words = counts.witness_words;
+    Ok(compute_minimum_fee(inputs))
 }
 
 #[cfg(test)]
@@ -226,7 +43,29 @@ mod tests {
     use super::*;
     use crate::collections::ZSet;
     use crate::generic_noun::UntypedNoun;
-    use nockvm::noun::D;
+    use crate::hashing::Hashable;
+    use crate::word_count::{note_data_words, seed_words, witness_words};
+    use crate::{Hash, NoteData, SeedV1, SeedsV1, SpendBody, SpendV0ToV1};
+    use alloc::{string::ToString, vec, vec::Vec};
+    use pokenoun::codec::Encode;
+    fn count_note_data_words(data: &NoteData) -> u64 {
+        note_data_words(data).unwrap()
+    }
+    fn count_seed_words_legacy(spends: &ZMap<NName, Spend>) -> u64 {
+        seed_words(spends, false).unwrap()
+    }
+    fn count_seed_words_merged(spends: &ZMap<NName, Spend>) -> u64 {
+        seed_words(spends, true).unwrap()
+    }
+    fn count_witness_words(spends: &ZMap<NName, Spend>) -> u64 {
+        witness_words(spends).unwrap()
+    }
+    fn count_leaves(h: &Hashable) -> u64 {
+        match h {
+            Hashable::Cell(left, right) => count_leaves(left) + count_leaves(right),
+            _ => 1,
+        }
+    }
 
     #[test]
     fn test_count_leaves() {
@@ -343,10 +182,7 @@ mod tests {
 
         assert_eq!(
             pre_fee,
-            core::cmp::max(
-                (legacy_seed_words + witness_words) * BASE_FEE * LEGACY_BASE_FEE_MULTIPLIER,
-                MIN_FEE
-            )
+            core::cmp::max((legacy_seed_words + witness_words) * BASE_FEE * 2, MIN_FEE)
         );
         assert_eq!(
             post_fee,
@@ -414,16 +250,14 @@ mod tests {
     }
 
     fn untyped_atom(value: u64) -> UntypedNoun {
-        let mut slab = NounSlab::<NockJammer>::new();
-        let space = slab.noun_space();
-        slab.copy_into(D(value), &space);
-        UntypedNoun { p: slab.jam() }
+        UntypedNoun {
+            p: value.to_jam().unwrap().into(),
+        }
     }
 
     fn untyped_cell(head: u64, tail: u64) -> UntypedNoun {
-        let mut slab = NounSlab::<NockJammer>::new();
-        let noun = nockvm::noun::T(&mut slab, &[D(head), D(tail)]);
-        slab.set_root(noun);
-        UntypedNoun { p: slab.jam() }
+        UntypedNoun {
+            p: (head, tail).to_jam().unwrap().into(),
+        }
     }
 }

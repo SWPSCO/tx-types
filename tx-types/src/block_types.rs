@@ -2,17 +2,17 @@ use crate::collections::zmap::ZMap;
 use crate::collections::zset::ZSet;
 use crate::fee_calculator::BYTHOS_PHASE;
 use crate::hashing::hashable::Hashable;
-use crate::hashing::hasher::{hash_hashable, hash_ten_cell};
+use crate::hashing::hasher::hash_hashable;
+use crate::lock::{build_lock_merkle_proof, Lock as V1Lock};
 use crate::transaction_types::*;
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use nockapp::noun::slab::NounSlab;
-use nockvm::noun::{Noun, NounSpace};
+use nockvm::noun::{Noun, NounAllocator, NounSpace};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use num_bigint::BigUint;
-use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Block Type Wrapper Types
@@ -70,7 +70,8 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
 
     let lk: SpendCondition = SpendCondition { p: vec![pkh, tim] };
 
-    let lmp = build_lock_merkle_proof(lk, 1, BYTHOS_PHASE);
+    let lmp = build_lock_merkle_proof(&V1Lock::SpendCondition(lk), 1, BYTHOS_PHASE)
+        .expect("coinbase condition is nonempty");
     let root = lmp.proof().root.clone();
 
     NName::new_v1(
@@ -80,151 +81,6 @@ pub fn make_name(pkh_hashes: ZSet<Hash>, parent_hash: Hash) -> NName {
             is_coinbase: true,
         },
     )
-}
-
-/// Build a lock merkle proof appropriate for the given page.
-///
-/// Hoon rejects a `%full` proof before Bythos activation
-/// (`check-context.check: (gte now bythos-phase)`), so choose the stub form
-/// below `BYTHOS_PHASE` and the full form at/after it. Callers that know the
-/// current chain height should pass it here.
-pub fn build_lock_merkle_proof(
-    form: SpendCondition,
-    leaf_number: u64,
-    page: u64,
-) -> LockMerkleProof {
-    if page >= BYTHOS_PHASE {
-        build_lock_merkle_proof_full(form, leaf_number)
-    } else {
-        build_lock_merkle_proof_stub(form, leaf_number)
-    }
-}
-
-pub fn build_lock_merkle_proof_stub(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
-    let hashable_form = Hashable::Hash(form.to_hash());
-    let (axis, merkle_proof) = prove_hashable_by_index(hashable_form, leaf_number);
-    let spend_condition = traverse_lock(form);
-    LockMerkleProof::new_stub(spend_condition, axis, merkle_proof)
-}
-
-pub fn build_lock_merkle_proof_full(form: SpendCondition, leaf_number: u64) -> LockMerkleProof {
-    let (spend_condition, axis, merkle_proof) =
-        build_lock_merkle_proof_stub(form, leaf_number).into_parts();
-    LockMerkleProof::new_full(spend_condition, axis, merkle_proof)
-}
-
-/// Tree address composition (peg) - combines two axes into a single address
-///
-/// This function computes the composition of tree addresses in Nock.
-/// For example, peg(2, 3) = 5 (go left, then right)
-///
-/// The algorithm works by bit manipulation:
-/// - Take all bits of `a`
-/// - Take all bits of `b` except the leading 1
-/// - Concatenate them: [b without leading 1][a]
-fn peg(a: u64, b: u64) -> u64 {
-    assert!(a != 0, "peg: a must be non-zero");
-    assert!(b != 0, "peg: b must be non-zero");
-
-    // Find the number of bits in b
-    let b_bits = 64 - b.leading_zeros();
-
-    // The output has (a_bits + b_bits - 1) bits
-    // We remove the leading 1 from b and concatenate with all of a
-
-    // Mask to get b without its leading bit
-    let b_mask = (1u64 << (b_bits - 1)) - 1;
-    let b_without_leading = b & b_mask;
-
-    // Shift a left by (b_bits - 1) and OR with b_without_leading
-    (a << (b_bits - 1)) | b_without_leading
-}
-
-/// Count the number of leaves in a Hashable tree
-fn leaf_count(h: &Hashable) -> u64 {
-    match h {
-        // Non-cell cases: Leaf, Hash, and List all count as 1 leaf
-        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => 1,
-        // Cell case: sum of left and right subtrees
-        Hashable::Cell(left, right) => leaf_count(left) + leaf_count(right),
-    }
-}
-
-/// Build a merkle proof for the leaf at the given index in a Hashable tree
-///
-/// This is the core recursive function that:
-/// - Returns the root hash, path (list of sibling hashes), and tree axis
-/// - Navigates left or right based on leaf counts
-/// - Builds the proof path as it recurses back up
-fn prove_hashable_go(node: &Hashable, index: u64) -> (Hash, Vec<Hash>, u64) {
-    match node {
-        // Base case: non-cell node (Leaf, Hash, or List)
-        Hashable::Leaf(_) | Hashable::Hash(_) | Hashable::List(_) => {
-            let root = hash_hashable(node).expect("lock hashable is u64-based");
-            (root, Vec::new(), 1)
-        }
-
-        // Recursive case: Cell
-        Hashable::Cell(left, right) => {
-            let lc = leaf_count(left);
-
-            if index <= lc {
-                // The target leaf is in the left subtree
-                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(left, index);
-                let sibling = hash_hashable(right).expect("lock hashable is u64-based");
-
-                // Combine the recursive root with the sibling
-                let root = hash_ten_cell(rec_root, sibling.clone());
-
-                // Add sibling to the path
-                rec_path.push(sibling);
-
-                // Compute new axis: go left (2) then follow rec_axis
-                let axis = peg(2, rec_axis);
-
-                (root, rec_path, axis)
-            } else {
-                // The target leaf is in the right subtree
-                let (rec_root, mut rec_path, rec_axis) = prove_hashable_go(right, index - lc);
-                let sibling = hash_hashable(left).expect("lock hashable is u64-based");
-
-                // Combine sibling with the recursive root
-                let root = hash_ten_cell(sibling.clone(), rec_root);
-
-                // Add sibling to the path
-                rec_path.push(sibling);
-
-                // Compute new axis: go right (3) then follow rec_axis
-                let axis = peg(3, rec_axis);
-
-                (root, rec_path, axis)
-            }
-        }
-    }
-}
-
-/// Build a merkle proof for a hashable at a given index
-///
-/// Given a Hashable tree structure and a 1-based index, this returns:
-/// - The axis (tree address) of the leaf
-/// - A MerkleProof containing the root hash and sibling path
-///
-/// # Panics
-/// Panics if index is 0 (indices are 1-based)
-pub fn prove_hashable_by_index(hashable: Hashable, index: u64) -> (u64, MerkleProof) {
-    assert!(
-        index != 0,
-        "prove_hashable_by_index: index must be non-zero (1-based indexing)"
-    );
-
-    let (root, path, axis) = prove_hashable_go(&hashable, index);
-
-    (axis, MerkleProof { root, path })
-}
-
-pub fn traverse_lock(spend_condition: SpendCondition) -> SpendCondition {
-    // for coinbase we don't need to implement this
-    spend_condition
 }
 
 /// Wrapper for transaction ID set
@@ -768,5 +624,19 @@ mod tests {
             "Block commitment hash should match Hoon output.\nGot:      {:x?}\nExpected: {:x?}",
             commitment_hash.values, expected_hash.values
         );
+    }
+}
+
+impl pokenoun::codec::Decode for Page {
+    fn decode(
+        noun: pokenoun::Noun,
+        arena: &pokenoun::Arena,
+    ) -> Result<Self, pokenoun::codec::Error> {
+        let mut slab: NounSlab = NounSlab::new();
+        let noun = slab
+            .cue_into(Bytes::from(pokenoun::jam(noun, arena)))
+            .map_err(|_| pokenoun::codec::Error("invalid page jam"))?;
+        Self::from_noun(&noun, &slab.noun_space())
+            .map_err(|_| pokenoun::codec::Error("invalid page noun"))
     }
 }

@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use crate::arena::{Arena, CellId, Noun};
 
@@ -112,6 +115,7 @@ enum Slot {
     Root,
     Head(CellId),
     Tail(CellId),
+    Complete(u64, Noun),
 }
 
 /// Decode a jammed noun (little-endian bytes, LSB-first bits) into an in-memory noun tree.
@@ -124,6 +128,13 @@ pub fn cue(bytes: &[u8], arena: &mut Arena) -> Result<Noun, CodecError> {
     stack.push(Slot::Root);
 
     while let Some(slot) = stack.pop() {
+        if let Slot::Complete(position, noun) = slot {
+            let index = backrefs
+                .binary_search_by_key(&position, |entry| entry.0)
+                .unwrap_err();
+            backrefs.insert(index, (position, noun));
+            continue;
+        }
         let start = reader.pos();
         let first = reader.read_bit()?;
         if !first {
@@ -162,6 +173,7 @@ pub fn cue(bytes: &[u8], arena: &mut Arena) -> Result<Noun, CodecError> {
                 Slot::Root => root = Some(noun),
                 Slot::Head(id) => arena.cell_mut(id).head = noun,
                 Slot::Tail(id) => arena.cell_mut(id).tail = noun,
+                Slot::Complete(_, _) => unreachable!(),
             }
             continue;
         }
@@ -174,23 +186,25 @@ pub fn cue(bytes: &[u8], arena: &mut Arena) -> Result<Noun, CodecError> {
                 Slot::Root => root = Some(noun),
                 Slot::Head(id) => arena.cell_mut(id).head = noun,
                 Slot::Tail(id) => arena.cell_mut(id).tail = noun,
+                Slot::Complete(_, _) => unreachable!(),
             }
             continue;
         }
 
         // cell (10)
         let cell_noun = arena.alloc_cell(arena.atom0(), arena.atom0());
-        backrefs.push((start, cell_noun));
         match slot {
             Slot::Root => root = Some(cell_noun),
             Slot::Head(id) => arena.cell_mut(id).head = cell_noun,
             Slot::Tail(id) => arena.cell_mut(id).tail = cell_noun,
+            Slot::Complete(_, _) => unreachable!(),
         }
         let Noun::Cell(cell_id) = cell_noun else {
             unreachable!();
         };
 
         // Decode head then tail; stack is LIFO so push tail first.
+        stack.push(Slot::Complete(start, cell_noun));
         stack.push(Slot::Tail(cell_id));
         stack.push(Slot::Head(cell_id));
     }
@@ -271,36 +285,94 @@ fn mat(writer: &mut BitWriter, atom_bits: usize, atom_bytes: &[u8]) -> Result<()
     Ok(())
 }
 
-fn jam_noun(writer: &mut BitWriter, arena: &Arena, noun: Noun) -> Result<(), CodecError> {
-    let mut stack: Vec<Noun> = Vec::new();
-    stack.push(noun);
-    while let Some(n) = stack.pop() {
-        match n {
-            Noun::Atom(id) => {
-                writer.write_bit(false); // 0 tag
-                let bytes = arena.atom_bytes(id);
-                let bits = met0_bytes(bytes);
-                mat(writer, bits, bytes)?;
-            }
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Value<'a> {
+    Atom(&'a [u8]),
+    Cell(usize, usize),
+}
+
+fn noun_key(noun: Noun) -> (bool, u32) {
+    match noun {
+        Noun::Atom(id) => (false, id.0),
+        Noun::Cell(id) => (true, id.0),
+    }
+}
+
+/// Assign equal nouns the same ID, independently of arena allocation and sharing.
+fn intern(noun: Noun, arena: &Arena) -> Result<(usize, Vec<Value<'_>>), CodecError> {
+    let mut ids = BTreeMap::new();
+    let mut values = Vec::new();
+    let mut interned = BTreeMap::new();
+    let mut active = BTreeSet::new();
+    let mut pending = alloc::vec![(noun, false)];
+    while let Some((current, visited)) = pending.pop() {
+        let key = noun_key(current);
+        if ids.contains_key(&key) {
+            continue;
+        }
+        let value = match current {
+            Noun::Atom(id) => Value::Atom(arena.atom_bytes_trimmed(id)),
             Noun::Cell(id) => {
-                writer.write_bit(true);
-                writer.write_bit(false); // 10 tag
                 let cell = arena.cell(id);
-                // DFS: head then tail => push tail first.
-                stack.push(cell.tail);
-                stack.push(cell.head);
+                if !visited {
+                    if !active.insert(key) {
+                        return Err(CodecError::InvalidEncoding);
+                    }
+                    pending.extend([(current, true), (cell.tail, false), (cell.head, false)]);
+                    continue;
+                }
+                active.remove(&key);
+                Value::Cell(ids[&noun_key(cell.head)], ids[&noun_key(cell.tail)])
+            }
+        };
+        let next = values.len();
+        let id = *interned.entry(value).or_insert(next);
+        if id == next {
+            values.push(value);
+        }
+        ids.insert(key, id);
+    }
+    Ok((ids[&noun_key(noun)], values))
+}
+
+fn jam_noun(writer: &mut BitWriter, arena: &Arena, noun: Noun) -> Result<(), CodecError> {
+    let (root, values) = intern(noun, arena)?;
+    let mut backrefs = BTreeMap::<usize, u64>::new();
+    let mut pending = alloc::vec![root];
+    while let Some(id) = pending.pop() {
+        if let Some(&position) = backrefs.get(&id) {
+            let use_backref = match values[id] {
+                Value::Cell(_, _) => true,
+                Value::Atom(bytes) => met0_bytes(bytes) > met0_u64(position),
+            };
+            if use_backref {
+                writer.write_bit(true);
+                writer.write_bit(true);
+                mat(writer, met0_u64(position), &position.to_le_bytes())?;
+                continue;
+            }
+        } else {
+            backrefs.insert(id, writer.bit as u64);
+        }
+        match values[id] {
+            Value::Atom(bytes) => {
+                writer.write_bit(false);
+                mat(writer, met0_bytes(bytes), bytes)?;
+            }
+            Value::Cell(head, tail) => {
+                writer.write_bit(true);
+                writer.write_bit(false);
+                pending.extend([tail, head]);
             }
         }
     }
     Ok(())
 }
 
-/// Encode a noun tree into jam bytes (little-endian bytes, LSB-first bits).
-///
-/// This encoder currently emits no backreferences; output is still valid jam.
+/// Encode a finite noun as canonical JAM, using the first occurrence for backreferences.
 pub fn jam(noun: Noun, arena: &Arena) -> Vec<u8> {
     let mut writer = BitWriter::new();
-    jam_noun(&mut writer, arena, noun).expect("jam");
+    jam_noun(&mut writer, arena, noun).expect("JAM requires a finite noun");
     writer.bytes
 }
 
@@ -381,15 +453,29 @@ mod tests {
     }
 
     #[test]
-    fn shared_dag_walk_is_bounded() {
-        // A cell whose tail is a backreference to itself: legal jam, but its
-        // logical expansion is infinite. The walk must return an error.
-        let encoded = [0xf1, 0x01];
+    fn cue_rejects_a_backreference_to_an_incomplete_cell() {
         let mut arena = Arena::new();
-        let noun = cue(&encoded, &mut arena).expect("cyclic jam is decodable");
         assert!(matches!(
-            crate::tip5::hash_noun_varlen(noun, &arena),
-            Err(crate::tip5::Tip5Error::WalkTooLarge)
+            cue(&[0xf1, 0x01], &mut arena),
+            Err(CodecError::InvalidBackref)
         ));
+    }
+
+    #[test]
+    fn equal_cells_use_the_same_backreference_without_shared_allocation() {
+        let mut arena = Arena::new();
+        let a = arena.alloc_atom_u64(123456);
+        let b = arena.alloc_atom_u64(789012);
+        let first = arena.alloc_cell(a, b);
+        let shared = arena.alloc_cell(first, first);
+        let a = arena.alloc_atom_u64(123456);
+        let b = arena.alloc_atom_u64(789012);
+        let second = arena.alloc_cell(a, b);
+        let distinct = arena.alloc_cell(first, second);
+        assert_eq!(jam(shared, &arena), jam(distinct, &arena));
+        let encoded = jam(distinct, &arena);
+        let mut decoded = Arena::new();
+        let value = cue(&encoded, &mut decoded).unwrap();
+        assert_eq!(jam(value, &decoded), encoded);
     }
 }

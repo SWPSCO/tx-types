@@ -35,7 +35,17 @@ jobs:
         run: cargo test -p tx-types --no-default-features
 
       - name: Run hosted regression tests
-        run: cargo test -p tx-types
+        run: cargo test -p tx-types -p pokenoun
+
+      - name: Verify committed reference fixtures
+        working-directory: tx-types/tests/reference
+        run: sha256sum --check SHA256SUMS
+
+      - name: Build the embedded WASM adapter
+        run: cargo build -p tx-types --no-default-features --features std,embedded --target wasm32-unknown-unknown
+
+      - name: Compile the native adapter
+        run: cargo check -p tx-types --no-default-features --features std,native --lib
 
       - name: Compile the no-std vanity library
         run: cargo check -p vanity --features mnemonic --lib --target thumbv7em-none-eabihf

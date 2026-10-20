@@ -22,11 +22,43 @@ Add this to your `Cargo.toml`:
 tx-types = { git = "https://github.com/SWPSCO/tx-types" }
 ```
 
-## Migration / handoff
+## Shared wallet construction
 
-See [`docs/wallet-builder-migration.md`](docs/wallet-builder-migration.md) for the
-gap between this crate, upstream `nockchain-types`/`wallet-tx-builder`, and the
-170,000 consensus validation rules.
+The pure transaction core runs with `no_std + alloc`. Both runtime backends use
+its noun codecs, TIP5 hashes, lock trees, proof builders, note-data normalization,
+fee accounting, lock admission, and deterministic planner.
+
+| Module | Responsibility |
+| --- | --- |
+| `lock` | Tagged 1/2/4/8/16-condition locks, Merkle proofs, authorization siblings, stub-axis admission |
+| `note_data` | Canonical lock and bridge payloads, based-atom validation, opaque payload preservation |
+| `lock_resolver` | Effective signer selection, disclosed/reconstructed locks, candidate-height timelocks and configured fund maturity |
+| `planner` | Candidate ordering, manual selection, exact/minimum fees, refunds, and V0-to-V1 sweeps |
+| `word_count`, `fee` | Encoded witness words, merged output note data, activation-dependent fee rates |
+| `tx_builder` (`std`) | Software signatures applied to a shared plan |
+| `rpc_note_data` (`std`) | RPC JSON converted to the actual on-chain note-data commitment |
+
+Call `planner::plan(PlanRequest { ... }, &matcher)` with notes, outputs, a refund
+lock, and explicit chain/fee configuration. The result includes unsigned spends,
+selected inputs, refunds, exact signed word estimates, and the required fee.
+A `LockMatcher` supplies ownership/unlock context. Consumers own snapshot IO,
+key storage, signing transport, and submission. Input notes retain their actual
+note data; RPC lock metadata marked `reconstructed` is outside that commitment.
+
+`lock::Lock` is the V1 tree. `transaction_types::Lock` is the V0 signature lock.
+Portable noun IO uses `pokenoun::codec::{Encode, Decode}`; `std` adds
+`noun-serde` adapters for the selected `embedded` or `native` runtime.
+
+The [reference fixtures](tx-types/tests/reference/) record the official source
+pin, generation commands, and byte/hash/fee comparisons. Run the core matrix:
+
+```sh
+cargo test -p tx-types --lib
+cargo test -p tx-types --no-default-features --lib
+cargo build -p tx-types --no-default-features --target thumbv7em-none-eabihf
+cargo build -p tx-types --no-default-features --features std,embedded --target wasm32-unknown-unknown
+cargo check -p tx-types --no-default-features --features std,native --lib
+```
 
 ## Vanity addresses
 

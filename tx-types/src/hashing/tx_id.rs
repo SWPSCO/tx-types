@@ -1,7 +1,9 @@
 /// Transaction ID computation
 /// Implements the compute-id logic from Hoon's raw-tx
 use super::hashable::Hashable;
-use super::hasher::{digest_to_base58, hash_hashable};
+#[cfg(feature = "std")]
+use super::hasher::digest_to_base58;
+use super::hasher::hash_hashable;
 use crate::transaction_types::{Coins, Hash, Inputs, TimelockRange};
 
 /// Compute the transaction ID from components
@@ -34,6 +36,7 @@ pub fn compute_tx_id(inputs: &Inputs, timelock_range: &TimelockRange, total_fees
 }
 
 /// Compute tx-id and return as base58 string
+#[cfg(feature = "std")]
 pub fn compute_tx_id_base58(
     inputs: &Inputs,
     timelock_range: &TimelockRange,

@@ -1,23 +1,24 @@
-use nockapp::noun::slab::NounSlab;
-use nockapp::noun::AtomExt;
-use nockapp::Noun;
-use nockvm::noun::{Atom, NounAllocator, NounSpace, D, T};
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
-use std::collections::HashMap;
-
-use crate::collections::{ZMap, ZSet};
+use crate::collections::ZSet;
 use crate::hashing::hashable::Hashable;
 use crate::hashing::hasher::hash_hashable;
-use crate::hashing::tip5::{Tip5Error, Tip5Hasher};
+use crate::hashing::tip5::Tip5Error;
 use crate::transaction_types_v0::*;
 use crate::transaction_types_v1::*;
-
-use bytes::Bytes;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+#[cfg(feature = "std")]
 use num_bigint::BigUint;
+#[cfg(feature = "std")]
 use num_traits::{One, Zero};
+use pokenoun::codec::{Decode, Encode, Error};
+use pokenoun::{Arena, Noun};
 
 // Coin name structure
-#[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Coins {
     pub value: u64,
 }
@@ -29,7 +30,7 @@ impl Coins {
 }
 
 // page number name structure
-#[derive(Debug, Clone, Copy, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageNumber {
     pub value: u64,
 }
@@ -41,19 +42,19 @@ impl PageNumber {
 }
 
 // Hash wrapper for transaction IDs and other hashes
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Hash {
     pub values: [u64; 5],
 }
 
 impl PartialOrd for Hash {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for Hash {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // Compare as UBig integers, not lexicographically
         // This ensures hash comparisons match the gor-tip behavior
         self.to_ubig().cmp(&other.to_ubig())
@@ -99,7 +100,6 @@ impl Hash {
         // Parse each u64 from the bytes
         for i in 0..5 {
             let start = i * 8;
-            let end = (i + 1) * 8;
 
             if start < bytes.len() {
                 // Get up to 8 bytes for this u64
@@ -121,6 +121,7 @@ impl Hash {
     /// tip5 domain) and the canonical base58 spelling. Values with a non-zero
     /// sixth quotient and aliases such as a leading `1` (zero byte) are
     /// rejected instead of being silently truncated or re-encoded.
+    #[cfg(feature = "std")]
     pub fn from_b58(base58: &str) -> Result<Self, String> {
         use crate::hashing::u320::U320;
 
@@ -155,9 +156,9 @@ impl Hash {
     /// Convert Hash to base58 encoded string
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(has=form `cord`(crip (en-base58 (digest-to-atom:tip5 has))))
+    #[cfg(feature = "std")]
     pub fn to_b58(&self) -> String {
         use bs58;
-        use num_bigint::BigUint;
 
         // The Goldilocks prime
         const GOLDILOCKS_PRIME: u64 = 0xFFFF_FFFF_0000_0001;
@@ -176,7 +177,7 @@ impl Hash {
 }
 
 // Note name structure
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NName {
     pub p: Vec<Hash>,
 }
@@ -297,6 +298,7 @@ impl NName {
         .expect("last_v1 hashable is u64-based")
     }
 
+    #[cfg(feature = "std")]
     pub fn display(&self) -> Vec<String> {
         self.p.iter().map(|h| h.to_b58()).collect()
     }
@@ -364,21 +366,8 @@ impl Timelock {
     }
 }
 
-impl NounEncode for Timelock {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        self.intent.to_noun(allocator)
-    }
-}
-
-impl NounDecode for Timelock {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        let intent = TimelockIntent::from_noun(noun, space)?;
-        Timelock::new(intent).map_err(|e| NounDecodeError::Custom(e))
-    }
-}
-
 // Timelock range structure
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimelockRange {
     pub min: Option<PageNumber>,
     pub max: Option<PageNumber>,
@@ -414,46 +403,9 @@ pub struct F6LT {
 }
 
 // Manual NounEncode/NounDecode implementations for F6LT
-impl NounEncode for F6LT {
-    fn to_noun<A: nockvm::noun::NounAllocator>(&self, allocator: &mut A) -> nockvm::noun::Noun {
-        use nockvm::noun::{Atom, T};
-        let atoms = self.values.map(|v| Atom::new(allocator, v).as_noun());
-        T(allocator, &atoms)
-    }
-}
-
-impl NounDecode for F6LT {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        // Extract 6 values from nested cell structure
-        let mut values = [0u64; 6];
-        let mut current = *noun;
-
-        for i in 0..5 {
-            let cell = current
-                .in_space(space)
-                .as_cell()
-                .map_err(|_| NounDecodeError::ExpectedCell)?;
-            values[i] = cell
-                .head()
-                .as_atom()
-                .map_err(|_| NounDecodeError::ExpectedAtom)?
-                .as_u64()?;
-            current = cell.tail().noun();
-        }
-
-        // Last element
-        values[5] = current
-            .in_space(space)
-            .as_atom()
-            .map_err(|_| NounDecodeError::ExpectedAtom)?
-            .as_u64()?;
-
-        Ok(F6LT { values })
-    }
-}
 
 // Schnorr signature structure a a-pt:cheta
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SchnorrPubkey {
     pub x: F6LT,
     pub y: F6LT,
@@ -462,6 +414,7 @@ pub struct SchnorrPubkey {
 
 impl SchnorrPubkey {
     #[inline]
+    #[cfg(feature = "std")]
     fn f6lt_words_be_desc(a: &F6LT, out: &mut Vec<u8>) {
         // a5...a0 as big-endian u64s
         out.extend_from_slice(&a.values[5].to_be_bytes());
@@ -475,10 +428,7 @@ impl SchnorrPubkey {
     pub fn to_hashable(&self) -> Hashable {
         // In Hoon, this is [%leaf form] where form is the pubkey noun.
         // We jam the noun and store it in Hashable::Leaf.
-        let mut slab: NounSlab = NounSlab::new();
-        let noun = self.to_noun(&mut slab);
-        slab.set_root(noun);
-        Hashable::Leaf(slab.jam().to_vec())
+        Hashable::Leaf(self.to_jam().expect("fixed-width noun encoding"))
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -490,6 +440,7 @@ impl SchnorrPubkey {
     /// ++  from-b58  |=(=cord `form`(base58-to-a-pt:cheetah cord))
     ///
     /// The base58 encoding represents a compressed elliptic curve point
+    #[cfg(feature = "std")]
     pub fn from_b58(s: &str) -> Result<Self, String> {
         if s == "inf" {
             return Ok(SchnorrPubkey {
@@ -538,9 +489,8 @@ impl SchnorrPubkey {
         })
     }
 
+    #[cfg(feature = "std")]
     fn pack_le(words: &[u64]) -> num_bigint::BigUint {
-        use num_bigint::BigUint;
-        use num_traits::{One, Zero};
         let mut n = BigUint::zero();
         for (i, &w) in words.iter().enumerate() {
             n += BigUint::from(w) << (64 * i);
@@ -548,8 +498,8 @@ impl SchnorrPubkey {
         n
     }
 
+    #[cfg(feature = "std")]
     pub fn to_base58(&self) -> String {
-        use num_bigint::BigUint;
         use num_traits::One;
         let mut n = BigUint::from(0u32);
 
@@ -570,6 +520,7 @@ impl SchnorrPubkey {
     /// Convert SchnorrPubkey to base58 encoded string
     /// Implements the Hoon to-b58 function:
     /// ++  to-b58  |=(sop=form `cord`(a-pt-to-base58:cheetah sop))
+    #[cfg(feature = "std")]
     pub fn to_b58(&self) -> String {
         if self.inf {
             return "inf".to_string();
@@ -581,10 +532,8 @@ impl SchnorrPubkey {
         bs58::encode(bytes).into_string()
     }
 
+    #[cfg(feature = "std")]
     pub fn from_base58(s: &str) -> Self {
-        use num_bigint::BigUint;
-        use num_traits::{One, Zero};
-
         let mut n = Self::de_base58(s);
         let inf = (&n & BigUint::one()) == BigUint::one();
         n >>= 1;
@@ -613,8 +562,8 @@ impl SchnorrPubkey {
         SchnorrPubkey { x, y, inf }
     }
 
+    #[cfg(feature = "std")]
     fn de_base58(s: &str) -> num_bigint::BigUint {
-        use num_bigint::BigUint;
         use num_traits::Zero;
         const ALPH: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
         let mut n = BigUint::zero();
@@ -624,8 +573,8 @@ impl SchnorrPubkey {
         }
         n
     }
+    #[cfg(feature = "std")]
     fn rip64(n: &num_bigint::BigUint) -> Vec<u64> {
-        use num_bigint::BigUint;
         use num_traits::Zero;
         let mut x = n.clone();
         let mut out = Vec::new();
@@ -645,14 +594,14 @@ impl SchnorrPubkey {
 
 // Implement PartialOrd and Ord manually to avoid conflict with DorTip
 impl PartialOrd for SchnorrPubkey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for SchnorrPubkey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering;
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
 
         // First try to compare based on hash (gor-tip style)
         // Since we don't have the hash computation here, fall back to dor comparison
@@ -674,7 +623,7 @@ impl Ord for SchnorrPubkey {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Lock {
     pub m: u64,
     pub pubkeys: ZSet<SchnorrPubkey>,
@@ -691,15 +640,9 @@ impl Lock {
         // $(pubkeys r.pubkeys)
 
         // Use ZSet's to_hashable method which properly traverses the tree
-        let pubkeys_hashable = self.pubkeys.to_hashable(|pubkey| {
-            // Hash each pubkey
-            let mut slab: NounSlab = NounSlab::new();
-            let pubkey_noun = pubkey.to_noun(&mut slab);
-            let space = slab.noun_space();
-            let pubkey_hash = Tip5Hasher::hash_noun_varlen(pubkey_noun, &space)
-                .expect("schnorr pubkey noun is u64-based");
-            Hashable::Hash(pubkey_hash)
-        });
+        let pubkeys_hashable = self
+            .pubkeys
+            .to_hashable(|pubkey| Hashable::Hash(pubkey.to_hash()));
 
         // Create the cell [leaf+m hashable-pubkeys]
         Hashable::cell(
@@ -723,6 +666,7 @@ impl Lock {
     ///   %+  turn  pks
     ///   |=  pk=@t
     ///   (from-b58:schnorr-pubkey pk)
+    #[cfg(feature = "std")]
     pub fn from_b58(m: u64, pubkeys_b58: Vec<String>) -> Result<Self, String> {
         let mut pubkeys = ZSet::new();
 
@@ -759,6 +703,7 @@ impl Lock {
     ///   ^-  [m=@udD pks=(list @t)]
     ///   :-  m.loc
     ///   (turn ~(tap z-in pubkeys.loc) to-b58:schnorr-pubkey)
+    #[cfg(feature = "std")]
     pub fn to_b58(&self) -> (u64, Vec<String>) {
         let pubkeys_b58: Vec<String> = self.pubkeys.iter().map(|pk| pk.to_b58()).collect();
 
@@ -766,8 +711,8 @@ impl Lock {
     }
 }
 
-impl std::hash::Hash for Lock {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl core::hash::Hash for Lock {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.m.hash(state);
         // Sort the pubkeys to ensure consistent hashing
         let mut sorted_pubkeys: Vec<_> = self.pubkeys.iter().collect();
@@ -783,7 +728,7 @@ impl std::hash::Hash for Lock {
     }
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Source {
     pub p: Hash,
     pub is_coinbase: bool,
@@ -822,37 +767,23 @@ impl NNote {
     }
 }
 
-impl NounDecode for NNote {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = NNoteV0::from_noun(noun, space) {
-            return Ok(NNote::V0(v0));
-        }
-        if let Ok(v1) = NNoteV1::from_noun(noun, space) {
-            return Ok(NNote::V1(v1));
-        }
-        Err(NounDecodeError::Custom(
-            "NNote enum decode: unsupported format".into(),
-        ))
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct T8 {
     pub values: [u64; 8],
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Chal {
     pub values: T8,
 }
 
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Sig {
     pub values: T8,
 }
 
 // Schnorr signature components
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct SchnorrSignature {
     pub chal: Chal,
     pub sig: Sig,
@@ -862,10 +793,7 @@ impl SchnorrSignature {
     pub fn to_hashable(&self) -> Hashable {
         // In Hoon, this is [%leaf form] where form is the signature noun.
         // We jam the noun and store it in Hashable::Leaf.
-        let mut slab: NounSlab = NounSlab::new();
-        let noun = self.to_noun(&mut slab);
-        slab.set_root(noun);
-        Hashable::Leaf(slab.jam().to_vec())
+        Hashable::Leaf(self.to_jam().expect("fixed-width noun encoding"))
     }
 
     pub fn to_hash(&self) -> Hash {
@@ -887,19 +815,10 @@ pub enum Seeds {
 }
 
 // Spend structure
-#[derive(Debug, Clone, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Spend {
     pub version: u64,
     pub body: SpendBody,
-}
-
-impl NounEncode for Spend {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        use nockvm::noun::T;
-        let version_noun = self.version.to_noun(allocator);
-        let body_noun = self.body.to_noun(allocator);
-        T(allocator, &[version_noun, body_noun])
-    }
 }
 
 impl Spend {
@@ -933,36 +852,6 @@ pub enum SpendBody {
     V1(SpendV1),
 }
 
-impl NounEncode for SpendBody {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            SpendBody::V0(v) => v.to_noun(allocator),
-            SpendBody::V0ToV1(v) => v.to_noun(allocator),
-            SpendBody::V1(v) => v.to_noun(allocator),
-        }
-    }
-}
-
-impl NounDecode for SpendBody {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        // Try V0 first
-        if let Ok(v0) = SpendV0::from_noun(noun, space) {
-            return Ok(SpendBody::V0(v0));
-        }
-        // Try V0ToV1
-        if let Ok(v0tov1) = SpendV0ToV1::from_noun(noun, space) {
-            return Ok(SpendBody::V0ToV1(v0tov1));
-        }
-        // Try V1
-        if let Ok(v1) = SpendV1::from_noun(noun, space) {
-            return Ok(SpendBody::V1(v1));
-        }
-        Err(NounDecodeError::Custom(
-            "SpendBody enum decode: unsupported format".into(),
-        ))
-    }
-}
-
 impl SpendBody {
     pub fn to_hashable(&self) -> Result<Hashable, Tip5Error> {
         match self {
@@ -990,26 +879,6 @@ pub enum Input {
     V1(InputV1),
 }
 
-impl NounEncode for Input {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            Input::V0(v) => v.to_noun(allocator),
-            Input::V1(_) => D(0),
-        }
-    }
-}
-
-impl NounDecode for Input {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputV0::from_noun(noun, space) {
-            return Ok(Input::V0(v0));
-        }
-        Err(NounDecodeError::Custom(
-            "Input enum decode: unsupported format".into(),
-        ))
-    }
-}
-
 impl Input {
     pub fn to_hashable(&self) -> Hashable {
         match self {
@@ -1035,26 +904,6 @@ pub enum Inputs {
     V1(InputsV1),
 }
 
-impl NounEncode for Inputs {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            Inputs::V0(v) => v.to_noun(allocator),
-            Inputs::V1(_) => D(0),
-        }
-    }
-}
-
-impl NounDecode for Inputs {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = InputsV0::from_noun(noun, space) {
-            return Ok(Inputs::V0(v0));
-        }
-        Err(NounDecodeError::Custom(
-            "Inputs enum decode: unsupported format".into(),
-        ))
-    }
-}
-
 impl Inputs {
     pub fn to_hashable(&self) -> Hashable {
         match self {
@@ -1068,7 +917,7 @@ impl Inputs {
 }
 
 // Hash wrapper for transaction IDs and other hashes
-#[derive(Debug, Clone, NounEncode, NounDecode)]
+#[derive(Debug, Clone)]
 pub struct Transaction {
     pub name: String,
     pub p: Inputs,
@@ -1082,85 +931,16 @@ pub enum Tx {
     V1(TxV1),
 }
 
-impl NounDecode for Tx {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        // First, peek at the version field (first field of the struct)
-        let cell = noun
-            .in_space(space)
-            .as_cell()
-            .map_err(|_| NounDecodeError::Custom("Tx must be a cell".into()))?;
-
-        let version_atom = cell
-            .head()
-            .as_atom()
-            .map_err(|_| NounDecodeError::Custom("Tx version must be an atom".into()))?;
-
-        let version = version_atom
-            .as_u64()
-            .map_err(|_| NounDecodeError::Custom("Tx version must be a u64".into()))?;
-
-        // Dispatch based on version
-        match version {
-            0 => TxV0::from_noun(noun, space).map(Tx::V0),
-            1 => TxV1::from_noun(noun, space).map(Tx::V1),
-            _ => Err(NounDecodeError::Custom(format!(
-                "Tx enum decode: unsupported version {}",
-                version
-            ))),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Outputs {
     V0(OutputsV0),
     V1(OutputsV1),
 }
 
-impl NounEncode for Outputs {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            Outputs::V0(v) => v.to_noun(allocator),
-            Outputs::V1(_) => D(0),
-        }
-    }
-}
-
-impl NounDecode for Outputs {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputsV0::from_noun(noun, space) {
-            return Ok(Outputs::V0(v0));
-        }
-        Err(NounDecodeError::Custom(
-            "Outputs enum decode: unsupported format".into(),
-        ))
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Output {
     V0(OutputV0),
     V1(OutputV1),
-}
-
-impl NounEncode for Output {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        match self {
-            Output::V0(v) => v.to_noun(allocator),
-            Output::V1(_) => D(0),
-        }
-    }
-}
-
-impl NounDecode for Output {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        if let Ok(v0) = OutputV0::from_noun(noun, space) {
-            return Ok(Output::V0(v0));
-        }
-        Err(NounDecodeError::Custom(
-            "Output enum decode: unsupported format".into(),
-        ))
-    }
 }
 
 // Raw transaction structure matching Hoon raw-tx form
@@ -1176,58 +956,22 @@ pub enum RawTransaction {
     V1(RawTransactionV1),
 }
 
-impl NounDecode for RawTransaction {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        // Try V1 first (has version field)
-        if let Ok(v1) = RawTransactionV1::from_noun(noun, space) {
-            return Ok(RawTransaction::V1(v1));
-        }
-        // Fall back to V0
-        if let Ok(v0) = RawTransactionV0::from_noun(noun, space) {
-            return Ok(RawTransaction::V0(v0));
-        }
-        Err(NounDecodeError::Custom(
-            "RawTransaction enum decode: unsupported format".into(),
-        ))
-    }
-}
-
-impl NounDecode for T8 {
-    fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NounDecodeError> {
-        let mut ret: [u64; 8] = [0; 8];
-        let mut cur = *noun;
-        for i in 0..7 {
-            let cur_cell = cur
-                .in_space(space)
-                .as_cell()
-                .map_err(|_| NounDecodeError::ExpectedCell)?;
-            ret[i] = cur_cell
-                .head()
-                .as_atom()
-                .map_err(|_| NounDecodeError::ExpectedAtom)?
-                .as_u64()?;
-            cur = cur_cell.tail().noun();
-        }
-        ret[7] = cur
-            .in_space(space)
-            .as_atom()
-            .map_err(|_| NounDecodeError::ExpectedAtom)?
-            .as_u64()?;
-        Ok(T8 { values: ret })
-    }
-}
-
-impl NounEncode for T8 {
-    fn to_noun<A: NounAllocator>(&self, alloc: &mut A) -> Noun {
-        let mut res_cell = Atom::new(alloc, self.values[7]).as_noun();
-        for i in (0..=6).rev() {
-            let b = Atom::new(alloc, self.values[i]).as_noun();
-            res_cell = T(alloc, &[b, res_cell]);
-        }
-        res_cell
-    }
-}
-
+crate::noun_codec::noun_struct!(
+    Coins { value },
+    PageNumber { value },
+    Hash { values },
+    NName { p },
+    TimelockRange { min, max },
+    F6LT { values },
+    SchnorrPubkey { x, y, inf },
+    Lock { m, pubkeys },
+    Source { p, is_coinbase },
+    T8 { values },
+    Chal { values },
+    Sig { values },
+    SchnorrSignature { chal, sig },
+    Transaction { name, p }
+);
 #[cfg(all(test, feature = "legacy-tests"))]
 mod tests {
     use crate::collections::ZSet;
@@ -1598,3 +1342,99 @@ mod tests {
         println!("Number of inputs: {}", decoded.p.p.wyt());
     }
 }
+
+impl Encode for Timelock {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        self.intent.encode(arena)
+    }
+}
+impl Decode for Timelock {
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        Self::new(TimelockIntent::decode(noun, arena)?).map_err(|_| Error("empty timelock intent"))
+    }
+}
+
+macro_rules! noun_union {
+    ($ty:ident { $($variant:ident($payload:ty)),+ $(,)? }) => {
+        impl Encode for $ty {
+            fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+                match self { $(Self::$variant(value) => value.encode(arena)),+ }
+            }
+        }
+        impl Decode for $ty {
+            fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+                $(if let Ok(value) = <$payload>::decode(noun, arena) { return Ok(Self::$variant(value)); })+
+                Err(Error(concat!("invalid ", stringify!($ty), " noun")))
+            }
+        }
+        crate::noun_codec::runtime_codec!($ty);
+    };
+}
+
+noun_union!(NNote { V0(NNoteV0), V1(NNoteV1) });
+noun_union!(SpendBody { V0(SpendV0), V0ToV1(SpendV0ToV1), V1(SpendV1) });
+noun_union!(Input { V0(InputV0), V1(InputV1) });
+noun_union!(Inputs { V0(InputsV0), V1(InputsV1) });
+noun_union!(Output { V0(OutputV0), V1(OutputV1) });
+noun_union!(Outputs { V0(OutputsV0), V1(OutputsV1) });
+
+impl Encode for Spend {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        let version = self.version.encode(arena)?;
+        let body = self.body.encode(arena)?;
+        Ok(arena.alloc_cell(version, body))
+    }
+}
+impl Decode for Spend {
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        let (version, body) = pokenoun::codec::pair(noun, arena)?;
+        let version = u64::decode(version, arena)?;
+        let body = match version {
+            0 => SpendBody::V0ToV1(SpendV0ToV1::decode(body, arena)?),
+            1 => SpendBody::V1(SpendV1::decode(body, arena)?),
+            _ => return Err(Error("invalid spend version")),
+        };
+        Ok(Self { version, body })
+    }
+}
+
+impl Encode for Tx {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        match self {
+            Self::V0(tx) => tx.encode(arena),
+            Self::V1(tx) => tx.encode(arena),
+        }
+    }
+}
+impl Decode for Tx {
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        let (version, _) = pokenoun::codec::pair(noun, arena)?;
+        match u64::decode(version, arena)? {
+            0 => TxV0::decode(noun, arena).map(Self::V0),
+            1 => TxV1::decode(noun, arena).map(Self::V1),
+            _ => Err(Error("invalid transaction version")),
+        }
+    }
+}
+
+impl Encode for RawTransaction {
+    fn encode(&self, arena: &mut Arena) -> Result<Noun, Error> {
+        match self {
+            Self::V0(tx) => tx.encode(arena),
+            Self::V1(tx) => tx.encode(arena),
+        }
+    }
+}
+impl Decode for RawTransaction {
+    fn decode(noun: Noun, arena: &Arena) -> Result<Self, Error> {
+        let (head, _) = pokenoun::codec::pair(noun, arena)?;
+        match head {
+            Noun::Cell(_) => RawTransactionV0::decode(noun, arena).map(Self::V0),
+            _ if u64::decode(head, arena)? == 1 => {
+                RawTransactionV1::decode(noun, arena).map(Self::V1)
+            }
+            _ => Err(Error("invalid raw transaction version")),
+        }
+    }
+}
+crate::noun_codec::runtime_codec!(Timelock, Spend, Tx, RawTransaction);
